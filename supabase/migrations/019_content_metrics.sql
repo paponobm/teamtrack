@@ -1,0 +1,10 @@
+-- Migration to add advanced tracking metrics for content pipeline
+ALTER TABLE public.content_batches
+ADD COLUMN IF NOT EXISTS category TEXT,
+ADD COLUMN IF NOT EXISTS shoot_date TIMESTAMPTZ,
+ADD COLUMN IF NOT EXISTS edit_date TIMESTAMPTZ,
+ADD COLUMN IF NOT EXISTS upload_date TIMESTAMPTZ,
+ADD COLUMN IF NOT EXISTS metrics_likes INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS metrics_comments INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS metrics_reach INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS rating TEXT;

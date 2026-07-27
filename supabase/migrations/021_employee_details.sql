@@ -1,0 +1,7 @@
+-- Add missing columns to employees table for detailed profiles
+ALTER TABLE employees 
+ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT NULL,
+ADD COLUMN IF NOT EXISTS date_of_birth DATE DEFAULT NULL,
+ADD COLUMN IF NOT EXISTS duty_start_time TIME DEFAULT NULL,
+ADD COLUMN IF NOT EXISTS duty_end_time TIME DEFAULT NULL,
+ADD COLUMN IF NOT EXISTS cv_url TEXT DEFAULT NULL;

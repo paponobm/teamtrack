@@ -1,0 +1,159 @@
+import { NextResponse } from 'next/server'
+
+import { requireAuth, isAuthed } from '@/lib/auth'
+
+// GET /api/members/[id]
+export async function GET(
+    request: Request,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    const auth = await requireAuth(0)
+    if (!isAuthed(auth)) return auth
+    const supabase = auth.supabase
+    const { id } = await params
+
+    const { data, error } = await supabase
+        .from('employees')
+        .select(`
+      *,
+      role:roles(id, name, level),
+      department:departments(id, name, name_bn)
+    `)
+        .eq('id', id)
+        .single()
+
+    if (error) {
+        return NextResponse.json({ error: error.message }, { status: 404 })
+    }
+
+    return NextResponse.json(data)
+}
+
+// PATCH /api/members/[id] - update employee
+// Admins (level 3+) can update any allowed field.
+// Members can ONLY update their own record, limited to safe personal fields.
+export async function PATCH(
+    request: Request,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    const auth = await requireAuth(0) // any employee
+    if (!isAuthed(auth)) return auth
+    const supabase = auth.supabase
+    const { id } = await params
+    const body = await request.json()
+
+    const isAdmin = auth.employee.roleLevel <= 3
+    const isSuperAdmin = auth.employee.roleLevel <= 2
+    const isSelf = auth.employee.id === id
+
+    // Members can only update their OWN record, and only safe fields
+    if (!isAdmin) {
+        if (!isSelf) {
+            return NextResponse.json({ error: 'Members can only update their own profile' }, { status: 403 })
+        }
+
+        // Whitelist: fields a member is allowed to self-update
+        const SELF_EDIT_FIELDS = ['personal_contact', 'whatsapp_number', 'address', 'avatar_url']
+        const filtered: Record<string, unknown> = {}
+        for (const key of SELF_EDIT_FIELDS) {
+            if (key in body) filtered[key] = body[key]
+        }
+
+        if (Object.keys(filtered).length === 0) {
+            return NextResponse.json({ error: 'No editable fields provided' }, { status: 400 })
+        }
+
+        const { data, error } = await supabase
+            .from('employees')
+            .update({ ...filtered, updated_at: new Date().toISOString() })
+            .eq('id', id)
+            .select(`*, role:roles(id, name, level), department:departments(id, name, name_bn)`)
+            .single()
+
+        if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        return NextResponse.json(data)
+    }
+
+    // Admin path: full update with safety guards.
+    // Look up the target's current role level once for the privilege checks below.
+    const { data: target } = await supabase.from('employees').select('role:roles(level)').eq('id', id).single()
+    const targetLevel = (target?.role as unknown as { level: number })?.level ?? 99
+
+    // An actor may never modify someone at the same or higher privilege tier (lower level number),
+    // unless they are editing their own record. This blocks admin-vs-admin takeover and lockout.
+    if (!isSelf && targetLevel <= auth.employee.roleLevel) {
+        return NextResponse.json({ error: 'You cannot modify a user at your own or a higher access level' }, { status: 403 })
+    }
+
+    // Nobody may change their own role through this endpoint (prevents self-escalation).
+    if (isSelf && body.role_id) {
+        return NextResponse.json({ error: 'You cannot change your own role' }, { status: 403 })
+    }
+
+    // Admins cannot assign Super Admin (or higher) roles to anyone.
+    if (!isSuperAdmin && body.role_id) {
+        const { data: newRole } = await supabase.from('roles').select('level').eq('id', body.role_id).single()
+        if (newRole && newRole.level <= 2) {
+            return NextResponse.json({ error: 'Admins cannot assign Super Admin roles' }, { status: 403 })
+        }
+    }
+
+    // Strip fields that must never be set via mass-assignment from the client.
+    // (total_points drives money withdrawals; user_id ties the row to an auth account.)
+    const PROTECTED_FIELDS = ['id', 'user_id', 'total_points', 'created_at', 'updated_at']
+    const safeUpdate: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(body)) {
+        if (!PROTECTED_FIELDS.includes(key)) safeUpdate[key] = value
+    }
+
+    const { data, error } = await supabase
+        .from('employees')
+        .update({
+            ...safeUpdate,
+            updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .select(`*, role:roles(id, name, level), department:departments(id, name, name_bn)`)
+        .single()
+
+    if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json(data)
+}
+
+
+// DELETE /api/members/[id] - deactivate (soft delete)
+export async function DELETE(
+    request: Request,
+    { params }: { params: Promise<{ id: string }> }
+) {
+    const auth = await requireAuth(3) // Admin+
+    if (!isAuthed(auth)) return auth
+    const supabase = auth.supabase
+    const { id } = await params
+
+    // Safety guard: cannot deactivate yourself, or anyone at your own / a higher access level.
+    if (id === auth.employee.id) {
+        return NextResponse.json({ error: 'You cannot deactivate your own account' }, { status: 403 })
+    }
+    const { data: target } = await supabase.from('employees').select('role:roles(level)').eq('id', id).single()
+    const targetLevel = (target?.role as unknown as { level: number })?.level ?? 99
+    if (targetLevel <= auth.employee.roleLevel) {
+        return NextResponse.json({ error: 'You cannot deactivate a user at your own or a higher access level' }, { status: 403 })
+    }
+
+    const { data, error } = await supabase
+        .from('employees')
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select()
+        .single()
+
+    if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ message: 'Member deactivated', data })
+}
