@@ -2,7 +2,7 @@
 -- TASKS & TASK ASSIGNMENTS
 -- ============================================
 CREATE TABLE IF NOT EXISTS tasks (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT NOT NULL,
   description TEXT,
   due_date DATE,
@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 CREATE TABLE IF NOT EXISTS task_assignments (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
   employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
   status TEXT CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',

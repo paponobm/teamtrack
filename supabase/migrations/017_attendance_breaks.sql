@@ -3,7 +3,7 @@
 -- ============================================
 
 CREATE TABLE IF NOT EXISTS attendance_breaks (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     attendance_id UUID REFERENCES attendance(id) ON DELETE CASCADE,
     start_time TIMESTAMPTZ NOT NULL,
     end_time TIMESTAMPTZ,

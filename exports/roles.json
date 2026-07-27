@@ -1,0 +1,32 @@
+[
+  {
+    "id": "f20a9b12-8548-46fd-8256-5b496eb5cb7e",
+    "name": "Owner",
+    "level": 1,
+    "created_at": "2026-03-04T17:17:21.781986+00:00"
+  },
+  {
+    "id": "292d4266-f1a6-4913-9791-657ae80a27c7",
+    "name": "Super Admin",
+    "level": 2,
+    "created_at": "2026-03-04T17:17:21.781986+00:00"
+  },
+  {
+    "id": "9b791bfe-fc9c-4e5c-bbf8-372b2f57a9cc",
+    "name": "Admin",
+    "level": 3,
+    "created_at": "2026-03-04T17:17:21.781986+00:00"
+  },
+  {
+    "id": "7337f765-35e8-43a0-a55c-1d8b520eca4e",
+    "name": "Manager",
+    "level": 4,
+    "created_at": "2026-03-04T17:17:21.781986+00:00"
+  },
+  {
+    "id": "7f0394c1-a63a-4c14-b17c-cb9028bd1be7",
+    "name": "Member",
+    "level": 5,
+    "created_at": "2026-03-04T17:17:21.781986+00:00"
+  }
+]

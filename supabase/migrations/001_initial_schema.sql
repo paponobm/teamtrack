@@ -9,7 +9,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 1. ROLES
 -- ============================================
 CREATE TABLE roles (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT UNIQUE NOT NULL,
   level INT NOT NULL, -- 1=Owner, 2=SuperAdmin, 3=Admin, 4=Manager, 5=Member
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -26,7 +26,7 @@ INSERT INTO roles (name, level) VALUES
 -- 2. DEPARTMENTS
 -- ============================================
 CREATE TABLE departments (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   name_bn TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -43,7 +43,7 @@ INSERT INTO departments (name, name_bn) VALUES
 -- 3. EMPLOYEES
 -- ============================================
 CREATE TABLE employees (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   employee_id TEXT UNIQUE,
   name TEXT NOT NULL,
@@ -69,7 +69,7 @@ CREATE TABLE employees (
 -- 4. FEATURES (the operational areas)
 -- ============================================
 CREATE TABLE features (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   name_bn TEXT,
   category TEXT,
@@ -108,7 +108,7 @@ INSERT INTO features (name, name_bn, category, slug, sort_order) VALUES
 -- 5. EMPLOYEE PERMISSIONS
 -- ============================================
 CREATE TABLE employee_permissions (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
   feature_id UUID REFERENCES features(id) ON DELETE CASCADE,
   access_level TEXT CHECK (access_level IN ('admin', 'member', 'no_access')) DEFAULT 'no_access',
@@ -119,7 +119,7 @@ CREATE TABLE employee_permissions (
 -- 6. ATTENDANCE
 -- ============================================
 CREATE TABLE attendance (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
   date DATE NOT NULL,
   clock_in TIMESTAMPTZ,
@@ -133,7 +133,7 @@ CREATE TABLE attendance (
 -- 7. POINT CATEGORIES
 -- ============================================
 CREATE TABLE point_categories (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   name_bn TEXT NOT NULL,
   max_points INT DEFAULT 10,
@@ -155,7 +155,7 @@ INSERT INTO point_categories (name, name_bn, max_points, sort_order) VALUES
 -- 8. PERFORMANCE SCORES
 -- ============================================
 CREATE TABLE performance_scores (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
   category_id UUID REFERENCES point_categories(id) ON DELETE CASCADE,
   date DATE NOT NULL,
@@ -169,7 +169,7 @@ CREATE TABLE performance_scores (
 -- 9. WORK ENTRIES (Daily Orders)
 -- ============================================
 CREATE TABLE work_entries (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
   date DATE NOT NULL,
   sl INT,
@@ -192,7 +192,7 @@ CREATE TABLE work_entries (
 -- 10. PROBLEMS
 -- ============================================
 CREATE TABLE problems (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   problem_no TEXT UNIQUE,
   entry_date DATE DEFAULT CURRENT_DATE,
   customer_name TEXT,
@@ -213,7 +213,7 @@ CREATE TABLE problems (
 -- 11. EXPENSES
 -- ============================================
 CREATE TABLE expenses (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   date DATE DEFAULT CURRENT_DATE,
   category TEXT,
   description TEXT,
@@ -230,7 +230,7 @@ CREATE TABLE expenses (
 -- 12. REQUISITIONS
 -- ============================================
 CREATE TABLE requisitions (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   requisition_no SERIAL,
   date DATE DEFAULT CURRENT_DATE,
   requested_by UUID REFERENCES employees(id),
@@ -249,7 +249,7 @@ CREATE TABLE requisitions (
 -- 13. IDEAS
 -- ============================================
 CREATE TABLE ideas (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   date DATE DEFAULT CURRENT_DATE,
   title TEXT,
   description TEXT,
@@ -267,7 +267,7 @@ CREATE TABLE ideas (
 -- 14. NOTIFICATIONS
 -- ============================================
 CREATE TABLE notifications (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   recipient_id UUID REFERENCES employees(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   title_bn TEXT,
@@ -284,7 +284,7 @@ CREATE TABLE notifications (
 -- 15. COURIER ISSUES
 -- ============================================
 CREATE TABLE courier_issues (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   date DATE DEFAULT CURRENT_DATE,
   parcel_id TEXT,
   contact_number TEXT,
@@ -307,7 +307,7 @@ CREATE TABLE courier_issues (
 -- 16. CONTENT TRACKER
 -- ============================================
 CREATE TABLE content_entries (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   date DATE DEFAULT CURRENT_DATE,
   video_shoot_count INT DEFAULT 0,
   video_info TEXT,

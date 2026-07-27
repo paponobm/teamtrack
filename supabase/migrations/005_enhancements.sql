@@ -16,7 +16,7 @@ ALTER TABLE employees ADD COLUMN IF NOT EXISTS total_points INT DEFAULT 0;
 
 -- 3. Activity Log table (shared across modules)
 CREATE TABLE IF NOT EXISTS activity_log (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   actor_id UUID REFERENCES employees(id),
   module TEXT NOT NULL,            -- 'work_log', 'problems', 'members'
   action TEXT NOT NULL,            -- 'status_change', 'pick', 'unpick', 'solve', etc.

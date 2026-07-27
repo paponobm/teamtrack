@@ -5,7 +5,7 @@
 -- ============================================
 
 CREATE TABLE IF NOT EXISTS app_settings (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   whatsapp_enabled BOOLEAN DEFAULT false,
   auto_assign_problems BOOLEAN DEFAULT true,
   smart_notifications BOOLEAN DEFAULT true,

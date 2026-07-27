@@ -3,7 +3,7 @@ ALTER TABLE expenses ADD COLUMN IF NOT EXISTS invoice_id TEXT;
 
 -- Income table for tracking income entries
 CREATE TABLE IF NOT EXISTS income (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   date DATE DEFAULT CURRENT_DATE,
   description TEXT,
   amount DECIMAL(10,2) NOT NULL,

@@ -18,7 +18,7 @@ ALTER TABLE courier_issues DROP CONSTRAINT IF EXISTS courier_issues_problem_stat
 
 -- 5. Global Source Options table (#18 - global sources)
 CREATE TABLE IF NOT EXISTS source_options (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL UNIQUE,
   slug TEXT NOT NULL UNIQUE,
   is_active BOOLEAN DEFAULT true,
@@ -44,7 +44,7 @@ CREATE POLICY "Auth users can manage source_options" ON source_options
 
 -- 6. Employee Access Records table (#12 - permission tracking)
 CREATE TABLE IF NOT EXISTS employee_access_records (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
   platform_name TEXT NOT NULL,
   role_description TEXT,
@@ -64,7 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_employee_access_employee ON employee_access_recor
 
 -- 7. Memories table (#20)
 CREATE TABLE IF NOT EXISTS memories (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT,
   description TEXT,
   image_url TEXT NOT NULL,
@@ -82,7 +82,7 @@ CREATE POLICY "Auth users can delete memories" ON memories
 
 -- 8. Tasks table (#21)
 CREATE TABLE IF NOT EXISTS tasks (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT NOT NULL,
   description TEXT,
   due_date DATE,
@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 CREATE TABLE IF NOT EXISTS task_assignments (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
   employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
@@ -121,21 +121,21 @@ CREATE INDEX IF NOT EXISTS idx_task_assignments_employee ON task_assignments(emp
 CREATE INDEX IF NOT EXISTS idx_task_assignments_task ON task_assignments(task_id);
 
 -- 9. Leave records table (#16)
-CREATE TABLE IF NOT EXISTS leave_records (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
-  date DATE NOT NULL,
-  reason TEXT,
-  created_by UUID REFERENCES employees(id),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(employee_id, date)
-);
+-- CREATE TABLE IF NOT EXISTS leave_records (
+--   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
+--   date DATE NOT NULL,
+--   reason TEXT,
+--   created_by UUID REFERENCES employees(id),
+--   created_at TIMESTAMPTZ DEFAULT NOW(),
+--   UNIQUE(employee_id, date)
+-- );
 
-ALTER TABLE leave_records ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Auth users can read leave_records" ON leave_records
-  FOR SELECT TO authenticated USING (true);
-CREATE POLICY "Auth users can manage leave_records" ON leave_records
-  FOR ALL TO authenticated USING (true);
+-- ALTER TABLE leave_records ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "Auth users can read leave_records" ON leave_records
+--   FOR SELECT TO authenticated USING (true);
+-- CREATE POLICY "Auth users can manage leave_records" ON leave_records
+--   FOR ALL TO authenticated USING (true);
 
 -- 10. Expenses: add payment_gateway column if not exists
 ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_gateway TEXT;

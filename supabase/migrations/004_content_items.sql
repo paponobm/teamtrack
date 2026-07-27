@@ -2,7 +2,7 @@
 -- CONTENT ITEMS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS content_items (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title TEXT NOT NULL,
     type TEXT CHECK (type IN ('post', 'video', 'story', 'reel', 'blog', 'other')) DEFAULT 'post',
     platform TEXT CHECK (platform IN ('facebook', 'instagram', 'youtube', 'tiktok', 'website', 'other')) DEFAULT 'facebook',

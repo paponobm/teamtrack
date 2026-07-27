@@ -1,6 +1,6 @@
 -- Create pr_management table
 CREATE TABLE IF NOT EXISTS public.pr_management (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     send_date DATE NOT NULL DEFAULT CURRENT_DATE,
     customer_name TEXT,
     customer_phone TEXT,

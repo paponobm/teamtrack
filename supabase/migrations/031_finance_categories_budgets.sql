@@ -1,6 +1,6 @@
 -- finance_categories table
 CREATE TABLE IF NOT EXISTS public.finance_categories (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     name TEXT NOT NULL,
     type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
     parent_id UUID REFERENCES public.finance_categories(id) ON DELETE CASCADE,
@@ -11,14 +11,15 @@ CREATE TABLE IF NOT EXISTS public.finance_categories (
 ALTER TABLE public.finance_categories ENABLE ROW LEVEL SECURITY;
 
 -- Admins can do anything
-CREATE POLICY "Admins can manage finance_categories" 
-    ON public.finance_categories FOR ALL 
-    TO authenticated 
+CREATE POLICY "Admins can manage finance_categories"
+    ON public.finance_categories FOR ALL
+    TO authenticated
     USING (
         EXISTS (
-            SELECT 1 FROM public.employees 
-            WHERE employees.id = auth.uid() 
-            AND employees."roleLevel" <= 3
+            SELECT 1 FROM public.employees
+            JOIN public.roles ON roles.id = employees.role_id
+            WHERE employees.user_id = auth.uid()
+            AND roles.level <= 3
         )
     );
 
@@ -31,7 +32,7 @@ CREATE POLICY "Everyone can read finance_categories"
 
 -- finance_budgets table
 CREATE TABLE IF NOT EXISTS public.finance_budgets (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     category_id UUID NOT NULL REFERENCES public.finance_categories(id) ON DELETE CASCADE,
     period TEXT NOT NULL, -- e.g., '2026-07'
     amount NUMERIC NOT NULL DEFAULT 0,
@@ -43,14 +44,15 @@ CREATE TABLE IF NOT EXISTS public.finance_budgets (
 ALTER TABLE public.finance_budgets ENABLE ROW LEVEL SECURITY;
 
 -- Admins can do anything
-CREATE POLICY "Admins can manage finance_budgets" 
-    ON public.finance_budgets FOR ALL 
-    TO authenticated 
+CREATE POLICY "Admins can manage finance_budgets"
+    ON public.finance_budgets FOR ALL
+    TO authenticated
     USING (
         EXISTS (
-            SELECT 1 FROM public.employees 
-            WHERE employees.id = auth.uid() 
-            AND employees."roleLevel" <= 3
+            SELECT 1 FROM public.employees
+            JOIN public.roles ON roles.id = employees.role_id
+            WHERE employees.user_id = auth.uid()
+            AND roles.level <= 3
         )
     );
 

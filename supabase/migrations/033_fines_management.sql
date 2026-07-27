@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS public.fines (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     member_id UUID NOT NULL REFERENCES public.employees(id) ON DELETE CASCADE,
     issued_by UUID NOT NULL REFERENCES public.employees(id) ON DELETE SET NULL,
     amount INTEGER NOT NULL CHECK (amount > 0),

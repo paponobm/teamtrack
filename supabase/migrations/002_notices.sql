@@ -2,7 +2,7 @@
 -- NOTICES / NOTICEBOARD
 -- ============================================
 CREATE TABLE notices (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT NOT NULL,
   content TEXT,
   type TEXT CHECK (type IN ('notice', 'meeting', 'announcement', 'other')) DEFAULT 'notice',

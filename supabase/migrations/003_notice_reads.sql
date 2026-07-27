@@ -2,7 +2,7 @@
 -- NOTICE READ RECEIPTS
 -- ============================================
 CREATE TABLE IF NOT EXISTS notice_reads (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   notice_id UUID REFERENCES notices(id) ON DELETE CASCADE,
   employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
   read_at TIMESTAMPTZ DEFAULT NOW(),

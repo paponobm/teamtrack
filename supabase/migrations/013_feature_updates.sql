@@ -8,7 +8,7 @@ ALTER TABLE courier_issues ADD COLUMN IF NOT EXISTS business_name TEXT;
 
 -- 2. Point Transactions table (logs every point award)
 CREATE TABLE IF NOT EXISTS point_transactions (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
   points INT NOT NULL,
   source TEXT NOT NULL CHECK (source IN ('manual', 'order', 'task', 'courier', 'idea', 'problem')),

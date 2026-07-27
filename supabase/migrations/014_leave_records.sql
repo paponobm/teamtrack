@@ -5,7 +5,7 @@
 -- ============================================
 
 CREATE TABLE IF NOT EXISTS leave_records (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
     leave_date DATE NOT NULL,
     reason TEXT,
