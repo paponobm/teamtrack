@@ -141,9 +141,9 @@ export default function AttendanceModal({ onClose, onSave, date, existingEmploye
                                     <option value="present">Present</option>
                                     <option value="late">Late</option>
                                     <option value="absent">Absent</option>
-                                    <option value="half_day">Half Day</option>
-                                    <option value="leave">On Leave</option>
-                                    <option value="on_duty">On Duty</option>
+                                    {/* <option value="half_day">Half Day</option> */}
+                                    {/* <option value="leave">On Leave</option> */}
+                                    {/* <option value="on_duty">On Duty</option> */}
                                 </select>
                             </div>
 
