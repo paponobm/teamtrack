@@ -31,11 +31,17 @@ export default function SelfAttendance() {
     const [actionLoading, setActionLoading] = useState(false)
     const [now, setNow] = useState(Date.now())
     const [date] = useState(() => new Date().toISOString().split('T')[0])
+    const [dutyStartTime, setDutyStartTime] = useState<string | null>(null)
 
     // Update the 'now' timer every second to keep live counters ticking
     useEffect(() => {
         const interval = setInterval(() => setNow(Date.now()), 1000)
         return () => clearInterval(interval)
+    }, [])
+
+    // Fetch the employee's duty start time so we can flag lateness before clock-in too
+    useEffect(() => {
+        fetch('/api/members/me').then(r => r.json()).then(d => setDutyStartTime(d?.duty_start_time || null)).catch(() => { })
     }, [])
 
     const fetchData = useCallback(async () => {
@@ -122,6 +128,19 @@ export default function SelfAttendance() {
 
     const isOnLeave = record?.status === 'leave'
 
+    // Before clock-in, flag lateness live against duty_start_time (15 min grace),
+    // mirroring the same threshold /api/attendance/me applies once they do clock in.
+    let isLateBeforeClockIn = false
+    if (!hasClockedIn && !isOnLeave) {
+        const startTime = dutyStartTime || '09:00:00'
+        const [dutyH, dutyM] = startTime.split(':').map(Number)
+        const shiftStart = new Date(`${date}T00:00:00`)
+        shiftStart.setHours(dutyH, dutyM, 0, 0)
+        isLateBeforeClockIn = now - shiftStart.getTime() > 15 * 60 * 1000
+    }
+
+    const isLate = record?.status === 'late' || isLateBeforeClockIn
+
     let currentStatus = 'Not Checked In'
     let statusColor = '#6B7280'
     let statusBg = 'rgba(107,114,128,0.08)'
@@ -164,9 +183,16 @@ export default function SelfAttendance() {
                         </div>
                         <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>{todayStr}</div>
                     </div>
-                    <span style={{ padding: '4px 12px', borderRadius: '16px', fontSize: '0.75rem', fontWeight: 600, color: statusColor, background: statusBg }}>
-                        {currentStatus}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {isLate && (
+                            <span style={{ padding: '4px 12px', borderRadius: '16px', fontSize: '0.75rem', fontWeight: 600, color: '#F59E0B', background: 'rgba(245,158,11,0.08)' }}>
+                                You are late
+                            </span>
+                        )}
+                        <span style={{ padding: '4px 12px', borderRadius: '16px', fontSize: '0.75rem', fontWeight: 600, color: statusColor, background: statusBg }}>
+                            {currentStatus}
+                        </span>
+                    </div>
                 </div>
 
                 {/* Main Action Area */}

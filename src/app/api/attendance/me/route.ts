@@ -62,6 +62,21 @@ export async function POST(request: Request) {
     if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 })
 
     if (action === 'clock_in') {
+        // Late if clocking in more than 15 minutes after the employee's duty start time
+        // (falls back to 09:00 if not set, matching the threshold used in /api/attendance/absent).
+        const { data: empRow } = await supabase
+            .from('employees')
+            .select('duty_start_time')
+            .eq('id', auth.employee.id)
+            .single()
+
+        const startTime = empRow?.duty_start_time || '09:00:00'
+        const [dutyH, dutyM] = startTime.split(':').map(Number)
+        const shiftStart = new Date(`${date}T00:00:00`)
+        shiftStart.setHours(dutyH, dutyM, 0, 0)
+        const LATE_GRACE_MS = 15 * 60 * 1000
+        const clockInStatus = Date.now() - shiftStart.getTime() > LATE_GRACE_MS ? 'late' : 'present'
+
         if (!attendance) {
             const { data: newAtt, error: insErr } = await supabase
                 .from('attendance')
@@ -69,7 +84,7 @@ export async function POST(request: Request) {
                     employee_id: auth.employee.id,
                     date: date,
                     clock_in: now,
-                    status: 'present'
+                    status: clockInStatus
                 })
                 .select()
                 .single()
@@ -78,7 +93,7 @@ export async function POST(request: Request) {
         } else if (!attendance.clock_in) {
             const { data: updAtt, error: updErr } = await supabase
                 .from('attendance')
-                .update({ clock_in: now })
+                .update({ clock_in: now, status: clockInStatus })
                 .eq('id', attendance.id)
                 .select()
                 .single()
