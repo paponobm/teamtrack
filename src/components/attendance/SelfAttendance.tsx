@@ -120,11 +120,17 @@ export default function SelfAttendance() {
 
     const netMs = Math.max(0, totalMs - breakMs)
 
+    const isOnLeave = record?.status === 'leave'
+
     let currentStatus = 'Not Checked In'
     let statusColor = '#6B7280'
     let statusBg = 'rgba(107,114,128,0.08)'
 
-    if (hasClockedIn) {
+    if (isOnLeave) {
+        currentStatus = 'On Leave'
+        statusColor = '#7C3AED'
+        statusBg = 'rgba(124,58,237,0.08)'
+    } else if (hasClockedIn) {
         if (hasClockedOut) {
             currentStatus = 'Clocked Out'
             statusColor = '#DC2626'
@@ -304,7 +310,11 @@ export default function SelfAttendance() {
 
                     {/* Buttons */}
                     <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                        {!hasClockedIn ? (
+                        {isOnLeave ? (
+                            <div style={{ flex: 1, padding: '12px', fontSize: '0.9375rem', textAlign: 'center', borderRadius: '10px', background: 'rgba(124,58,237,0.08)', color: '#7C3AED', fontWeight: 600 }}>
+                                You are on leave today
+                            </div>
+                        ) : !hasClockedIn ? (
                             <button className="btn btn-primary" style={{ flex: 1, padding: '12px', fontSize: '0.9375rem' }}
                                 onClick={() => handleAction('clock_in')} disabled={actionLoading}>
                                 {actionLoading ? 'Clocking in...' : 'Clock In'}
