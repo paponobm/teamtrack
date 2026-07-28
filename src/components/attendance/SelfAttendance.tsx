@@ -130,7 +130,7 @@ export default function SelfAttendance() {
 
     // Before clock-in, compare live against duty_start_time (fallback 09:00), mirroring
     // the same threshold /api/attendance/me applies once they do clock in: 15 min grace
-    // shows "late", and 2+ hours with still no clock-in is treated as an on-leave/no-show day.
+    // shows "late", and 2+ hours with still no clock-in is treated as an absent no-show day.
     let minutesLateBeforeClockIn = 0
     if (!hasClockedIn && !isOnLeave) {
         const startTime = dutyStartTime || '09:00:00'
@@ -139,8 +139,8 @@ export default function SelfAttendance() {
         shiftStart.setHours(dutyH, dutyM, 0, 0)
         minutesLateBeforeClockIn = (now - shiftStart.getTime()) / 60000
     }
-    const isAutoLeave = minutesLateBeforeClockIn > 120
-    const isLateBeforeClockIn = minutesLateBeforeClockIn > 15 && !isAutoLeave
+    const isAutoAbsent = minutesLateBeforeClockIn > 120
+    const isLateBeforeClockIn = minutesLateBeforeClockIn > 15 && !isAutoAbsent
 
     const isLate = record?.status === 'late' || isLateBeforeClockIn
 
@@ -148,10 +148,14 @@ export default function SelfAttendance() {
     let statusColor = '#6B7280'
     let statusBg = 'rgba(107,114,128,0.08)'
 
-    if (isOnLeave || isAutoLeave) {
+    if (isOnLeave) {
         currentStatus = 'On Leave'
         statusColor = '#7C3AED'
         statusBg = 'rgba(124,58,237,0.08)'
+    } else if (isAutoAbsent) {
+        currentStatus = 'Absent'
+        statusColor = '#DC2626'
+        statusBg = 'rgba(220,38,38,0.08)'
     } else if (hasClockedIn) {
         if (hasClockedOut) {
             currentStatus = 'Clocked Out'
@@ -339,9 +343,13 @@ export default function SelfAttendance() {
 
                     {/* Buttons */}
                     <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                        {isOnLeave || isAutoLeave ? (
+                        {isOnLeave ? (
                             <div style={{ flex: 1, padding: '12px', fontSize: '0.9375rem', textAlign: 'center', borderRadius: '10px', background: 'rgba(124,58,237,0.08)', color: '#7C3AED', fontWeight: 600 }}>
                                 You are on leave today
+                            </div>
+                        ) : isAutoAbsent ? (
+                            <div style={{ flex: 1, padding: '12px', fontSize: '0.9375rem', textAlign: 'center', borderRadius: '10px', background: 'rgba(220,38,38,0.08)', color: '#DC2626', fontWeight: 600 }}>
+                                You are absent today
                             </div>
                         ) : !hasClockedIn ? (
                             <button className="btn btn-primary" style={{ flex: 1, padding: '12px', fontSize: '0.9375rem' }}
