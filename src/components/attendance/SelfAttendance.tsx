@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { IconClock, IconCheckCircle, IconPlay } from '@/components/icons/Icons'
+import { IconClock, IconCheckCircle, IconPlay, IconXCircle, IconCalendar, IconAlertCircle, IconUser } from '@/components/icons/Icons'
 import { useLanguage } from '@/lib/LanguageContext'
 
 interface BreakRecord {
@@ -93,7 +93,7 @@ export default function SelfAttendance() {
         const hrs = Math.floor(totalSeconds / 3600)
         const mins = Math.floor((totalSeconds % 3600) / 60)
         const secs = totalSeconds % 60
-        
+
         if (hrs > 0) {
             return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
         }
@@ -181,6 +181,59 @@ export default function SelfAttendance() {
     return (
         <motion.div variants={item} style={{ marginBottom: '32px' }}>
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                {/* Status icon animation — distinct per state so Late/Absent/Leave are instantly recognizable */}
+                {(isOnLeave || isAutoAbsent || isLate) && (
+                    <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '14px' }}>
+                        {isOnLeave ? (
+                            <motion.div animate={{ y: [0, -6, 0] }} transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}>
+                                <span
+                                    style={{
+                                        background: "#7C3AED",
+                                        color: "#fff",
+                                        fontWeight: "bold",
+                                        padding: "6px 14px",
+                                        borderRadius: "999px",
+                                        fontSize: "14px",
+                                    }}
+                                >
+                                    LEAVE
+                                </span>
+                            </motion.div>
+                        ) : isAutoAbsent ? (
+                            <motion.div animate={{ rotate: [0, -12, 12, -12, 0] }} transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}>
+                                <span
+                                    style={{
+                                        background: "#DC2626",
+                                        color: "#fff",
+                                        fontWeight: "bold",
+                                        padding: "6px 14px",
+                                        borderRadius: "999px",
+                                        fontSize: "14px",
+                                    }}
+                                >
+                                    ABSENT
+                                </span>
+
+
+                            </motion.div>
+                        ) : (
+                            <motion.div animate={{ scale: [1, 1.18, 1] }} transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}>
+                                <span
+                                    style={{
+                                        background: "#F59E0B",
+                                        color: "#fff",
+                                        fontWeight: "bold",
+                                        padding: "6px 14px",
+                                        borderRadius: "999px",
+                                        fontSize: "14px",
+                                    }}
+                                >
+                                    LATE
+                                </span>
+                            </motion.div>
+                        )}
+                    </div>
+                )}
                 {/* Header section inside card */}
                 <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--color-border-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
@@ -222,9 +275,9 @@ export default function SelfAttendance() {
                     {/* Break Animation Popup */}
                     <AnimatePresence>
                         {activeBreak && (
-                            <motion.div 
-                                initial={{ opacity: 0 }} 
-                                animate={{ opacity: 1 }} 
+                            <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
                                 exit={{ opacity: 0 }}
                                 style={{
                                     position: 'fixed',
@@ -239,14 +292,14 @@ export default function SelfAttendance() {
                                     padding: '24px'
                                 }}
                             >
-                                <motion.div 
+                                <motion.div
                                     initial={{ scale: 0.9, y: 20 }}
                                     animate={{ scale: 1, y: 0 }}
                                     exit={{ scale: 0.9, y: 20 }}
-                                    style={{ 
-                                        background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)', 
-                                        borderRadius: '24px', 
-                                        padding: '48px 32px', 
+                                    style={{
+                                        background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
+                                        borderRadius: '24px',
+                                        padding: '48px 32px',
                                         display: 'flex',
                                         flexDirection: 'column',
                                         alignItems: 'center',
@@ -266,44 +319,44 @@ export default function SelfAttendance() {
                                     <div style={{ position: 'relative', width: '160px', height: '160px' }}>
                                         <motion.svg viewBox="0 0 100 100" width="100%" height="100%" fill="none" stroke="#D97706" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                                             {/* Steam (wavy and hot) */}
-                                            <motion.path 
-                                                d="M35 30 C30 20, 45 15, 40 5" 
-                                                animate={{ 
+                                            <motion.path
+                                                d="M35 30 C30 20, 45 15, 40 5"
+                                                animate={{
                                                     d: ["M35 30 C30 20, 45 15, 40 5", "M35 30 C45 20, 30 15, 40 5", "M35 30 C30 20, 45 15, 40 5"],
                                                     opacity: [0.3, 0.8, 0.3],
                                                     y: [0, -5, 0]
-                                                }} 
-                                                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }} 
+                                                }}
+                                                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
                                             />
-                                            <motion.path 
-                                                d="M50 30 C45 20, 60 15, 55 5" 
-                                                animate={{ 
+                                            <motion.path
+                                                d="M50 30 C45 20, 60 15, 55 5"
+                                                animate={{
                                                     d: ["M50 30 C45 20, 60 15, 55 5", "M50 30 C60 20, 45 15, 55 5", "M50 30 C45 20, 60 15, 55 5"],
                                                     opacity: [0.3, 0.8, 0.3],
                                                     y: [0, -5, 0]
-                                                }} 
-                                                transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut", delay: 0.5 }} 
+                                                }}
+                                                transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
                                             />
-                                            <motion.path 
-                                                d="M65 30 C60 20, 75 15, 70 5" 
-                                                animate={{ 
+                                            <motion.path
+                                                d="M65 30 C60 20, 75 15, 70 5"
+                                                animate={{
                                                     d: ["M65 30 C60 20, 75 15, 70 5", "M65 30 C75 20, 60 15, 70 5", "M65 30 C60 20, 75 15, 70 5"],
                                                     opacity: [0.3, 0.8, 0.3],
                                                     y: [0, -5, 0]
-                                                }} 
-                                                transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut", delay: 1 }} 
+                                                }}
+                                                transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut", delay: 1 }}
                                             />
-                                            
+
                                             {/* Coffee Cup */}
-                                            <motion.path 
-                                                d="M20 35 Q50 45 80 35 L72 80 Q50 95 28 80 Z" 
+                                            <motion.path
+                                                d="M20 35 Q50 45 80 35 L72 80 Q50 95 28 80 Z"
                                                 fill="#FDE68A"
                                             />
                                             <path d="M80 45 Q95 45 90 65 Q80 70 76 65" />
                                             {/* Hot Tea Liquid inside rim */}
                                             <ellipse cx="50" cy="35" rx="30" ry="10" fill="#92400E" stroke="none" />
                                             <ellipse cx="50" cy="35" rx="30" ry="10" stroke="#D97706" fill="none" />
-                                            
+
                                             {/* Biscuit */}
                                             <motion.g animate={{ y: [0, -5, 0], rotate: [0, 5, -5, 0] }} transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}>
                                                 <circle cx="85" cy="85" r="14" fill="#F59E0B" />
@@ -319,10 +372,10 @@ export default function SelfAttendance() {
                                     <p style={{ color: '#B45309', fontSize: '1rem', textAlign: 'center', maxWidth: '300px', marginBottom: '32px', lineHeight: 1.5 }}>
                                         The tea is hot! Take your time, relax, and recharge. We'll be right here.
                                     </p>
-                                    <button 
-                                        className="btn" 
+                                    <button
+                                        className="btn"
                                         style={{ padding: '16px 32px', fontSize: '1.0625rem', fontWeight: 700, background: '#D97706', color: '#FFF', border: 'none', borderRadius: '12px', boxShadow: '0 4px 12px rgba(217, 119, 6, 0.3)', cursor: 'pointer' }}
-                                        onClick={() => handleAction('end_break')} 
+                                        onClick={() => handleAction('end_break')}
                                         disabled={actionLoading}
                                     >
                                         {actionLoading ? 'Ending Break...' : 'End Break & Get to Work'}
@@ -384,25 +437,25 @@ export default function SelfAttendance() {
                                     </>
                                 )}
                                 {hasClockedOut && (
-                                    <motion.div 
-                                        initial={{ opacity: 0, scale: 0.9, y: 10 }} 
-                                        animate={{ opacity: 1, scale: 1, y: 0 }} 
-                                        style={{ 
-                                            width: '100%', 
-                                            padding: '24px', 
-                                            background: 'linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%)', 
-                                            borderRadius: '16px', 
-                                            border: '1px solid #BBF7D0', 
-                                            display: 'flex', 
-                                            flexDirection: 'column', 
-                                            alignItems: 'center', 
-                                            justifyContent: 'center', 
-                                            gap: '12px' 
+                                    <motion.div
+                                        initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                                        style={{
+                                            width: '100%',
+                                            padding: '24px',
+                                            background: 'linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%)',
+                                            borderRadius: '16px',
+                                            border: '1px solid #BBF7D0',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: '12px'
                                         }}
                                     >
-                                        <motion.div 
-                                            initial={{ rotate: 0 }} 
-                                            animate={{ rotate: [0, 20, -10, 20, 0] }} 
+                                        <motion.div
+                                            initial={{ rotate: 0 }}
+                                            animate={{ rotate: [0, 20, -10, 20, 0] }}
                                             transition={{ duration: 1.5, repeat: Infinity, repeatDelay: 2 }}
                                             style={{ fontSize: '3rem', transformOrigin: 'bottom right' }}
                                         >
