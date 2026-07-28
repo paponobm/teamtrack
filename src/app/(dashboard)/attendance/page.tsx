@@ -22,6 +22,7 @@ interface AttendanceRecord {
         employee_id: string
         designation: string
         avatar_url: string | null
+        duty_start_time: string | null
         department: { id: string; name: string } | null
     }
 }
@@ -49,6 +50,15 @@ const item = {
 function formatTime(ts: string | null) {
     if (!ts) return '-'
     const d = new Date(ts)
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+}
+
+// duty_start_time comes back as a plain "HH:MM:SS" TIME value (no date), format it for display.
+function formatReportingTime(t: string | null) {
+    if (!t) return null
+    const [h, m] = t.split(':').map(Number)
+    const d = new Date()
+    d.setHours(h, m, 0, 0)
     return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
 }
 
@@ -529,6 +539,11 @@ export default function AttendancePage() {
                                                         {formatTime(r.clock_in)}
                                                         {r.clock_out && ` - ${formatTime(r.clock_out)}`}
                                                     </>
+                                                )}
+                                                {r.status === 'late' && r.employee.duty_start_time && (
+                                                    <div style={{ color: 'var(--color-text-tertiary)', fontFamily: 'inherit', marginTop: '2px' }}>
+                                                        Reporting: {formatReportingTime(r.employee.duty_start_time)}
+                                                    </div>
                                                 )}
                                             </div>
                                             <span style={{ padding: '3px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: `${sc.color}15`, flexShrink: 0 }}>{sc.label}</span>

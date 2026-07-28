@@ -17,7 +17,7 @@ export async function GET(request: Request) {
         .from('attendance')
         .select(`
             *,
-            employee:employees(id, name, employee_id, designation, avatar_url, department:departments(id, name))
+            employee:employees(id, name, employee_id, designation, avatar_url, duty_start_time, department:departments(id, name))
         `)
         .eq('date', date)
         .order('clock_in', { ascending: true, nullsFirst: false })
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
         )
         .select(`
             *,
-            employee:employees(id, name, employee_id, designation, avatar_url, department:departments(id, name))
+            employee:employees(id, name, employee_id, designation, avatar_url, duty_start_time, department:departments(id, name))
         `)
         .single()
 
