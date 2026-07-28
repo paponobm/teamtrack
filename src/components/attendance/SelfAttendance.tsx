@@ -128,16 +128,19 @@ export default function SelfAttendance() {
 
     const isOnLeave = record?.status === 'leave'
 
-    // Before clock-in, flag lateness live against duty_start_time (15 min grace),
-    // mirroring the same threshold /api/attendance/me applies once they do clock in.
-    let isLateBeforeClockIn = false
+    // Before clock-in, compare live against duty_start_time (fallback 09:00), mirroring
+    // the same threshold /api/attendance/me applies once they do clock in: 15 min grace
+    // shows "late", and 2+ hours with still no clock-in is treated as an on-leave/no-show day.
+    let minutesLateBeforeClockIn = 0
     if (!hasClockedIn && !isOnLeave) {
         const startTime = dutyStartTime || '09:00:00'
         const [dutyH, dutyM] = startTime.split(':').map(Number)
         const shiftStart = new Date(`${date}T00:00:00`)
         shiftStart.setHours(dutyH, dutyM, 0, 0)
-        isLateBeforeClockIn = now - shiftStart.getTime() > 15 * 60 * 1000
+        minutesLateBeforeClockIn = (now - shiftStart.getTime()) / 60000
     }
+    const isAutoLeave = minutesLateBeforeClockIn > 120
+    const isLateBeforeClockIn = minutesLateBeforeClockIn > 15 && !isAutoLeave
 
     const isLate = record?.status === 'late' || isLateBeforeClockIn
 
@@ -145,7 +148,7 @@ export default function SelfAttendance() {
     let statusColor = '#6B7280'
     let statusBg = 'rgba(107,114,128,0.08)'
 
-    if (isOnLeave) {
+    if (isOnLeave || isAutoLeave) {
         currentStatus = 'On Leave'
         statusColor = '#7C3AED'
         statusBg = 'rgba(124,58,237,0.08)'
@@ -336,7 +339,7 @@ export default function SelfAttendance() {
 
                     {/* Buttons */}
                     <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                        {isOnLeave ? (
+                        {isOnLeave || isAutoLeave ? (
                             <div style={{ flex: 1, padding: '12px', fontSize: '0.9375rem', textAlign: 'center', borderRadius: '10px', background: 'rgba(124,58,237,0.08)', color: '#7C3AED', fontWeight: 600 }}>
                                 You are on leave today
                             </div>
