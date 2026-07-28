@@ -162,7 +162,7 @@ export default function AttendancePage() {
     const navigateDate = (dir: number) => {
         const d = new Date(date + 'T00:00:00')
         d.setDate(d.getDate() + dir)
-        setDate(d.toISOString().split('T')[0])
+        setDate(getLocalDateString(d))
     }
 
     const isToday = date === getLocalDateString()
@@ -400,7 +400,7 @@ export default function AttendancePage() {
             {/* Page Header */}
             <motion.div className="page-header" variants={item}>
                 <div>
-                    <h1 className="page-title">Leave</h1>
+                    <h1 className="page-title">Employee Attendance</h1>
                     <p className="page-subtitle">{records.length} record{records.length !== 1 ? 's' : ''} for today</p>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
