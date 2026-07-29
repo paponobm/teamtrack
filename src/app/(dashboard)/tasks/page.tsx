@@ -121,6 +121,7 @@ export default function TasksPage() {
     const [activeFilter, setActiveFilter] = useState('all')
     const [showModal, setShowModal] = useState(false)
     const [form, setForm] = useState(emptyForm)
+    const [descRows, setDescRows] = useState<{ id: string; val: string }[]>([{ id: 'desc-init', val: '' }])
     const [saving, setSaving] = useState(false)
     const [selectedTask, setSelectedTask] = useState<Task | null>(null)
     const [assigneeSearch, setAssigneeSearch] = useState('')
@@ -129,6 +130,7 @@ export default function TasksPage() {
     const toast = useToast()
 
     const [searchQuery, setSearchQuery] = useState('')
+    const [filterEmployeeId, setFilterEmployeeId] = useState('')
     const [dateRange, setDateRange] = useState('all')
     const [customStart, setCustomStart] = useState('')
     const [customEnd, setCustomEnd] = useState('')
@@ -194,6 +196,35 @@ export default function TasksPage() {
         })
     }
 
+    // Description rows: numbered list of single-line inputs, same pattern as the Tasks
+    // rows above it. form.description itself stays a single string (unchanged shape for
+    // the API/backend) — these rows just get joined as "1. ...\n2. ..." into it.
+    const syncDescription = (rows: { id: string; val: string }[]) => {
+        const joined = rows.filter(r => r.val.trim()).map((r, i) => `${i + 1}. ${r.val.trim()}`).join('\n')
+        setForm(prev => ({ ...prev, description: joined }))
+    }
+
+    const handleDescRowChange = (id: string, val: string) => {
+        setDescRows(prev => {
+            const next = prev.map(r => r.id === id ? { ...r, val } : r)
+            syncDescription(next)
+            return next
+        })
+    }
+
+    const handleAddDescRow = () => {
+        setDescRows(prev => [...prev, { id: Math.random().toString(), val: '' }])
+    }
+
+    const handleRemoveDescRow = (id: string) => {
+        setDescRows(prev => {
+            const next = prev.filter(r => r.id !== id)
+            const finalRows = next.length === 0 ? [{ id: Math.random().toString(), val: '' }] : next
+            syncDescription(finalRows)
+            return finalRows
+        })
+    }
+
     const handleSave = async () => {
         const validTitles = form.titles.filter(t => t.val.trim().length > 0)
         if (validTitles.length === 0) return
@@ -213,6 +244,7 @@ export default function TasksPage() {
             await fetchTasks()
             setShowModal(false)
             setForm(emptyForm)
+            setDescRows([{ id: Math.random().toString(), val: '' }])
         } catch { alert('Failed to create tasks') }
         finally { setSaving(false) }
     }
@@ -292,6 +324,15 @@ export default function TasksPage() {
         }
         if (activeFilter !== 'all' && activeFilter !== 'my_tasks' && t.status !== activeFilter) return false
 
+        // Employee filter (admin-only UI, but harmless to apply regardless)
+        if (filterEmployeeId) {
+            const isAssignedToFilter = t.task_assignments.some(a => {
+                const empId = a.employee ? (Array.isArray(a.employee) ? (a.employee as unknown as Employee[])[0]?.id : a.employee.id) : null
+                return empId === filterEmployeeId
+            })
+            if (!isAssignedToFilter) return false
+        }
+
         // Search query filter (title, description, task_no)
         if (searchQuery) {
             const q = searchQuery.toLowerCase()
@@ -344,7 +385,7 @@ export default function TasksPage() {
                     <p className="page-subtitle">Manage and track team assignments.</p>
                 </div>
                 {isAdmin && (
-                    <button className="btn btn-primary btn-sm" onClick={() => { setForm(emptyForm); setShowModal(true) }}>
+                    <button className="btn btn-primary btn-sm" onClick={() => { setForm(emptyForm); setDescRows([{ id: Math.random().toString(), val: '' }]); setShowModal(true) }}>
                         <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
                         Create Task
                     </button>
@@ -401,6 +442,21 @@ export default function TasksPage() {
                         </button>
                     ))}
                 </div>
+
+                {/* Employee filter — see one employee's task updates across the list */}
+                {isAdmin && (
+                    <select
+                        className="form-input"
+                        value={filterEmployeeId}
+                        onChange={e => setFilterEmployeeId(e.target.value)}
+                        style={{ width: '170px', height: '36px', fontSize: '0.8125rem', flexShrink: 0 }}
+                    >
+                        <option value="">All Employees</option>
+                        {employees.map(emp => (
+                            <option key={emp.id} value={emp.id}>{emp.name}</option>
+                        ))}
+                    </select>
+                )}
 
                 {/* Text Search */}
                 <div style={{ flex: 1, minWidth: '200px', maxWidth: '300px' }}>
@@ -488,7 +544,7 @@ export default function TasksPage() {
                                             )}
                                         </div>
                                         {task.description && (
-                                            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '0 0 8px', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{task.description}</p>
+                                            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '0 0 8px', lineHeight: 1.5, whiteSpace: 'pre-line' }}>{task.description}</p>
                                         )}
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
                                             {task.due_date && (
@@ -740,9 +796,49 @@ export default function TasksPage() {
                                         ))}
                                     </AnimatePresence>
                                 </div>
-                                <div className="form-group">
-                                    <label className="form-label">Description</label>
-                                    <textarea className="form-input" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Details..." rows={3} style={{ resize: 'vertical' }} />
+                                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    <label className="form-label" style={{ marginBottom: 0 }}>Description</label>
+                                    <AnimatePresence initial={false}>
+                                        {descRows.map((row, i) => (
+                                            <motion.div
+                                                key={row.id}
+                                                initial={{ opacity: 0, height: 0, y: -10 }}
+                                                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                                                exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
+                                                transition={{ duration: 0.2 }}
+                                                style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                            >
+                                                <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6875rem', fontWeight: 600, flexShrink: 0 }}>
+                                                    {i + 1}
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    className="form-input"
+                                                    placeholder="Details..."
+                                                    value={row.val}
+                                                    onChange={e => handleDescRowChange(row.id, e.target.value)}
+                                                    style={{ flex: 1 }}
+                                                    disabled={saving}
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter' && row.val.trim()) {
+                                                            e.preventDefault()
+                                                            if (i === descRows.length - 1) handleAddDescRow()
+                                                        }
+                                                    }}
+                                                />
+                                                {descRows.length > 1 && (
+                                                    <button onClick={() => handleRemoveDescRow(row.id)} className="btn btn-ghost btn-icon" style={{ color: 'var(--color-text-tertiary)', flexShrink: 0, padding: '6px' }}>
+                                                        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                                                    </button>
+                                                )}
+                                                {i === descRows.length - 1 && (
+                                                    <button onClick={handleAddDescRow} className="btn btn-ghost btn-icon" style={{ color: 'var(--color-primary)', background: 'var(--color-primary-light)', flexShrink: 0, padding: '6px' }}>
+                                                        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                                                    </button>
+                                                )}
+                                            </motion.div>
+                                        ))}
+                                    </AnimatePresence>
                                 </div>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                     <div className="form-group">
