@@ -13,6 +13,10 @@ export async function GET(request: Request) {
     const type = searchParams.get('type')
     const date = searchParams.get('date')
     const month = searchParams.get('month')
+    const startDate = searchParams.get('start_date')
+    const endDate = searchParams.get('end_date')
+    const employeeId = searchParams.get('employee_id')
+    const status = searchParams.get('status')
 
     if (!type) return NextResponse.json({ error: 'Missing type parameter' }, { status: 400 })
 
@@ -48,21 +52,45 @@ export async function GET(request: Request) {
                 csvContent += row([e.date, e.sl, e.customer_phone, e.invoice_no, e.courier_id, e.source, e.amount, e.advance || 0, e.note, e.order_type, e.delivery_status, empName])
             })
     } else if (type === 'attendance') {
+        // The Attendance Report tab uses start_date/end_date (+ optional employee_id/status) and
+        // wants Employee ID/Department columns too — kept as a separate branch so the original
+        // date/month single-export (used by the Daily Attendance tab today) is untouched.
+        const isRangeExport = !!(startDate && endDate)
+
         let query = supabase
             .from('attendance')
-            .select('date, status, clock_in, clock_out, notes, employee:employees!employee_id(name)')
+            .select(
+                isRangeExport
+                    ? 'date, status, clock_in, clock_out, notes, employee:employees!employee_id(name, employee_id, department:departments(name))'
+                    : 'date, status, clock_in, clock_out, notes, employee:employees!employee_id(name)'
+            )
             .order('date', { ascending: false })
 
-        if (date) query = query.eq('date', date)
-        if (month) query = query.gte('date', `${month}-01`).lte('date', monthEnd(month))
+        if (isRangeExport) {
+            query = query.gte('date', startDate!).lte('date', endDate!)
+            if (employeeId) query = query.eq('employee_id', employeeId)
+            if (status) query = query.eq('status', status)
+        } else {
+            if (date) query = query.eq('date', date)
+            if (month) query = query.gte('date', `${month}-01`).lte('date', monthEnd(month))
+        }
 
         const { data } = await query
-        csvContent = 'Date,Employee,Status,Clock In,Clock Out,Notes\n'
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ; (data || []).forEach((e: any) => {
-                const empName = Array.isArray(e.employee) ? e.employee[0]?.name : e.employee?.name
-                csvContent += row([e.date, empName, e.status, e.clock_in || '', e.clock_out || '', e.notes])
-            })
+        if (isRangeExport) {
+            csvContent = 'Date,Employee,Employee ID,Department,Status,Clock In,Clock Out,Notes\n'
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                ; (data || []).forEach((e: any) => {
+                    const emp = Array.isArray(e.employee) ? e.employee[0] : e.employee
+                    csvContent += row([e.date, emp?.name, emp?.employee_id, emp?.department?.name, e.status, e.clock_in || '', e.clock_out || '', e.notes])
+                })
+        } else {
+            csvContent = 'Date,Employee,Status,Clock In,Clock Out,Notes\n'
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                ; (data || []).forEach((e: any) => {
+                    const empName = Array.isArray(e.employee) ? e.employee[0]?.name : e.employee?.name
+                    csvContent += row([e.date, empName, e.status, e.clock_in || '', e.clock_out || '', e.notes])
+                })
+        }
     } else if (type === 'expenses') {
         let query = supabase
             .from('expenses')

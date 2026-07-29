@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import AttendanceModal from '@/components/attendance/AttendanceModal'
 import AdminLeaves from '@/components/attendance/AdminLeaves'
+import AttendanceReport from '@/components/attendance/AttendanceReport'
 import { usePermissions } from '@/lib/PermissionsContext'
 import { useToast } from '@/lib/ToastContext'
 import { formatLongDate } from '@/lib/format'
@@ -117,7 +118,7 @@ export default function AttendancePage() {
     const [leaveReason, setLeaveReason] = useState('')
     const [showLeaveModal, setShowLeaveModal] = useState(false)
     const [leaveTargetRecord, setLeaveTargetRecord] = useState<AttendanceRecord | null>(null)
-    const [activeTab, setActiveTab] = useState<'attendance' | 'leaves'>('attendance')
+    const [activeTab, setActiveTab] = useState<'attendance' | 'leaves' | 'report'>('attendance')
 
     // Standalone leave modal
     const [showStandaloneLeave, setShowStandaloneLeave] = useState(false)
@@ -457,6 +458,13 @@ export default function AttendancePage() {
                     >
                         Pending Leaves
                     </button>
+                    <button
+                        className={`tab-btn ${activeTab === 'report' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('report')}
+                        style={{ padding: '8px 16px', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 600, color: activeTab === 'report' ? '#fff' : 'var(--color-text-secondary)', background: activeTab === 'report' ? '#2563EB' : 'transparent', border: 'none', cursor: 'pointer', transition: 'all 0.2s' }}
+                    >
+                        Attendance Report
+                    </button>
                 </div>
             </motion.div>
 
@@ -673,9 +681,13 @@ export default function AttendancePage() {
                 </motion.div>
             )}
             </motion.div>
-            ) : (
+            ) : activeTab === 'leaves' ? (
                 <motion.div key="leaves" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
                     <AdminLeaves />
+                </motion.div>
+            ) : (
+                <motion.div key="report" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
+                    <AttendanceReport />
                 </motion.div>
             )}
             </AnimatePresence>
