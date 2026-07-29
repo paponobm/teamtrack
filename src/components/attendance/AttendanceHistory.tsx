@@ -11,6 +11,7 @@ interface AttendanceRecord {
     clock_in: string | null
     clock_out: string | null
     status: string
+    notes: string | null
 }
 
 interface BreakRecord {
@@ -153,16 +154,17 @@ export default function AttendanceHistory() {
                                 <th>Break Time</th>
                                 <th>Net Hours</th>
                                 <th>Status</th>
+                                <th>Notes</th>
                             </tr>
                         </thead>
                         <tbody>
                             {loading ? (
                                 <tr>
-                                    <td colSpan={7} style={{ textAlign: 'center', padding: '32px' }}>Loading history...</td>
+                                    <td colSpan={8} style={{ textAlign: 'center', padding: '32px' }}>Loading history...</td>
                                 </tr>
                             ) : dailyData.length === 0 ? (
                                 <tr>
-                                    <td colSpan={7} style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-tertiary)' }}>No records found for this month</td>
+                                    <td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-tertiary)' }}>No records found for this month</td>
                                 </tr>
                             ) : (
                                 dailyData.map(d => {
@@ -179,6 +181,10 @@ export default function AttendanceHistory() {
                                                 <span className={`badge ${d.status === 'present' ? 'badge-success' : d.status === 'leave' ? 'badge-warning' : 'badge-danger'}`}>
                                                     {d.status}
                                                 </span>
+                                            </td>
+                                            {/* <td style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8125rem', maxWidth: '180px' }}> */}
+                                            <td style={{ color: '#f51b0b', fontSize: '0.8125rem', maxWidth: '180px' }}>
+                                                <span className="truncate" style={{ display: 'block' }}>{d.notes || '-'}</span>
                                             </td>
                                         </tr>
                                     )
