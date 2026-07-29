@@ -91,6 +91,23 @@ export async function GET(request: Request) {
                     csvContent += row([e.date, empName, e.status, e.clock_in || '', e.clock_out || '', e.notes])
                 })
         }
+    } else if (type === 'work-reports') {
+        let query = supabase
+            .from('work_reports')
+            .select('date, project, description, hours, progress, status, notes, employee:employees!employee_id(name, employee_id, department:departments(name))')
+            .order('date', { ascending: false })
+
+        if (startDate && endDate) query = query.gte('date', startDate).lte('date', endDate)
+        if (employeeId) query = query.eq('employee_id', employeeId)
+        if (status) query = query.eq('status', status)
+
+        const { data } = await query
+        csvContent = 'Date,Employee,Employee ID,Department,Project,Hours,Progress %,Status,Notes\n'
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ; (data || []).forEach((e: any) => {
+                const emp = Array.isArray(e.employee) ? e.employee[0] : e.employee
+                csvContent += row([e.date, emp?.name, emp?.employee_id, emp?.department?.name, e.project, e.hours, e.progress, e.status, e.notes])
+            })
     } else if (type === 'expenses') {
         let query = supabase
             .from('expenses')

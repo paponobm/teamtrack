@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 import RequireFeature from '@/components/common/RequireFeature'
 import { usePermissions } from '@/lib/PermissionsContext'
+import DailyWorkReport from '@/components/work-reports/DailyWorkReport'
 
 interface TaskAssignment {
     id: string
@@ -113,6 +114,7 @@ const emptyForm = { titles: [{ id: 'init', val: '' }], description: '', due_date
 
 export default function TasksPage() {
     const { data: perms } = usePermissions()
+    const [activeMainTab, setActiveMainTab] = useState<'tasks' | 'reports'>('tasks')
     const [tasks, setTasks] = useState<Task[]>([])
     const [loading, setLoading] = useState(true)
     const [isAdmin, setIsAdmin] = useState(false)
@@ -393,6 +395,30 @@ export default function TasksPage() {
                 )}
             </motion.div>
 
+            {/* Tabs */}
+            <motion.div variants={item} style={{ marginBottom: '24px' }}>
+                <div className="tabs" style={{ display: 'inline-flex', background: 'var(--color-bg-primary)', padding: '4px', borderRadius: '12px', border: '1px solid var(--color-border-light)' }}>
+                    <button
+                        className={`tab-btn ${activeMainTab === 'tasks' ? 'active' : ''}`}
+                        onClick={() => setActiveMainTab('tasks')}
+                        style={{ padding: '8px 16px', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 600, color: activeMainTab === 'tasks' ? '#fff' : 'var(--color-text-secondary)', background: activeMainTab === 'tasks' ? '#2563EB' : 'transparent', border: 'none', cursor: 'pointer', transition: 'all 0.2s' }}
+                    >
+                        Task Management
+                    </button>
+                    <button
+                        className={`tab-btn ${activeMainTab === 'reports' ? 'active' : ''}`}
+                        onClick={() => setActiveMainTab('reports')}
+                        style={{ padding: '8px 16px', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 600, color: activeMainTab === 'reports' ? '#fff' : 'var(--color-text-secondary)', background: activeMainTab === 'reports' ? '#2563EB' : 'transparent', border: 'none', cursor: 'pointer', transition: 'all 0.2s' }}
+                    >
+                        Daily Work Report
+                    </button>
+                </div>
+            </motion.div>
+
+            {activeMainTab === 'reports' ? (
+                <DailyWorkReport />
+            ) : (
+            <>
             {/* Stats */}
             <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '24px' }}>
                 {[
@@ -590,6 +616,8 @@ export default function TasksPage() {
                         )
                     })}
                 </motion.div>
+            )}
+            </>
             )}
 
             {/* Task Detail Modal */}
