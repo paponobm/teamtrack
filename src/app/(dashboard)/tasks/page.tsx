@@ -83,8 +83,9 @@ function getAvatarColor(name: string) {
 }
 
 const dateRangeOptions = [
+     { key: 'today', label: 'Today' },
     { key: 'all', label: 'All Time' },
-    { key: 'today', label: 'Today' },
+   
     { key: 'week', label: 'This Week' },
     { key: 'month', label: 'This Month' },
     { key: 'custom', label: 'Custom' },
@@ -131,7 +132,7 @@ export default function TasksPage() {
 
     const [searchQuery, setSearchQuery] = useState('')
     const [filterEmployeeId, setFilterEmployeeId] = useState('')
-    const [dateRange, setDateRange] = useState('all')
+    const [dateRange, setDateRange] = useState('today')
     const [customStart, setCustomStart] = useState('')
     const [customEnd, setCustomEnd] = useState('')
 
@@ -490,7 +491,7 @@ export default function TasksPage() {
 
             {/* Tasks List */}
             {loading ? (
-                <motion.div variants={item} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '12px' }}>
                     {[1, 2, 3].map(i => (
                         <div key={i} className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <div className="skeleton" style={{ width: '60%', height: 16 }} />
@@ -509,7 +510,7 @@ export default function TasksPage() {
                     </p>
                 </motion.div>
             ) : (
-                <motion.div variants={item} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '12px' }}>
                     {filtered.map(task => {
                         const sc = statusConfig[task.status] || statusConfig.pending
                         const pc = priorityConfig[task.priority] || priorityConfig.medium
