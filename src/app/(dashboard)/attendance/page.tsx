@@ -54,6 +54,12 @@ function formatTime(ts: string | null) {
     return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
 }
 
+// For populating <input type="time"> from a stored break start/end timestamp.
+function toTimeInput(ts: string | null) {
+    if (!ts) return ''
+    return new Date(ts).toTimeString().slice(0, 5)
+}
+
 // duty_start_time comes back as a plain "HH:MM:SS" TIME value (no date), format it for display.
 function formatReportingTime(t: string | null) {
     if (!t) return null
@@ -144,6 +150,9 @@ export default function AttendancePage() {
     const [editLogs, setEditLogs] = useState<ActivityLog[]>([])
     const [editLogsLoading, setEditLogsLoading] = useState(false)
     const [deletingAttId, setDeletingAttId] = useState<string | null>(null)
+    const [editBreaks, setEditBreaks] = useState<{ id: string; start_time: string; end_time: string | null }[]>([])
+    const [editBreaksLoading, setEditBreaksLoading] = useState(false)
+    const [addingBreak, setAddingBreak] = useState(false)
 
     // Stat card detail view
     const [viewingStatus, setViewingStatus] = useState<string | null>(null)
@@ -310,6 +319,63 @@ export default function AttendancePage() {
                 .catch(() => { })
                 .finally(() => setEditLogsLoading(false))
         }
+        // Fetch this day's break entries (there can be more than one)
+        setEditBreaksLoading(true)
+        fetch(`/api/attendance/${record.id}/breaks`)
+            .then(r => r.json())
+            .then(d => { if (Array.isArray(d)) setEditBreaks(d) })
+            .catch(() => { })
+            .finally(() => setEditBreaksLoading(false))
+    }
+
+    const handleAddBreak = async () => {
+        if (!editingRecord) return
+        setAddingBreak(true)
+        try {
+            const res = await fetch(`/api/attendance/${editingRecord.id}/breaks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ start_time: new Date().toISOString() }),
+            })
+            if (res.ok) {
+                const newBreak = await res.json()
+                setEditBreaks(prev => [...prev, newBreak])
+            } else {
+                const e = await res.json().catch(() => ({}))
+                toast.error(e.error || 'Failed to add break')
+            }
+        } finally {
+            setAddingBreak(false)
+        }
+    }
+
+    const handleUpdateBreak = async (breakId: string, field: 'start_time' | 'end_time', timeValue: string) => {
+        if (!editingRecord) return
+        // Same "date + HH:MM + fixed offset" convention already used for clock_in/clock_out above.
+        const iso = timeValue ? `${date}T${timeValue}:00+06:00` : null
+        const res = await fetch(`/api/attendance/${editingRecord.id}/breaks/${breakId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [field]: iso }),
+        })
+        if (res.ok) {
+            const updated = await res.json()
+            setEditBreaks(prev => prev.map(b => b.id === breakId ? updated : b))
+        } else {
+            const e = await res.json().catch(() => ({}))
+            toast.error(e.error || 'Failed to update break')
+        }
+    }
+
+    const handleDeleteBreak = async (breakId: string) => {
+        if (!editingRecord) return
+        const res = await fetch(`/api/attendance/${editingRecord.id}/breaks/${breakId}`, { method: 'DELETE' })
+        if (res.ok) {
+            setEditBreaks(prev => prev.filter(b => b.id !== breakId))
+        } else {
+            const e = await res.json().catch(() => ({}))
+            toast.error(e.error || 'Failed to delete break')
+        }
     }
 
     const handleEditSave = async () => {
@@ -379,8 +445,11 @@ export default function AttendancePage() {
     }
 
     // Stats
+    // "late" also counts toward "present" (they did show up) — same convention already used
+    // for the Attendance Report tab's Total Present card, and elsewhere in the app (dashboard,
+    // reports/monthly, reports/commission, attendance/absent all treat present-or-late as present).
     const statCounts = {
-        present: records.filter(r => r.status === 'present').length,
+        present: records.filter(r => r.status === 'present' || r.status === 'late').length,
         absent: records.filter(r => r.status === 'absent').length,
         late: records.filter(r => r.status === 'late').length,
         leave: records.filter(r => r.status === 'leave' || r.status === 'half_day' || r.status === 'on_duty').length,
@@ -734,6 +803,35 @@ export default function AttendancePage() {
                                         <label className="input-label">Clock Out</label>
                                         <input type="time" className="input" value={editForm.clock_out} onChange={e => setEditForm({ ...editForm, clock_out: e.target.value })} />
                                     </div>
+                                </div>
+                                {/* Break Time — an employee can take multiple breaks in a day */}
+                                <div className="input-group">
+                                    <label className="input-label">Break Time</label>
+                                    {editBreaksLoading ? (
+                                        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>Loading...</div>
+                                    ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                            {editBreaks.map((b, i) => (
+                                                <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                    <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', width: '52px', flexShrink: 0 }}>Break {i + 1}</span>
+                                                    <input type="time" className="input" style={{ flex: 1 }}
+                                                        value={toTimeInput(b.start_time)}
+                                                        onChange={e => handleUpdateBreak(b.id, 'start_time', e.target.value)} />
+                                                    <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.75rem' }}>to</span>
+                                                    <input type="time" className="input" style={{ flex: 1 }}
+                                                        value={toTimeInput(b.end_time)}
+                                                        onChange={e => handleUpdateBreak(b.id, 'end_time', e.target.value)} />
+                                                    <button className="btn btn-ghost btn-sm" onClick={() => handleDeleteBreak(b.id)} title="Remove break" style={{ color: '#DC2626', padding: '4px 6px' }}>✕</button>
+                                                </div>
+                                            ))}
+                                            {editBreaks.length === 0 && (
+                                                <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>No breaks recorded</div>
+                                            )}
+                                            <button className="btn btn-secondary btn-sm" onClick={handleAddBreak} disabled={addingBreak} style={{ alignSelf: 'flex-start' }}>
+                                                {addingBreak ? 'Adding...' : '+ Add Break'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                                 {/* Notes */}
                                 <div className="input-group">

@@ -29,7 +29,7 @@ export async function GET(request: Request) {
         .from('attendance')
         .select(`
             id, date, clock_in, clock_out, status,
-            employee:employees(id, name, employee_id, avatar_url, department:departments(id, name))
+            employee:employees(id, name, employee_id, avatar_url, duty_start_time, department:departments(id, name))
         `)
         .gte('date', startDate)
         .lte('date', endDate)
@@ -52,10 +52,13 @@ export async function GET(request: Request) {
     }
 
     // Summary counts reflect the whole filtered range, not just the current page.
+    // "late" also counts toward "present" (they did show up) — same convention already
+    // used elsewhere (attendance/absent, dashboard, reports/monthly, reports/commission
+    // all treat status === 'present' || 'late' as a present day).
     const counts = { present: 0, late: 0, absent: 0, leave: 0 }
     rows.forEach(r => {
         if (r.status === 'present') counts.present++
-        else if (r.status === 'late') counts.late++
+        else if (r.status === 'late') { counts.present++; counts.late++ }
         else if (r.status === 'absent') counts.absent++
         else if (r.status === 'leave') counts.leave++
     })
@@ -102,6 +105,7 @@ export async function GET(request: Request) {
                 name: r.employee?.name,
                 employee_id: r.employee?.employee_id,
                 avatar_url: r.employee?.avatar_url,
+                duty_start_time: r.employee?.duty_start_time || null,
                 department: r.employee?.department?.name || null,
             },
             workingMs,

@@ -14,7 +14,7 @@ interface ReportEntry {
     clock_in: string | null
     clock_out: string | null
     status: string
-    employee: { id: string; name: string; employee_id: string; avatar_url: string | null; department: string | null }
+    employee: { id: string; name: string; employee_id: string; avatar_url: string | null; department: string | null; duty_start_time: string | null }
     workingMs: number
     breakMs: number
     overtimeMs: number
@@ -54,6 +54,15 @@ function formatDuration(ms: number) {
 function formatClockTime(ts: string | null) {
     if (!ts) return '-'
     return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+}
+
+// duty_start_time comes back as a plain "HH:MM:SS" TIME value (no date), format it for display.
+function formatReportingTime(t: string | null) {
+    if (!t) return '-'
+    const [h, m] = t.split(':').map(Number)
+    const d = new Date()
+    d.setHours(h, m, 0, 0)
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
 }
 
 const LIMIT = 20
@@ -303,14 +312,14 @@ export default function AttendanceReport() {
                                 <tr>
                                     <th>SL</th>
                                     <th>Employee</th>
-                                    <th>Employee ID</th>
-                                    <th>Department</th>
-                                    <th>Date</th>
+                                     <th>Date</th>
+                                    <th>Reporting Time</th>
+                                   
                                     <th>Clock In</th>
                                     <th>Clock Out</th>
                                     <th>Working Time</th>
                                     <th>Break Time</th>
-                                    <th>Overtime</th>
+                                    {/* <th>Overtime</th> */}
                                     <th>Status</th>
                                 </tr>
                             </thead>
@@ -328,17 +337,26 @@ export default function AttendanceReport() {
                                                             <img src={e.employee.avatar_url} alt="" onError={(ev) => { ev.currentTarget.style.display = 'none' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                         ) : (e.employee.name || '?')[0]?.toUpperCase()}
                                                     </div>
-                                                    <div style={{ fontWeight: 500 }}>{e.employee.name || '-'}</div>
+                                                    <div>
+                                                        <div style={{ fontWeight: 500 }}>{e.employee.name || '-'}</div>
+                                                        {(e.employee.employee_id || e.employee.department) && (
+                                                            <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
+                                                                {e.employee.employee_id}
+                                                                {e.employee.employee_id && e.employee.department ? ' • ' : ''}
+                                                                {e.employee.department}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </td>
-                                            <td style={{ color: 'var(--color-text-secondary)' }}>{e.employee.employee_id || '-'}</td>
-                                            <td style={{ color: 'var(--color-text-secondary)' }}>{e.employee.department || '-'}</td>
-                                            <td>{dateStr}</td>
+                                             <td>{dateStr}</td>
+                                            <td style={{ fontFamily: 'monospace', fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>{formatReportingTime(e.employee.duty_start_time)}</td>
+                                           
                                             <td style={{ fontFamily: 'monospace', fontSize: '0.8125rem' }}>{formatClockTime(e.clock_in)}</td>
                                             <td style={{ fontFamily: 'monospace', fontSize: '0.8125rem' }}>{formatClockTime(e.clock_out)}</td>
                                             <td style={{ fontSize: '0.8125rem' }}>{formatDuration(e.workingMs)}</td>
                                             <td style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>{formatDuration(e.breakMs)}</td>
-                                            <td style={{ fontSize: '0.8125rem', color: e.overtimeMs > 0 ? '#16A34A' : 'var(--color-text-tertiary)' }}>{e.overtimeMs > 0 ? formatDuration(e.overtimeMs) : '-'}</td>
+                                            {/* <td style={{ fontSize: '0.8125rem', color: e.overtimeMs > 0 ? '#16A34A' : 'var(--color-text-tertiary)' }}>{e.overtimeMs > 0 ? formatDuration(e.overtimeMs) : '-'}</td> */}
                                             <td>
                                                 <span style={{ padding: '3px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: `${sc.color}15` }}>{sc.label}</span>
                                             </td>
