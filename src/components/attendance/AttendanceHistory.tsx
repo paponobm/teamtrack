@@ -26,6 +26,16 @@ const item = {
     show: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 }
 
+// Mirrors attendance/page.tsx's statusConfig so badge colors match exactly across pages.
+const statusConfig: Record<string, { label: string; color: string; bg: string }> = {
+    present: { label: 'Present', color: '#16A34A', bg: 'rgba(22,163,74,0.08)' },
+    late: { label: 'Late', color: '#F59E0B', bg: 'rgba(245,158,11,0.08)' },
+    absent: { label: 'Absent', color: '#DC2626', bg: 'rgba(220,38,38,0.08)' },
+    half_day: { label: 'Half Day', color: '#3B82F6', bg: 'rgba(59,130,246,0.08)' },
+    leave: { label: 'On Leave', color: '#7C3AED', bg: 'rgba(124,58,237,0.08)' },
+    on_duty: { label: 'On Duty', color: '#0891B2', bg: 'rgba(8,145,178,0.08)' },
+}
+
 export default function AttendanceHistory() {
     const { lang } = useLanguage()
     const [records, setRecords] = useState<AttendanceRecord[]>([])
@@ -169,6 +179,7 @@ export default function AttendanceHistory() {
                             ) : (
                                 dailyData.map(d => {
                                     const dateStr = new Date(d.date + 'T00:00:00').toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+                                    const sc = statusConfig[d.status] || statusConfig.present
                                     return (
                                         <tr key={d.id}>
                                             <td style={{ fontWeight: 500 }}>{dateStr}</td>
@@ -178,8 +189,8 @@ export default function AttendanceHistory() {
                                             <td style={{ color: '#F59E0B' }}>{d.breakMs > 0 ? formatDuration(d.breakMs) : '--'}</td>
                                             <td style={{ fontWeight: 600, color: '#2563EB' }}>{formatDuration(d.netMs)}</td>
                                             <td>
-                                                <span className={`badge ${d.status === 'present' ? 'badge-success' : d.status === 'leave' ? 'badge-warning' : 'badge-danger'}`}>
-                                                    {d.status}
+                                                <span style={{ padding: '3px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: `${sc.color}15` }}>
+                                                    {sc.label}
                                                 </span>
                                             </td>
                                             {/* <td style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8125rem', maxWidth: '180px' }}> */}
