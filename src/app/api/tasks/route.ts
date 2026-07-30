@@ -157,7 +157,7 @@ export async function PUT(request: Request) {
 
     const supabase = auth.supabase
     const body = await request.json()
-    const { id, ...updates } = body
+    const { id, assignee_ids, ...updates } = body
 
     if (!id) return NextResponse.json({ error: 'Task ID required' }, { status: 400 })
 
@@ -232,6 +232,32 @@ export async function PUT(request: Request) {
         .single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    // Re-sync assignees (admin edit only) — add newly checked members, remove unchecked ones.
+    if (isAdmin && Array.isArray(assignee_ids)) {
+        const { data: existingAssignments } = await supabase.from('task_assignments').select('employee_id').eq('task_id', id)
+        const existingIds = new Set((existingAssignments || []).map(a => a.employee_id))
+        const newIds = new Set(assignee_ids as string[])
+
+        const toAdd = [...newIds].filter(eid => !existingIds.has(eid))
+        const toRemove = [...existingIds].filter(eid => !newIds.has(eid))
+
+        if (toRemove.length > 0) {
+            await supabase.from('task_assignments').delete().eq('task_id', id).in('employee_id', toRemove)
+        }
+        if (toAdd.length > 0) {
+            await supabase.from('task_assignments').insert(toAdd.map(eid => ({ task_id: id, employee_id: eid })))
+            await supabase.from('notifications').insert(toAdd.map(eid => ({
+                recipient_id: eid,
+                title: 'New Task Assigned 📋',
+                message: `You have been assigned a task: ${data.title}`,
+                type: 'task_assignment',
+                related_entity_type: 'tasks',
+                related_entity_id: id,
+                is_read: false,
+            })))
+        }
+    }
 
     // Log status change
     if (updates.status && oldTask && updates.status !== oldTask.status && actor) {

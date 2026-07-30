@@ -83,6 +83,14 @@ function getAvatarColor(name: string) {
     return colors[name.charCodeAt(0) % colors.length]
 }
 
+// Description lines optionally carry a trailing "[Npt]" marker set via the Create Task
+// modal's per-item points field; strip it out for display and surface it separately.
+function parseDescriptionLine(line: string): { text: string; points: number | null } {
+    const m = line.match(/^(.*?)\s*\[(\d+)pt\]\s*$/)
+    if (m) return { text: m[1], points: parseInt(m[2], 10) }
+    return { text: line, points: null }
+}
+
 const dateRangeOptions = [
      { key: 'today', label: 'Today' },
     { key: 'all', label: 'All Time' },
@@ -124,13 +132,22 @@ export default function TasksPage() {
     const [activeFilter, setActiveFilter] = useState('all')
     const [showModal, setShowModal] = useState(false)
     const [form, setForm] = useState(emptyForm)
-    const [descRows, setDescRows] = useState<{ id: string; val: string }[]>([{ id: 'desc-init', val: '' }])
+    const [descRows, setDescRows] = useState<{ id: string; val: string; points: string }[]>([{ id: 'desc-init', val: '', points: '' }])
     const [saving, setSaving] = useState(false)
     const [selectedTask, setSelectedTask] = useState<Task | null>(null)
     const [assigneeSearch, setAssigneeSearch] = useState('')
     const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([])
     const [logsLoading, setLogsLoading] = useState(false)
     const toast = useToast()
+
+    // Edit Task modal (admin) — separate from the Create Task modal's state/rows so
+    // editing a single task can't interfere with the multi-task creation flow.
+    const [editTaskModal, setEditTaskModal] = useState(false)
+    const [editTaskForm, setEditTaskForm] = useState({ title: '', due_date: '', priority: 'medium' })
+    const [editDescRows, setEditDescRows] = useState<{ id: string; val: string; points: string }[]>([{ id: 'edit-desc-init', val: '', points: '' }])
+    const [editAssigneeIds, setEditAssigneeIds] = useState<string[]>([])
+    const [editAssigneeSearch, setEditAssigneeSearch] = useState('')
+    const [editSaving, setEditSaving] = useState(false)
 
     const [searchQuery, setSearchQuery] = useState('')
     const [filterEmployeeId, setFilterEmployeeId] = useState('')
@@ -201,9 +218,15 @@ export default function TasksPage() {
 
     // Description rows: numbered list of single-line inputs, same pattern as the Tasks
     // rows above it. form.description itself stays a single string (unchanged shape for
-    // the API/backend) — these rows just get joined as "1. ...\n2. ..." into it.
-    const syncDescription = (rows: { id: string; val: string }[]) => {
-        const joined = rows.filter(r => r.val.trim()).map((r, i) => `${i + 1}. ${r.val.trim()}`).join('\n')
+    // the API/backend) — these rows just get joined as "1. ...\n2. ..." into it, with a
+    // trailing "[Npt]" marker when a point value is set (parsed back out by
+    // parseDescriptionLine wherever the description is displayed).
+    const syncDescription = (rows: { id: string; val: string; points: string }[]) => {
+        const joined = rows.filter(r => r.val.trim()).map((r, i) => {
+            const pts = parseInt(r.points, 10)
+            const suffix = pts > 0 ? ` [${pts}pt]` : ''
+            return `${i + 1}. ${r.val.trim()}${suffix}`
+        }).join('\n')
         setForm(prev => ({ ...prev, description: joined }))
     }
 
@@ -215,14 +238,22 @@ export default function TasksPage() {
         })
     }
 
+    const handleDescPointsChange = (id: string, points: string) => {
+        setDescRows(prev => {
+            const next = prev.map(r => r.id === id ? { ...r, points } : r)
+            syncDescription(next)
+            return next
+        })
+    }
+
     const handleAddDescRow = () => {
-        setDescRows(prev => [...prev, { id: Math.random().toString(), val: '' }])
+        setDescRows(prev => [...prev, { id: Math.random().toString(), val: '', points: '' }])
     }
 
     const handleRemoveDescRow = (id: string) => {
         setDescRows(prev => {
             const next = prev.filter(r => r.id !== id)
-            const finalRows = next.length === 0 ? [{ id: Math.random().toString(), val: '' }] : next
+            const finalRows = next.length === 0 ? [{ id: Math.random().toString(), val: '', points: '' }] : next
             syncDescription(finalRows)
             return finalRows
         })
@@ -247,7 +278,7 @@ export default function TasksPage() {
             await fetchTasks()
             setShowModal(false)
             setForm(emptyForm)
-            setDescRows([{ id: Math.random().toString(), val: '' }])
+            setDescRows([{ id: Math.random().toString(), val: '', points: '' }])
         } catch { alert('Failed to create tasks') }
         finally { setSaving(false) }
     }
@@ -299,6 +330,91 @@ export default function TasksPage() {
         toast.success('Task deleted')
         setSelectedTask(null)
         await fetchTasks()
+    }
+
+    const openEditTaskModal = () => {
+        if (!selectedTask) return
+        setEditTaskForm({
+            title: selectedTask.title,
+            due_date: selectedTask.due_date || '',
+            priority: selectedTask.priority,
+        })
+        const lines = (selectedTask.description || '').split('\n').filter(l => l.trim())
+        const rows = lines.length > 0
+            ? lines.map((line, i) => {
+                const { text, points } = parseDescriptionLine(line.replace(/^\d+\.\s*/, ''))
+                return { id: `${selectedTask.id}-${i}`, val: text, points: points !== null ? String(points) : '' }
+            })
+            : [{ id: selectedTask.id, val: '', points: '' }]
+        setEditDescRows(rows)
+        setEditAssigneeIds(selectedTask.task_assignments.map(a => {
+            const emp = a.employee
+            return emp ? (Array.isArray(emp) ? (emp as unknown as Employee[])[0]?.id : emp.id) : null
+        }).filter((eid): eid is string => !!eid))
+        setEditAssigneeSearch('')
+        setEditTaskModal(true)
+    }
+
+    const toggleEditAssignee = (empId: string) => {
+        setEditAssigneeIds(prev => prev.includes(empId) ? prev.filter(id => id !== empId) : [...prev, empId])
+    }
+
+    const handleEditDescRowChange = (id: string, val: string) => {
+        setEditDescRows(prev => prev.map(r => r.id === id ? { ...r, val } : r))
+    }
+
+    const handleEditDescPointsChange = (id: string, points: string) => {
+        setEditDescRows(prev => prev.map(r => r.id === id ? { ...r, points } : r))
+    }
+
+    const handleAddEditDescRow = () => {
+        setEditDescRows(prev => [...prev, { id: Math.random().toString(), val: '', points: '' }])
+    }
+
+    const handleRemoveEditDescRow = (id: string) => {
+        setEditDescRows(prev => {
+            const next = prev.filter(r => r.id !== id)
+            return next.length === 0 ? [{ id: Math.random().toString(), val: '', points: '' }] : next
+        })
+    }
+
+    const handleSaveEditTask = async () => {
+        if (!selectedTask || !editTaskForm.title.trim()) { toast.error('Title is required'); return }
+        setEditSaving(true)
+        try {
+            const description = editDescRows.filter(r => r.val.trim()).map((r, i) => {
+                const pts = parseInt(r.points, 10)
+                const suffix = pts > 0 ? ` [${pts}pt]` : ''
+                return `${i + 1}. ${r.val.trim()}${suffix}`
+            }).join('\n')
+
+            const res = await fetch('/api/tasks', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: selectedTask.id,
+                    title: editTaskForm.title.trim(),
+                    description: description || null,
+                    due_date: editTaskForm.due_date || null,
+                    priority: editTaskForm.priority,
+                    assignee_ids: editAssigneeIds,
+                }),
+            })
+            if (!res.ok) {
+                const e = await res.json().catch(() => ({}))
+                toast.error(e.error || 'Failed to update task')
+                return
+            }
+            // Re-fetch (same pattern as handleStatusChange) so task_assignments reflects
+            // the new assignee list, not just the plain columns PUT returns.
+            const fresh = await fetchTasks()
+            const refreshed = (fresh || []).find(t => t.id === selectedTask.id)
+            if (refreshed) setSelectedTask(refreshed)
+            setEditTaskModal(false)
+            toast.success('Task updated')
+        } finally {
+            setEditSaving(false)
+        }
     }
 
     const toggleAssignee = (empId: string) => {
@@ -388,7 +504,7 @@ export default function TasksPage() {
                     <p className="page-subtitle">Manage and track team assignments.</p>
                 </div>
                 {isAdmin && (
-                    <button className="btn btn-primary btn-sm" onClick={() => { setForm(emptyForm); setDescRows([{ id: Math.random().toString(), val: '' }]); setShowModal(true) }}>
+                    <button className="btn btn-primary btn-sm" onClick={() => { setForm(emptyForm); setDescRows([{ id: Math.random().toString(), val: '', points: '' }]); setShowModal(true) }}>
                         <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
                         Create Task
                     </button>
@@ -571,7 +687,19 @@ export default function TasksPage() {
                                             )}
                                         </div>
                                         {task.description && (
-                                            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '0 0 8px', lineHeight: 1.5, whiteSpace: 'pre-line' }}>{task.description}</p>
+                                            <div style={{ margin: '0 0 8px' }}>
+                                                {task.description.split('\n').map((line, i) => {
+                                                    const { text, points } = parseDescriptionLine(line)
+                                                    return (
+                                                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8125rem', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+                                                            <span style={{ flex: 1 }}>{text}</span>
+                                                            {points !== null && (
+                                                                <span style={{ padding: '1px 7px', borderRadius: '10px', fontSize: '0.6875rem', fontWeight: 700, color: '#F59E0B', background: 'rgba(245,158,11,0.12)', flexShrink: 0 }}>{points} pt{points !== 1 ? 's' : ''}</span>
+                                                            )}
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
                                         )}
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
                                             {task.due_date && (
@@ -674,10 +802,19 @@ export default function TasksPage() {
                                             Mark Complete
                                         </button>
                                     )}
-                                    {isSuperAdmin && (
-                                        <button className="btn btn-sm" style={{ color: '#DC2626', border: '1px solid #DC262620', marginLeft: 'auto' }} onClick={() => handleDelete(selectedTask.id)}>
-                                            Delete
-                                        </button>
+                                    {(isAdmin || isSuperAdmin) && (
+                                        <div style={{ display: 'flex', gap: '8px', marginLeft: 'auto' }}>
+                                            {isAdmin && (
+                                                <button className="btn btn-sm" style={{ color: '#2563EB', border: '1px solid #2563EB20' }} onClick={openEditTaskModal}>
+                                                    Edit
+                                                </button>
+                                            )}
+                                            {isSuperAdmin && (
+                                                <button className="btn btn-sm" style={{ color: '#DC2626', border: '1px solid #DC262620' }} onClick={() => handleDelete(selectedTask.id)}>
+                                                    Delete
+                                                </button>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
 
@@ -685,7 +822,17 @@ export default function TasksPage() {
                                 {selectedTask.description && (
                                     <div style={{ padding: '12px 16px', background: 'var(--color-surface)', borderRadius: '10px', border: '1px solid var(--color-border-light)' }}>
                                         <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: '4px' }}>Description</div>
-                                        <p style={{ fontSize: '0.875rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{selectedTask.description}</p>
+                                        {selectedTask.description.split('\n').map((line, i) => {
+                                            const { text, points } = parseDescriptionLine(line)
+                                            return (
+                                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.875rem', lineHeight: 1.6 }}>
+                                                    <span style={{ flex: 1 }}>{text}</span>
+                                                    {points !== null && (
+                                                        <span style={{ padding: '1px 7px', borderRadius: '10px', fontSize: '0.6875rem', fontWeight: 700, color: '#F59E0B', background: 'rgba(245,158,11,0.12)', flexShrink: 0 }}>{points} pt{points !== 1 ? 's' : ''}</span>
+                                                    )}
+                                                </div>
+                                            )
+                                        })}
                                     </div>
                                 )}
 
@@ -762,6 +909,187 @@ export default function TasksPage() {
                                         )}
                                     </div>
                                 )}
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Edit Task Modal (admin) */}
+            <AnimatePresence>
+                {editTaskModal && selectedTask && (
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setEditTaskModal(false)}>
+                        <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                            onClick={e => e.stopPropagation()} style={{ maxWidth: '520px', width: '100%', maxHeight: '85vh', overflow: 'auto' }}>
+                            <div className="modal-header">
+                                <h2 className="modal-title">Edit Task</h2>
+                                <button className="btn btn-ghost btn-sm" onClick={() => setEditTaskModal(false)}>
+                                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                                </button>
+                            </div>
+                            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                                <div className="form-group">
+                                    <label className="form-label">Title</label>
+                                    <input type="text" className="form-input" value={editTaskForm.title} onChange={e => setEditTaskForm({ ...editTaskForm, title: e.target.value })} placeholder="Task title..." disabled={editSaving} />
+                                </div>
+                                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    <label className="form-label" style={{ marginBottom: 0 }}>Description</label>
+                                    <AnimatePresence initial={false}>
+                                        {editDescRows.map((row, i) => (
+                                            <motion.div
+                                                key={row.id}
+                                                initial={{ opacity: 0, height: 0, y: -10 }}
+                                                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                                                exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
+                                                transition={{ duration: 0.2 }}
+                                                style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                            >
+                                                <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6875rem', fontWeight: 600, flexShrink: 0 }}>
+                                                    {i + 1}
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    className="form-input"
+                                                    placeholder="Details..."
+                                                    value={row.val}
+                                                    onChange={e => handleEditDescRowChange(row.id, e.target.value)}
+                                                    style={{ flex: 1 }}
+                                                    disabled={editSaving}
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter' && row.val.trim()) {
+                                                            e.preventDefault()
+                                                            if (i === editDescRows.length - 1) handleAddEditDescRow()
+                                                        }
+                                                    }}
+                                                />
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    className="form-input"
+                                                    placeholder="pts"
+                                                    title="Points for this item"
+                                                    value={row.points}
+                                                    onChange={e => handleEditDescPointsChange(row.id, e.target.value)}
+                                                    style={{ width: '60px', flexShrink: 0, textAlign: 'center' }}
+                                                    disabled={editSaving}
+                                                />
+                                                {editDescRows.length > 1 && (
+                                                    <button onClick={() => handleRemoveEditDescRow(row.id)} className="btn btn-ghost btn-icon" style={{ color: 'var(--color-text-tertiary)', flexShrink: 0, padding: '6px' }}>
+                                                        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                                                    </button>
+                                                )}
+                                                {i === editDescRows.length - 1 && (
+                                                    <button onClick={handleAddEditDescRow} className="btn btn-ghost btn-icon" style={{ color: 'var(--color-primary)', background: 'var(--color-primary-light)', flexShrink: 0, padding: '6px' }}>
+                                                        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                                                    </button>
+                                                )}
+                                            </motion.div>
+                                        ))}
+                                    </AnimatePresence>
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                    <div className="form-group">
+                                        <label className="form-label">Due Date</label>
+                                        <input className="form-input" type="date" value={editTaskForm.due_date} onChange={e => setEditTaskForm({ ...editTaskForm, due_date: e.target.value })} disabled={editSaving} />
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">Priority</label>
+                                        <select className="form-input" value={editTaskForm.priority} onChange={e => setEditTaskForm({ ...editTaskForm, priority: e.target.value })} disabled={editSaving}>
+                                            <option value="low">Low</option>
+                                            <option value="medium">Medium</option>
+                                            <option value="high">High</option>
+                                            <option value="urgent">Urgent</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label">Assign To</label>
+                                    {/* Selected members as chips */}
+                                    {editAssigneeIds.length > 0 && (
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px' }}>
+                                            {editAssigneeIds.map(id => {
+                                                const emp = employees.find(e => e.id === id)
+                                                return emp ? (
+                                                    <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px 3px 6px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 500, background: '#2563EB15', color: '#2563EB', border: '1px solid #2563EB25' }}>
+                                                        <span style={{ width: '16px', height: '16px', borderRadius: '50%', background: getAvatarColor(emp.name), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.5rem', fontWeight: 700, flexShrink: 0 }}>{emp.name[0]}</span>
+                                                        {emp.name}
+                                                        <button onClick={() => toggleEditAssignee(id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 0 0 2px', display: 'flex', lineHeight: 1 }}>
+                                                            <svg width="12" height="12" viewBox="0 0 20 20" fill="#2563EB"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                                                        </button>
+                                                    </span>
+                                                ) : null
+                                            })}
+                                        </div>
+                                    )}
+                                    {/* Search input */}
+                                    <input
+                                        className="form-input"
+                                        type="text"
+                                        placeholder="Search members..."
+                                        value={editAssigneeSearch}
+                                        onChange={e => setEditAssigneeSearch(e.target.value)}
+                                        style={{ fontSize: '0.8125rem', marginBottom: '6px' }}
+                                    />
+                                    {/* Select All / Deselect All */}
+                                    <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                                        <button type="button" onClick={() => setEditAssigneeIds(employees.map(e => e.id))}
+                                            style={{ padding: '3px 10px', fontSize: '0.6875rem', fontWeight: 500, border: '1px solid var(--color-border-light)', borderRadius: '6px', background: 'var(--color-surface)', color: 'var(--color-text-secondary)', cursor: 'pointer' }}>
+                                            Select All
+                                        </button>
+                                        {editAssigneeIds.length > 0 && (
+                                            <button type="button" onClick={() => setEditAssigneeIds([])}
+                                                style={{ padding: '3px 10px', fontSize: '0.6875rem', fontWeight: 500, border: '1px solid var(--color-border-light)', borderRadius: '6px', background: 'var(--color-surface)', color: 'var(--color-text-tertiary)', cursor: 'pointer' }}>
+                                                Deselect All
+                                            </button>
+                                        )}
+                                    </div>
+                                    {/* Member list */}
+                                    <div style={{ maxHeight: '180px', overflow: 'auto', border: '1px solid var(--color-border-light)', borderRadius: '8px', background: 'var(--color-surface)' }}>
+                                        {employees
+                                            .filter(emp => !editAssigneeSearch || emp.name.toLowerCase().includes(editAssigneeSearch.toLowerCase()))
+                                            .map(emp => {
+                                                const isSelected = editAssigneeIds.includes(emp.id)
+                                                return (
+                                                    <div key={emp.id}
+                                                        onClick={() => toggleEditAssignee(emp.id)}
+                                                        style={{
+                                                            display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px',
+                                                            cursor: 'pointer', transition: 'background 0.15s',
+                                                            background: isSelected ? 'rgba(37,99,235,0.06)' : 'transparent',
+                                                            borderBottom: '1px solid var(--color-border-light)',
+                                                        }}
+                                                        onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = 'rgba(0,0,0,0.02)' }}
+                                                        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = isSelected ? 'rgba(37,99,235,0.06)' : 'transparent' }}
+                                                    >
+                                                        <div style={{
+                                                            width: '16px', height: '16px', borderRadius: '4px', border: isSelected ? '2px solid #2563EB' : '2px solid var(--color-border-light)',
+                                                            background: isSelected ? '#2563EB' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s',
+                                                        }}>
+                                                            {isSelected && <svg width="10" height="10" viewBox="0 0 20 20" fill="#fff"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>}
+                                                        </div>
+                                                        <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: getAvatarColor(emp.name), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.5625rem', fontWeight: 600, flexShrink: 0 }}>
+                                                            {emp.name[0]}
+                                                        </div>
+                                                        <span style={{ fontSize: '0.8125rem', fontWeight: isSelected ? 600 : 400, color: isSelected ? '#2563EB' : 'var(--color-text-primary)' }}>{emp.name}</span>
+                                                    </div>
+                                                )
+                                            })}
+                                        {employees.filter(emp => !editAssigneeSearch || emp.name.toLowerCase().includes(editAssigneeSearch.toLowerCase())).length === 0 && (
+                                            <div style={{ padding: '16px', textAlign: 'center', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>No members found</div>
+                                        )}
+                                    </div>
+                                    {editAssigneeIds.length > 0 && (
+                                        <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginTop: '4px' }}>
+                                            {editAssigneeIds.length} member(s) selected
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="modal-footer">
+                                <button className="btn btn-secondary btn-sm" onClick={() => setEditTaskModal(false)}>Cancel</button>
+                                <button className="btn btn-primary btn-sm" onClick={handleSaveEditTask} disabled={editSaving || !editTaskForm.title.trim()}>
+                                    {editSaving ? 'Saving...' : 'Save Changes'}
+                                </button>
                             </div>
                         </motion.div>
                     </motion.div>
@@ -854,6 +1182,17 @@ export default function TasksPage() {
                                                             if (i === descRows.length - 1) handleAddDescRow()
                                                         }
                                                     }}
+                                                />
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    className="form-input"
+                                                    placeholder="pts"
+                                                    title="Points for this item"
+                                                    value={row.points}
+                                                    onChange={e => handleDescPointsChange(row.id, e.target.value)}
+                                                    style={{ width: '60px', flexShrink: 0, textAlign: 'center' }}
+                                                    disabled={saving}
                                                 />
                                                 {descRows.length > 1 && (
                                                     <button onClick={() => handleRemoveDescRow(row.id)} className="btn btn-ghost btn-icon" style={{ color: 'var(--color-text-tertiary)', flexShrink: 0, padding: '6px' }}>
