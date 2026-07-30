@@ -24,11 +24,14 @@ interface WorkEntryModalProps {
         payment_gateway: string | null
         transaction_id: string | null
         business_name: string | null
+        advance_verified?: boolean
+        verified_at?: string | null
+        verifier?: { id: string; name: string } | null
         employee: { id: string } | null
     } | null
     date: string
     employees: { id: string; name: string; employee_id: string }[]
-    currentUser: { employee_id: string; name: string; is_super: boolean } | null
+    currentUser: { employee_id: string; name: string; is_super: boolean; role: string } | null
     onClose: () => void
     onSave: () => void
 }
@@ -63,6 +66,37 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
     const toast = useToast()
+
+    // Advance payment verification — Admin/Super Admin/Manager only (Manager isn't
+    // included in the page's own `isAdmin`, so this is checked separately here).
+    const canVerifyAdvance = !!currentUser && (currentUser.is_super || ['Owner', 'Super Admin', 'Admin', 'Manager'].includes(currentUser.role))
+    const [advanceVerified, setAdvanceVerified] = useState(entry?.advance_verified || false)
+    const [verifiedInfo, setVerifiedInfo] = useState<{ name: string; at: string | null }>(
+        entry?.advance_verified ? { name: entry.verifier?.name || '', at: entry.verified_at || null } : { name: '', at: null }
+    )
+    const [showVerifyConfirm, setShowVerifyConfirm] = useState(false)
+    const [verifying, setVerifying] = useState(false)
+
+    const handleVerifyAdvance = async () => {
+        if (!entry) return
+        setVerifying(true)
+        try {
+            const res = await fetch(`/api/work-log/${entry.id}/verify-advance`, { method: 'POST' })
+            const data = await res.json()
+            if (!res.ok) {
+                toast.error(data.error || 'Failed to verify advance payment')
+                return
+            }
+            setAdvanceVerified(true)
+            setVerifiedInfo({ name: currentUser?.name || 'You', at: data.verified_at || new Date().toISOString() })
+            setShowVerifyConfirm(false)
+            toast.success('Advance payment verified')
+        } catch {
+            toast.error('Failed to verify advance payment')
+        } finally {
+            setVerifying(false)
+        }
+    }
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
         setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
@@ -262,6 +296,56 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
                         <div className="input-group" style={{ marginBottom: '16px' }}>
                             <label className="input-label">Transaction ID</label>
                             <input className="input" name="transaction_id" type="text" value={form.transaction_id} onChange={handleChange} placeholder="e.g. 8N7A2K9XYZ" />
+                        </div>
+                    )}
+
+                    {/* Advance Payment Verification — editing an existing entry only */}
+                    {isEdit && (
+                        <div style={{ border: '1px solid var(--color-border-light)', borderRadius: '10px', padding: '14px', marginBottom: '16px', background: 'var(--color-surface)' }}>
+                            <div style={{ fontSize: '0.8125rem', fontWeight: 600, marginBottom: '10px' }}>Advance Payment</div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                                <div>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>Advance Amount</div>
+                                    <div style={{ fontSize: '1.125rem', fontWeight: 700 }}>৳{(parseFloat(form.advance) || 0).toLocaleString()}</div>
+                                </div>
+                                {advanceVerified ? (
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '8px', fontSize: '0.8125rem', fontWeight: 600, color: '#16A34A', background: 'rgba(22,163,74,0.1)' }}>
+                                        ✅ Verified
+                                    </span>
+                                ) : (
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '8px', fontSize: '0.8125rem', fontWeight: 600, color: '#DC2626', background: 'rgba(220,38,38,0.1)' }}>
+                                        ❌ Not Verified
+                                    </span>
+                                )}
+                            </div>
+                            {advanceVerified && verifiedInfo.name && (
+                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginTop: '6px' }}>
+                                    Verified by {verifiedInfo.name}{verifiedInfo.at && ` on ${new Date(verifiedInfo.at).toLocaleString()}`}
+                                </div>
+                            )}
+                            {canVerifyAdvance && !advanceVerified && (parseFloat(form.advance) || 0) > 0 && (
+                                <div style={{ marginTop: '12px' }}>
+                                    {!showVerifyConfirm ? (
+                                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowVerifyConfirm(true)}>
+                                            Verify Advance
+                                        </button>
+                                    ) : (
+                                        <div style={{ padding: '12px', background: 'rgba(37,99,235,0.05)', border: '1px solid rgba(37,99,235,0.15)', borderRadius: '8px' }}>
+                                            <div style={{ fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>Verify this advance payment?</div>
+                                            <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginBottom: '10px' }}>
+                                                Amount: ৳{(parseFloat(form.advance) || 0).toLocaleString()}
+                                                {form.transaction_id && <><br />Transaction ID: {form.transaction_id}</>}
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowVerifyConfirm(false)} disabled={verifying}>Cancel</button>
+                                                <button type="button" className="btn btn-primary btn-sm" onClick={handleVerifyAdvance} disabled={verifying}>
+                                                    {verifying ? 'Verifying...' : 'Verify'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     )}
 

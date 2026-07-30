@@ -19,6 +19,7 @@ export async function GET(request: Request) {
     const orderType = searchParams.get('order_type')
     const source = searchParams.get('source')
     const deliveryStatus = searchParams.get('delivery_status')
+    const advanceStatus = searchParams.get('advance_status')
 
     let query = supabase
         .from('work_entries')
@@ -26,7 +27,8 @@ export async function GET(request: Request) {
             *,
             employee:employees!employee_id(id, name, employee_id),
             manager_checked:employees!management_check(id, name),
-            authority_checked:employees!authority_check(id, name)
+            authority_checked:employees!authority_check(id, name),
+            verifier:employees!verified_by(id, name)
         `)
         .order('sl', { ascending: true })
 
@@ -54,6 +56,15 @@ export async function GET(request: Request) {
     if (deliveryStatus && deliveryStatus !== 'all') {
         query = query.eq('delivery_status', deliveryStatus)
     }
+    if (advanceStatus === 'with_advance') {
+        query = query.gt('advance', 0)
+    } else if (advanceStatus === 'verified') {
+        query = query.gt('advance', 0).eq('advance_verified', true)
+    } else if (advanceStatus === 'pending_verification') {
+        query = query.gt('advance', 0).eq('advance_verified', false)
+    } else if (advanceStatus === 'no_advance') {
+        query = query.or('advance.is.null,advance.eq.0')
+    }
 
     const { data, error } = await query
 
@@ -67,6 +78,12 @@ export async function GET(request: Request) {
     // Total = base amount + suggested (the actual order total, not just the base).
     const totalAmount = entries.reduce((s, e) => s + (Number(e.amount) || 0) + (Number(e.suggested_amount) || 0), 0)
     const totalAdvance = entries.reduce((s, e) => s + (Number(e.advance) || 0), 0)
+    const advanceOrders = entries.filter(e => Number(e.advance) > 0)
+    const verifiedAdvanceAmount = advanceOrders.filter(e => e.advance_verified).reduce((s, e) => s + (Number(e.advance) || 0), 0)
+    const pendingAdvanceOrders = advanceOrders.filter(e => !e.advance_verified)
+    const pendingAdvanceAmount = pendingAdvanceOrders.reduce((s, e) => s + (Number(e.advance) || 0), 0)
+    const pendingAdvanceCount = pendingAdvanceOrders.length
+    const advanceOrderCount = advanceOrders.length
     const sources = entries.reduce((acc: Record<string, number>, e) => {
         const src = e.source || 'other'
         acc[src] = (acc[src] || 0) + 1
@@ -85,7 +102,10 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
         entries,
-        stats: { totalOrders, totalAmount, totalAdvance, sources, orderTypes, statusBreakdown },
+        stats: {
+            totalOrders, totalAmount, totalAdvance, sources, orderTypes, statusBreakdown,
+            verifiedAdvanceAmount, pendingAdvanceAmount, pendingAdvanceCount, advanceOrderCount,
+        },
     })
 }
 
