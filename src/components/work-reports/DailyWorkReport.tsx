@@ -73,8 +73,12 @@ export default function DailyWorkReport() {
     const [editingReport, setEditingReport] = useState<WorkReportEntry | null>(null)
     const [form, setForm] = useState(emptyReportForm)
     const [saving, setSaving] = useState(false)
-    const [uploading, setUploading] = useState(false)
     const [viewingReport, setViewingReport] = useState<WorkReportEntry | null>(null)
+
+    // Work Description on the Create form: numbered rows, same pattern as the Task
+    // creation modal's Description section. form.description stays a single string
+    // (joined "1. ...\n2. ...") so the rest of the save/edit flow is untouched.
+    const [descRows, setDescRows] = useState<{ id: string; val: string }[]>([{ id: 'desc-init', val: '' }])
 
     const range = dateRangeMode === 'today' ? { start: refDate, end: refDate }
         : dateRangeMode === 'week' ? getWeekRange(new Date(`${refDate}T00:00:00`))
@@ -133,7 +137,34 @@ export default function DailyWorkReport() {
     const openCreateModal = () => {
         setEditingReport(null)
         setForm({ ...emptyReportForm, date: getLocalDateString() })
+        setDescRows([{ id: Math.random().toString(), val: '' }])
         setShowModal(true)
+    }
+
+    const syncDescription = (rows: { id: string; val: string }[]) => {
+        const joined = rows.filter(r => r.val.trim()).map((r, i) => `${i + 1}. ${r.val.trim()}`).join('\n')
+        setForm(prev => ({ ...prev, description: joined }))
+    }
+
+    const handleDescRowChange = (id: string, val: string) => {
+        setDescRows(prev => {
+            const next = prev.map(r => r.id === id ? { ...r, val } : r)
+            syncDescription(next)
+            return next
+        })
+    }
+
+    const handleAddDescRow = () => {
+        setDescRows(prev => [...prev, { id: Math.random().toString(), val: '' }])
+    }
+
+    const handleRemoveDescRow = (id: string) => {
+        setDescRows(prev => {
+            const next = prev.filter(r => r.id !== id)
+            const finalRows = next.length === 0 ? [{ id: Math.random().toString(), val: '' }] : next
+            syncDescription(finalRows)
+            return finalRows
+        })
     }
 
     const canEdit = (report: WorkReportEntry) => isAdmin || report.date === getLocalDateString()
@@ -150,35 +181,13 @@ export default function DailyWorkReport() {
             attachment_url: report.attachment_url || '',
             notes: report.notes || '',
         })
+        // Parse the stored "1. ...\n2. ..." description back into rows for the editor.
+        // report.id (already a unique UUID) seeds the row keys instead of Math.random(),
+        // so this stays a pure function of its argument.
+        const lines = (report.description || '').split('\n').map(l => l.replace(/^\d+\.\s*/, '')).filter(l => l.trim())
+        setDescRows(lines.length > 0 ? lines.map((val, i) => ({ id: `${report.id}-${i}`, val })) : [{ id: report.id, val: '' }])
         setViewingReport(null)
         setShowModal(true)
-    }
-
-    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0]
-        if (!file) return
-        const MAX_BYTES = 50 * 1024 * 1024
-        if (file.size > MAX_BYTES) { toast.error('File is too large (max 50MB)'); return }
-        setUploading(true)
-        try {
-            const res = await fetch('/api/upload/r2', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filename: file.name, contentType: file.type, size: file.size }),
-            })
-            const data = await res.json()
-            if (!res.ok || !data.presignedUrl || !data.publicUrl) {
-                toast.error(data.error || 'Upload failed')
-                return
-            }
-            const putRes = await fetch(data.presignedUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })
-            if (putRes.ok) setForm(prev => ({ ...prev, attachment_url: data.publicUrl }))
-            else toast.error('Upload failed')
-        } catch {
-            toast.error('Upload failed')
-        } finally {
-            setUploading(false)
-        }
     }
 
     const handleSave = async () => {
@@ -396,67 +405,56 @@ export default function DailyWorkReport() {
                 </motion.div>
             ) : !error && (
                 <>
-                    <motion.div className="table-container" variants={item} initial="hidden" animate="show">
-                        <table className="table">
-                            <thead>
-                                <tr>
-                                    {isAdmin && <th>Employee</th>}
-                                    {isAdmin && <th>Department</th>}
-                                    <th>Date</th>
-                                    <th>Project</th>
-                                    <th>Hours</th>
-                                    <th>Progress</th>
-                                    <th>Status</th>
-                                    <th>Submitted At</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {entries.map(r => {
-                                    const sc = statusConfig[r.status] || statusConfig.pending
-                                    return (
-                                        <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => setViewingReport(r)}>
+                    <motion.div variants={item} initial="hidden" animate="show" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '12px' }}>
+                        {entries.map(r => {
+                            const sc = statusConfig[r.status] || statusConfig.pending
+                            return (
+                                <motion.div key={r.id} className="card"
+                                    style={{ cursor: 'pointer', position: 'relative', overflow: 'hidden' }}
+                                    whileHover={{ y: -2, boxShadow: '0 8px 30px rgba(0,0,0,0.08)' }}
+                                    onClick={() => setViewingReport(r)}>
+                                    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '4px', background: sc.color }} />
+                                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
+                                                <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>{r.project}</h3>
+                                                {/* <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: sc.bg }}>{sc.label}</span> */}
+                                            </div>
                                             {isAdmin && (
-                                                <td>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                        <div className="avatar avatar-sm" style={{ background: getAvatarColor(r.employee.name), overflow: 'hidden' }}>
-                                                            {r.employee.avatar_url ? (
-                                                                <img src={r.employee.avatar_url} alt="" onError={(ev) => { ev.currentTarget.style.display = 'none' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                            ) : (r.employee.name || '?')[0]?.toUpperCase()}
-                                                        </div>
-                                                        <div>
-                                                            <div style={{ fontWeight: 500 }}>{r.employee.name}</div>
-                                                            {r.employee.employee_id && <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>{r.employee.employee_id}</div>}
-                                                        </div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                                    <div className="avatar avatar-sm" style={{ background: getAvatarColor(r.employee.name), overflow: 'hidden' }}>
+                                                        {r.employee.avatar_url ? (
+                                                            <img src={r.employee.avatar_url} alt="" onError={(ev) => { ev.currentTarget.style.display = 'none' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                        ) : (r.employee.name || '?')[0]?.toUpperCase()}
                                                     </div>
-                                                </td>
+                                                    <div style={{ fontSize: '0.8125rem' }}>
+                                                        <span style={{ fontWeight: 500 }}>{r.employee.name}</span>
+                                                        {r.employee.department && <span style={{ color: 'var(--color-text-tertiary)' }}> · {r.employee.department}</span>}
+                                                    </div>
+                                                </div>
                                             )}
-                                            {isAdmin && <td style={{ color: 'var(--color-text-secondary)' }}>{r.employee.department || '-'}</td>}
-                                            <td>{new Date(`${r.date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
-                                            <td style={{ fontWeight: 500 }}>{r.project}</td>
-                                            <td style={{ fontFamily: 'monospace', fontSize: '0.8125rem' }}>{r.hours}h</td>
-                                            <td style={{ fontSize: '0.8125rem' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                                    <div style={{ width: '48px', height: '6px', borderRadius: '3px', background: 'rgba(118,118,128,0.15)', overflow: 'hidden' }}>
+                                            {r.description && (
+                                                <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '0 0 8px', lineHeight: 1.5, whiteSpace: 'pre-line' }}>{r.description}</p>
+                                            )}
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.75rem', color: 'var(--color-text-tertiary)', flexWrap: 'wrap' }}>
+                                                {/* <span>{new Date(`${r.date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                                                <span>{r.hours}h</span>
+                                                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                    <div style={{ width: '40px', height: '5px', borderRadius: '3px', background: 'rgba(118,118,128,0.15)', overflow: 'hidden' }}>
                                                         <div style={{ width: `${r.progress}%`, height: '100%', background: '#2563EB' }} />
                                                     </div>
                                                     {r.progress}%
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <span style={{ padding: '3px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: sc.bg }}>{sc.label}</span>
-                                            </td>
-                                            <td style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{formatSubmittedAt(r.created_at)}</td>
-                                            <td onClick={e => e.stopPropagation()}>
-                                                {canEdit(r) && (
-                                                    <button className="btn btn-ghost btn-sm" onClick={() => openEditModal(r)} style={{ fontSize: '0.6875rem', padding: '3px 8px' }}>Edit</button>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    )
-                                })}
-                            </tbody>
-                        </table>
+                                                </span> */}
+                                                <span>{formatSubmittedAt(r.created_at)}</span>
+                                            </div>
+                                        </div>
+                                        {canEdit(r) && (
+                                            <button onClick={e => { e.stopPropagation(); openEditModal(r) }} className="btn btn-ghost btn-sm" style={{ fontSize: '0.6875rem', padding: '3px 8px', flexShrink: 0 }}>Edit</button>
+                                        )}
+                                    </div>
+                                </motion.div>
+                            )
+                        })}
                     </motion.div>
 
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginTop: '20px' }}>
@@ -493,14 +491,14 @@ export default function DailyWorkReport() {
                                 )}
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '0.8125rem' }}>
                                     <div><span style={{ color: 'var(--color-text-tertiary)' }}>Date:</span> {viewingReport.date}</div>
-                                    <div><span style={{ color: 'var(--color-text-tertiary)' }}>Hours:</span> {viewingReport.hours}h</div>
-                                    <div><span style={{ color: 'var(--color-text-tertiary)' }}>Progress:</span> {viewingReport.progress}%</div>
-                                    <div>
+                                    {/* <div><span style={{ color: 'var(--color-text-tertiary)' }}>Hours:</span> {viewingReport.hours}h</div> */}
+                                    {/* <div><span style={{ color: 'var(--color-text-tertiary)' }}>Progress:</span> {viewingReport.progress}%</div> */}
+                                    {/* <div>
                                         <span style={{ color: 'var(--color-text-tertiary)' }}>Status:</span>{' '}
                                         <span style={{ color: (statusConfig[viewingReport.status] || statusConfig.pending).color, fontWeight: 600 }}>
                                             {(statusConfig[viewingReport.status] || statusConfig.pending).label}
                                         </span>
-                                    </div>
+                                    </div> */}
                                 </div>
                                 {viewingReport.description && (
                                     <div>
@@ -549,54 +547,62 @@ export default function DailyWorkReport() {
                                 <button className="btn btn-ghost btn-sm" onClick={() => setShowModal(false)}>✕</button>
                             </div>
                             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                                    <div className="input-group">
-                                        <label className="input-label">Date</label>
-                                        <input type="date" className="input" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} disabled={!isAdmin && !!editingReport} />
-                                    </div>
-                                    <div className="input-group">
-                                        <label className="input-label">Hours Worked</label>
-                                        <input type="number" step="0.5" min="0" className="input" value={form.hours} onChange={e => setForm({ ...form, hours: e.target.value })} placeholder="e.g. 6.5" />
-                                    </div>
+                                <div className="input-group">
+                                    <label className="input-label">Date</label>
+                                    <input type="date" className="input" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} disabled={!isAdmin && !!editingReport} />
                                 </div>
                                 <div className="input-group">
-                                    <label className="input-label">Task / Project</label>
+                                    <label className="input-label">Task / Project Name</label>
                                     <input type="text" className="input" value={form.project} onChange={e => setForm({ ...form, project: e.target.value })} placeholder="e.g. Website Redesign" />
                                 </div>
-                                <div className="input-group">
-                                    <label className="input-label">Work Description</label>
-                                    <textarea className="input" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="What did you work on?" rows={3} style={{ resize: 'vertical' }} />
-                                </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                                    <div className="input-group">
-                                        <label className="input-label">Progress %</label>
-                                        <input type="number" min="0" max="100" className="input" value={form.progress} onChange={e => setForm({ ...form, progress: e.target.value })} />
-                                    </div>
-                                    <div className="input-group">
-                                        <label className="input-label">Status</label>
-                                        <select className="input" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
-                                            <option value="pending">Pending</option>
-                                            <option value="in_progress">In Progress</option>
-                                            <option value="completed">Completed</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div className="input-group">
-                                    <label className="input-label">Attachment (optional)</label>
-                                    <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime" onChange={handleFileChange} disabled={uploading} />
-                                    {uploading && <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginTop: '4px' }}>Uploading...</div>}
-                                    {form.attachment_url && !uploading && (
-                                        <div style={{ fontSize: '0.75rem', color: '#16A34A', marginTop: '4px' }}>Attached ✓</div>
-                                    )}
-                                </div>
-                                <div className="input-group">
-                                    <label className="input-label">Notes</label>
-                                    <input type="text" className="input" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Anything else to add..." />
+                                <div className="input-group" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    <label className="input-label" style={{ marginBottom: 0 }}>Work Description</label>
+                                    <AnimatePresence initial={false}>
+                                        {descRows.map((row, i) => (
+                                            <motion.div
+                                                key={row.id}
+                                                initial={{ opacity: 0, height: 0, y: -10 }}
+                                                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                                                exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
+                                                transition={{ duration: 0.2 }}
+                                                style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                            >
+                                                <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6875rem', fontWeight: 600, flexShrink: 0 }}>
+                                                    {i + 1}
+                                                </div>
+                                                <input
+                                                    type="text"
+                                                    className="input"
+                                                    placeholder="What did you work on?"
+                                                    value={row.val}
+                                                    onChange={e => handleDescRowChange(row.id, e.target.value)}
+                                                    style={{ flex: 1 }}
+                                                    disabled={saving}
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter' && row.val.trim()) {
+                                                            e.preventDefault()
+                                                            if (i === descRows.length - 1) handleAddDescRow()
+                                                        }
+                                                    }}
+                                                />
+                                                {descRows.length > 1 && (
+                                                    <button onClick={() => handleRemoveDescRow(row.id)} className="btn btn-ghost btn-icon" style={{ color: 'var(--color-text-tertiary)', flexShrink: 0, padding: '6px' }}>
+                                                        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                                                    </button>
+                                                )}
+                                                {i === descRows.length - 1 && (
+                                                    <button onClick={handleAddDescRow} className="btn btn-ghost btn-icon" style={{ color: 'var(--color-primary)', background: 'var(--color-primary-light)', flexShrink: 0, padding: '6px' }}>
+                                                        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                                                    </button>
+                                                )}
+                                            </motion.div>
+                                        ))}
+                                    </AnimatePresence>
                                 </div>
                             </div>
                             <div className="modal-footer">
                                 <button className="btn btn-secondary btn-sm" onClick={() => setShowModal(false)}>Cancel</button>
-                                <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving || uploading}>
+                                <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
                                     {saving ? 'Saving...' : editingReport ? 'Save Changes' : 'Submit Report'}
                                 </button>
                             </div>
