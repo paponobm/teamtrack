@@ -73,7 +73,31 @@ export async function GET(request: Request) {
 
     const total = rows.length
     const offset = (page - 1) * limit
-    const entries = rows.slice(offset, offset + limit).map(r => ({
+    const pageRows = rows.slice(offset, offset + limit)
+
+    // Attach the admin's Work Comparison evaluation (if any) so the submitter can see
+    // that their report was reviewed, and what points/feedback it got.
+    const reportIds = pageRows.map(r => r.id)
+    const evaluationByReport: Record<string, { points: number; note: string | null; evaluated_at: string }> = {}
+    if (reportIds.length > 0) {
+        const { data: evalItems } = await supabase
+            .from('work_evaluation_items')
+            .select('work_report_id, points, created_at, evaluation:work_evaluations(note, evaluated_at)')
+            .in('work_report_id', reportIds)
+            .order('created_at', { ascending: false })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ; (evalItems || []).forEach((it: any) => {
+            if (!evaluationByReport[it.work_report_id]) {
+                evaluationByReport[it.work_report_id] = {
+                    points: it.points,
+                    note: it.evaluation?.note || null,
+                    evaluated_at: it.evaluation?.evaluated_at || it.created_at,
+                }
+            }
+        })
+    }
+
+    const entries = pageRows.map(r => ({
         id: r.id,
         date: r.date,
         project: r.project,
@@ -91,6 +115,7 @@ export async function GET(request: Request) {
             avatar_url: r.employee?.avatar_url,
             department: r.employee?.department?.name || null,
         },
+        evaluation: evaluationByReport[r.id] || null,
     }))
 
     // Dashboard cards reflect fixed periods (today/this week/this month), independent of

@@ -6,6 +6,7 @@ import { useToast } from '@/lib/ToastContext'
 import RequireFeature from '@/components/common/RequireFeature'
 import { usePermissions } from '@/lib/PermissionsContext'
 import DailyWorkReport from '@/components/work-reports/DailyWorkReport'
+import WorkComparison from '@/components/work-comparison/WorkComparison'
 
 interface TaskAssignment {
     id: string
@@ -122,7 +123,7 @@ const emptyForm = { titles: [{ id: 'init', val: '' }], description: '', due_date
 
 export default function TasksPage() {
     const { data: perms } = usePermissions()
-    const [activeMainTab, setActiveMainTab] = useState<'tasks' | 'reports'>('tasks')
+    const [activeMainTab, setActiveMainTab] = useState<'tasks' | 'reports' | 'comparison'>('tasks')
     const [tasks, setTasks] = useState<Task[]>([])
     const [loading, setLoading] = useState(true)
     const [isAdmin, setIsAdmin] = useState(false)
@@ -528,11 +529,22 @@ export default function TasksPage() {
                     >
                         Daily Work Report
                     </button>
+                    {isAdmin && (
+                        <button
+                            className={`tab-btn ${activeMainTab === 'comparison' ? 'active' : ''}`}
+                            onClick={() => setActiveMainTab('comparison')}
+                            style={{ padding: '8px 16px', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 600, color: activeMainTab === 'comparison' ? '#fff' : 'var(--color-text-secondary)', background: activeMainTab === 'comparison' ? '#2563EB' : 'transparent', border: 'none', cursor: 'pointer', transition: 'all 0.2s' }}
+                        >
+                            Work Comparison
+                        </button>
+                    )}
                 </div>
             </motion.div>
 
             {activeMainTab === 'reports' ? (
                 <DailyWorkReport />
+            ) : activeMainTab === 'comparison' ? (
+                <WorkComparison />
             ) : (
             <>
             {/* Stats */}

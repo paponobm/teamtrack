@@ -21,6 +21,7 @@ interface WorkReportEntry {
     notes: string | null
     created_at: string
     employee: { id: string; name: string; employee_id: string; avatar_url: string | null; department: string | null }
+    evaluation: { points: number; note: string | null; evaluated_at: string } | null
 }
 
 const item = { hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } }
@@ -167,7 +168,9 @@ export default function DailyWorkReport() {
         })
     }
 
-    const canEdit = (report: WorkReportEntry) => isAdmin || report.date === getLocalDateString()
+    // Once an admin has accepted/scored a report via Work Comparison, it's locked from
+    // further edits (by anyone) so the evaluation stays tied to what was actually reviewed.
+    const canEdit = (report: WorkReportEntry) => !report.evaluation && (isAdmin || report.date === getLocalDateString())
 
     const openEditModal = (report: WorkReportEntry) => {
         setEditingReport(report)
@@ -419,6 +422,11 @@ export default function DailyWorkReport() {
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
                                                 <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>{r.project}</h3>
                                                 {/* <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: sc.bg }}>{sc.label}</span> */}
+                                                {r.evaluation && (
+                                                    <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: '#16A34A', background: 'rgba(22,163,74,0.08)' }}>
+                                                        ✓ Accepted
+                                                    </span>
+                                                )}
                                             </div>
                                             {isAdmin && (
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
@@ -435,6 +443,16 @@ export default function DailyWorkReport() {
                                             )}
                                             {r.description && (
                                                 <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '0 0 8px', lineHeight: 1.5, whiteSpace: 'pre-line' }}>{r.description}</p>
+                                            )}
+                                            {r.evaluation && (
+                                                <div style={{ padding: '8px 10px', background: 'rgba(22,163,74,0.06)', border: '1px solid rgba(22,163,74,0.15)', borderRadius: '8px', marginBottom: '8px' }}>
+                                                    <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#16A34A', marginBottom: r.evaluation.note ? '4px' : 0 }}>
+                                                        ⭐ {r.evaluation.points} pts awarded
+                                                    </div>
+                                                    {r.evaluation.note && (
+                                                        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>{r.evaluation.note}</div>
+                                                    )}
+                                                </div>
                                             )}
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.75rem', color: 'var(--color-text-tertiary)', flexWrap: 'wrap' }}>
                                                 {/* <span>{new Date(`${r.date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
@@ -504,6 +522,16 @@ export default function DailyWorkReport() {
                                     <div>
                                         <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: '4px' }}>Work Description</div>
                                         <p style={{ fontSize: '0.875rem', whiteSpace: 'pre-line' }}>{viewingReport.description}</p>
+                                    </div>
+                                )}
+                                {viewingReport.evaluation && (
+                                    <div style={{ padding: '10px 12px', background: 'rgba(22,163,74,0.06)', border: '1px solid rgba(22,163,74,0.15)', borderRadius: '8px' }}>
+                                        <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#16A34A', textTransform: 'uppercase', marginBottom: '4px' }}>
+                                            ✓ Accepted — {viewingReport.evaluation.points} pts awarded
+                                        </div>
+                                        {viewingReport.evaluation.note && (
+                                            <p style={{ fontSize: '0.875rem', whiteSpace: 'pre-line', margin: 0 }}>{viewingReport.evaluation.note}</p>
+                                        )}
                                     </div>
                                 )}
                                 {viewingReport.notes && (
