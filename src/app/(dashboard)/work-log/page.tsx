@@ -514,7 +514,7 @@ export default function WorkLogPage() {
                     <div className="stat-card">
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Pending Verification</span>
                         <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{stats.pendingAdvanceAmount.toLocaleString()}</span>
-                        <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginTop: '4px' }}>Pending: {stats.pendingAdvanceCount}</div>
+                        <div style={{ fontSize: '0.6875rem', color: '#DC2626', marginTop: '4px' }}>Pending: {stats.pendingAdvanceCount}</div>
                     </div>
                     {/* <div className="stat-card">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconWallet size={14} color="var(--color-text-tertiary)" /> Advance Orders</span>
