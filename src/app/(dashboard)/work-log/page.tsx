@@ -29,6 +29,7 @@ interface WorkEntry {
     order_type: string
     delivery_status: string
     payment_gateway: string | null
+    transaction_id: string | null
     business_name: string | null
     date: string
     management_check: boolean

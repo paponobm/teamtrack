@@ -22,6 +22,7 @@ interface WorkEntryModalProps {
         order_type: string
         delivery_status: string
         payment_gateway: string | null
+        transaction_id: string | null
         business_name: string | null
         employee: { id: string } | null
     } | null
@@ -55,6 +56,7 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
         order_type: entry?.order_type || '',
         delivery_status: entry?.delivery_status || 'confirmed',
         payment_gateway: entry?.payment_gateway || '',
+        transaction_id: entry?.transaction_id || '',
         business_name: entry?.business_name || '',
     })
 
@@ -102,6 +104,7 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
                 suggested_amount: form.suggested_amount ? parseFloat(form.suggested_amount) : null,
                 advance: form.advance ? parseFloat(form.advance) : null,
                 payment_gateway: form.payment_gateway || null,
+                transaction_id: form.transaction_id || null,
                 business_name: form.business_name || null,
             }
 
@@ -136,7 +139,6 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
         >
             <motion.div
                 className="modal"
@@ -254,6 +256,14 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
                             )}
                         </div>
                     </div>
+
+                    {/* Transaction ID — only relevant once a gateway is picked */}
+                    {form.payment_gateway && (
+                        <div className="input-group" style={{ marginBottom: '16px' }}>
+                            <label className="input-label">Transaction ID</label>
+                            <input className="input" name="transaction_id" type="text" value={form.transaction_id} onChange={handleChange} placeholder="e.g. 8N7A2K9XYZ" />
+                        </div>
+                    )}
 
                     {/* Business Name + Order Type + Delivery Status */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '16px' }}>

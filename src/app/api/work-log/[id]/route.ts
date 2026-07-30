@@ -35,7 +35,7 @@ export async function PATCH(
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     // Record a field-level diff so the entry's history shows exactly what changed (#7).
-    const TRACKED_FIELDS = ['order_type', 'source', 'amount', 'suggested_amount', 'delivery_status', 'customer_name', 'customer_phone', 'product_details', 'business_name', 'quantity', 'notes', 'date', 'logistics', 'payment_gateway']
+    const TRACKED_FIELDS = ['order_type', 'source', 'amount', 'suggested_amount', 'delivery_status', 'customer_name', 'customer_phone', 'product_details', 'business_name', 'quantity', 'notes', 'date', 'logistics', 'payment_gateway', 'transaction_id']
     const changes: { field: string; from: unknown; to: unknown }[] = []
     for (const k of Object.keys(body)) {
         if (TRACKED_FIELDS.includes(k) && String(oldEntry[k] ?? '') !== String(body[k] ?? '')) {

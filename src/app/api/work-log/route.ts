@@ -101,7 +101,7 @@ export async function POST(request: Request) {
     const {
         employee_id, date, customer_phone, customer_name, invoice_no, courier_id,
         source, amount, suggested_amount, advance, note,
-        order_type, delivery_status, payment_gateway, business_name
+        order_type, delivery_status, payment_gateway, business_name, transaction_id
     } = body
 
     // Members can only create entries for themselves
@@ -151,6 +151,7 @@ export async function POST(request: Request) {
             delivery_status: delivery_status || 'confirmed',
             payment_gateway: payment_gateway || null,
             business_name: business_name || null,
+            transaction_id: transaction_id || null,
         })
         .select(`
             *,
