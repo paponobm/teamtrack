@@ -1,4 +1,4 @@
-import { requireAuth, isAuthed } from '@/lib/auth'
+import { requireAuth, isAuthed, awardPoints } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { NextResponse } from 'next/server'
 
@@ -66,10 +66,40 @@ export async function DELETE(
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
+
+    const { data: report, error: fetchErr } = await auth.supabase
+        .from('work_reports')
+        .select('employee_id, project')
+        .eq('id', id)
+        .single()
+    if (fetchErr || !report) return NextResponse.json({ error: 'Report not found' }, { status: 404 })
+
+    // If this report was already scored via Work Comparison, reverse exactly the points
+    // it was awarded — total_points and point_transactions history stay accurate instead
+    // of keeping points for a report that no longer exists. work_evaluation_items rows
+    // themselves cascade-delete with the report, so read them before deleting.
+    const { data: scoredItems } = await auth.supabase
+        .from('work_evaluation_items')
+        .select('points')
+        .eq('work_report_id', id)
+    const pointsToReverse = (scoredItems || []).reduce((sum, it) => sum + (it.points || 0), 0)
+
     const { error } = await auth.supabase.from('work_reports').delete().eq('id', id)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+    if (pointsToReverse > 0) {
+        await awardPoints(
+            auth.supabase,
+            report.employee_id,
+            -pointsToReverse,
+            'work_evaluation_reversal',
+            id,
+            `Work report deleted — reversing ${pointsToReverse} pt(s) previously awarded for "${report.project}"`,
+            auth.employee.id
+        )
+    }
+
     await logAudit(auth.employee.id, 'Deleted a daily work report', 'work_reports', id)
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, pointsReversed: pointsToReverse })
 }
