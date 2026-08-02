@@ -46,13 +46,16 @@ export async function GET(request: Request) {
     const taskIds = (assignments || []).map(a => a.task_id)
     let tasks: { id: string; title: string; task_no: string | null; description: string | null; status: string; priority: string; due_date: string | null }[] = []
     if (taskIds.length > 0) {
+        // Match on created_at (when the task was actually assigned) rather than due_date —
+        // due_date is optional and commonly left unset, which would silently exclude most
+        // tasks from every period if used as the filter.
         const { data, error } = await supabase
             .from('tasks')
             .select('id, title, task_no, description, status, priority, due_date')
             .in('id', taskIds)
-            .gte('due_date', startDate)
-            .lte('due_date', endDate)
-            .order('due_date', { ascending: true })
+            .gte('created_at', `${startDate}T00:00:00`)
+            .lte('created_at', `${endDate}T23:59:59`)
+            .order('created_at', { ascending: true })
         if (error) return NextResponse.json({ error: error.message }, { status: 500 })
         tasks = data || []
     }

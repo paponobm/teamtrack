@@ -225,8 +225,14 @@ export default function ExpensesPage() {
             const method = editingExpense ? 'PUT' : 'POST'
             const body = editingExpense ? { id: editingExpense.id, ...form, amount: Number(form.amount) } : { ...form, amount: Number(form.amount) }
             const res = await fetch('/api/expenses', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-            if (res.ok) { await fetchExpenses(); setShowModal(false) }
-        } catch { console.error('Save failed') }
+            if (res.ok) {
+                await fetchExpenses()
+                setShowModal(false)
+            } else {
+                const e = await res.json().catch(() => ({}))
+                toast.error(e.error || 'Failed to save expense')
+            }
+        } catch { toast.error('Failed to save expense') }
         finally { setSaving(false) }
     }
 
