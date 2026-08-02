@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 import StarRating from '@/components/common/StarRating'
@@ -92,23 +93,46 @@ function statusColor(value: string) {
 // pattern used by PR Management's own ModernSelect (kept local since that one isn't exported).
 function MiniSelect({ value, options, onChange }: { value: string; options: string[]; onChange: (v: string) => void }) {
     const [open, setOpen] = useState(false)
-    const ref = useRef<HTMLDivElement>(null)
+    const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null)
+    const btnRef = useRef<HTMLButtonElement>(null)
+    const menuRef = useRef<HTMLDivElement>(null)
     const color = statusColor(value)
 
+    // The table this lives in scrolls with overflow:auto, which clips any absolutely
+    // positioned dropdown to the table's box. Render the menu into a portal instead, so
+    // it escapes that clipping and floats above everything, positioned off the button's
+    // real screen coordinates.
     useEffect(() => {
-        const handleOutside = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+        const handleOutside = (e: MouseEvent) => {
+            if (btnRef.current?.contains(e.target as Node)) return
+            if (menuRef.current?.contains(e.target as Node)) return
+            setOpen(false)
+        }
+        const handleScroll = () => setOpen(false)
         document.addEventListener('mousedown', handleOutside)
-        return () => document.removeEventListener('mousedown', handleOutside)
+        window.addEventListener('scroll', handleScroll, true)
+        return () => {
+            document.removeEventListener('mousedown', handleOutside)
+            window.removeEventListener('scroll', handleScroll, true)
+        }
     }, [])
 
+    const toggleOpen = () => {
+        if (!open && btnRef.current) {
+            const rect = btnRef.current.getBoundingClientRect()
+            setMenuPos({ top: rect.bottom + 4, left: rect.left })
+        }
+        setOpen(!open)
+    }
+
     return (
-        <div ref={ref} style={{ position: 'relative', width: 'fit-content' }}>
-            <button onClick={() => setOpen(!open)} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 500, border: 'none', cursor: 'pointer', background: color.bg, color: color.text, whiteSpace: 'nowrap' }}>
+        <div style={{ position: 'relative', width: 'fit-content' }}>
+            <button ref={btnRef} onClick={toggleOpen} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 500, border: 'none', cursor: 'pointer', background: color.bg, color: color.text, whiteSpace: 'nowrap' }}>
                 {value}
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}><polyline points="6 9 12 15 18 9"></polyline></svg>
             </button>
-            {open && (
-                <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', padding: '4px', zIndex: 20, minWidth: '140px' }}>
+            {open && menuPos && createPortal(
+                <div ref={menuRef} style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', padding: '4px', zIndex: 300, minWidth: '140px' }}>
                     {options.map(opt => (
                         <button key={opt} onClick={() => { onChange(opt); setOpen(false) }}
                             style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', borderRadius: '4px', border: 'none', background: 'transparent', fontSize: '0.75rem', cursor: 'pointer', fontWeight: value === opt ? 600 : 400, color: value === opt ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}
@@ -117,7 +141,8 @@ function MiniSelect({ value, options, onChange }: { value: string; options: stri
                             {opt}
                         </button>
                     ))}
-                </div>
+                </div>,
+                document.body
             )}
         </div>
     )
