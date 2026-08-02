@@ -181,8 +181,9 @@ export async function PUT(request: Request) {
 
     if (isRatingUpdate) {
         const { data: existing } = await auth.supabase.from('influencers').select(ratingFields.join(',')).eq('id', id).single()
+        const existingRow = (existing || {}) as Record<string, number>
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const merged: any = { ...(existing || {}), ...updates }
+        const merged: any = { ...existingRow, ...updates }
         const values = ratingFields.map(f => Number(merged[f])).filter(v => !isNaN(v) && v > 0)
         updates.rating = values.length > 0 ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10 : 0
     }
