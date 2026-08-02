@@ -614,6 +614,23 @@ input[type="date"].form-input::-webkit-calendar-picker-indicator {
   margin-left: var(--sidebar-collapsed-width);
 }
 
+/* Full-screen detail views (e.g. Influencer Profile) need to fill the content area
+   without covering the fixed Sidebar/Header, so they mirror .main-content's own box
+   instead of using inset:0, and stay in sync with the sidebar collapse toggle. */
+.content-area-overlay {
+  position: fixed;
+  top: var(--header-height);
+  left: var(--sidebar-width);
+  right: 0;
+  bottom: 0;
+  z-index: 150;
+  transition: left 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.app-layout[data-sidebar-collapsed="true"] .content-area-overlay {
+  left: var(--sidebar-collapsed-width);
+}
+
 .page-header {
   display: flex;
   align-items: center;

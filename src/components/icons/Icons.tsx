@@ -303,6 +303,42 @@ export function IconFacebook({ size = defaults.size, color = defaults.color, ...
     )
 }
 
+export function IconWhatsApp({ size = defaults.size, color = defaults.color, ...props }: IconProps) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+            <path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.16-.17.2-.35.22-.64.08-.3-.15-1.26-.46-2.39-1.48-.88-.79-1.48-1.76-1.65-2.06-.17-.3-.02-.46.13-.61.13-.13.3-.35.44-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.61-.92-2.21-.24-.58-.49-.5-.67-.51-.17-.01-.37-.01-.57-.01-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.87 1.21 3.07c.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.69.62.71.23 1.36.19 1.87.12.57-.08 1.76-.72 2.01-1.41.25-.7.25-1.29.17-1.41-.07-.13-.27-.2-.57-.35z" />
+            <path d="M12.04 2.15A9.85 9.85 0 002.15 12.04c0 1.75.46 3.4 1.26 4.83L2.15 21.85l5.13-1.34a9.83 9.83 0 004.76 1.21h.01c5.44 0 9.85-4.4 9.85-9.84a9.79 9.79 0 00-2.88-6.96 9.8 9.8 0 00-6.98-2.77z" />
+        </svg>
+    )
+}
+
+export function IconInstagram({ size = defaults.size, color = defaults.color, strokeWidth = defaults.strokeWidth, ...props }: IconProps) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" {...props}>
+            <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+            <path d="M16 11.37A4 4 0 1112.63 8 4 4 0 0116 11.37z" />
+            <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+        </svg>
+    )
+}
+
+export function IconYouTube({ size = defaults.size, color = defaults.color, ...props }: IconProps) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+            <path d="M22.54 6.42a2.78 2.78 0 00-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.42a2.78 2.78 0 00-1.94 2A29 29 0 001 11.75a29 29 0 00.46 5.33A2.78 2.78 0 003.4 19c1.72.42 8.6.42 8.6.42s6.88 0 8.6-.42a2.78 2.78 0 001.94-2 29 29 0 00.46-5.25 29 29 0 00-.46-5.33z" />
+            <polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02" />
+        </svg>
+    )
+}
+
+export function IconTikTok({ size = defaults.size, color = defaults.color, ...props }: IconProps) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" {...props}>
+            <path d="M16.5 2c.3 2.42 1.9 4.03 4.5 4.2v3.06a7.6 7.6 0 01-4.47-1.42v6.4a6.24 6.24 0 11-5.36-6.18v3.16a3.1 3.1 0 102.19 2.96V2h3.14z" />
+        </svg>
+    )
+}
+
 // ---- People ----
 export function IconUsers({ size = defaults.size, color = defaults.color, strokeWidth = defaults.strokeWidth, ...props }: IconProps) {
     return (

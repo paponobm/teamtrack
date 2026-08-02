@@ -86,6 +86,7 @@ export async function POST(request: Request) {
                     .insert([{
                         name: payload.customer_name,
                         phone: payload.customer_phone || null,
+                        address: payload.address || null,
                     }])
                     .select('id')
                     .single()
