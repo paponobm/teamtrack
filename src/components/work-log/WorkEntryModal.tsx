@@ -294,7 +294,7 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
                     {/* Transaction ID — only relevant once a gateway is picked */}
                     {form.payment_gateway && (
                         <div className="input-group" style={{ marginBottom: '16px' }}>
-                            <label className="input-label">Transaction ID</label>
+                            <label className="input-label">Transaction ID / last 4 digits</label>
                             <input className="input" name="transaction_id" type="text" value={form.transaction_id} onChange={handleChange} placeholder="e.g. 8N7A2K9XYZ" />
                         </div>
                     )}
