@@ -128,6 +128,9 @@ export default function ExpensesPage() {
     // Bulk-approve pending expenses (Super Admin only)
     const [selectedIds, setSelectedIds] = useState<string[]>([])
     const [bulkApproving, setBulkApproving] = useState(false)
+    // Admin filter (Super Admin only) — who submitted the expenses being viewed
+    const [filterSubmitter, setFilterSubmitter] = useState('')
+    const [employees, setEmployees] = useState<{ id: string; name: string; employee_id: string; role?: { level: number } }[]>([])
 
     const getWeekRange = (d: Date) => {
         const day = d.getDay()
@@ -159,6 +162,7 @@ export default function ExpensesPage() {
                 params.set('start_date', customStart)
                 params.set('end_date', customEnd)
             }
+            if (filterSubmitter) params.set('submitted_by', filterSubmitter)
             const url = `/api/expenses?${params}`
             const res = await fetch(url)
             if (res.ok) {
@@ -175,7 +179,7 @@ export default function ExpensesPage() {
             }
         } catch { console.error('Failed to fetch') }
         finally { setLoading(false) }
-    }, [dateRange, refDate, customStart, customEnd])
+    }, [dateRange, refDate, customStart, customEnd, filterSubmitter])
 
     useEffect(() => {
         fetchExpenses()
@@ -205,6 +209,20 @@ export default function ExpensesPage() {
         setIsAdmin(perms.is_admin || perms.is_super)
         setIsSuperAdmin(perms.is_super)
     }, [perms])
+
+    // Options for the Super-Admin-only "filter by submitter" dropdown.
+    useEffect(() => {
+        if (!isSuperAdmin) return
+        const fetchEmployees = async () => {
+            try {
+                const res = await fetch('/api/members?status=active')
+                const data = await res.json()
+                // "Admin filter" — only Owner/Super Admin/Admin (role level <= 3), not Manager/Member.
+                if (Array.isArray(data)) setEmployees(data.filter((m: { role?: { level: number } }) => (m.role?.level ?? 99) <= 3))
+            } catch { /* ignore */ }
+        }
+        fetchEmployees()
+    }, [isSuperAdmin])
 
     const openAddModal = () => { setEditingExpense(null); setForm(emptyForm); setShowExtraFields(false); setShowModal(true) }
     const openEditModal = (e: Expense) => {
@@ -492,6 +510,13 @@ export default function ExpensesPage() {
                         <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8125rem' }}>to</span>
                         <div style={{ width: '150px' }}><ModernDatePicker value={customEnd} onChange={setCustomEnd} placeholder="End Date" /></div>
                     </div>
+                )}
+                {isSuperAdmin && (
+                    <select className="form-input" value={filterSubmitter} onChange={e => setFilterSubmitter(e.target.value)}
+                        style={{ width: '180px', height: '36px', fontSize: '0.8125rem' }}>
+                        <option value="">All Admins</option>
+                        {employees.map(emp => (<option key={emp.id} value={emp.id}>{emp.name}</option>))}
+                    </select>
                 )}
             </motion.div>
 

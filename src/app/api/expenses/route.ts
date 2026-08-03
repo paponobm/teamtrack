@@ -1,21 +1,23 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { NextResponse } from 'next/server'
 
-// GET /api/expenses (admin sees all, members see their own)
+// GET /api/expenses (super admin sees everyone's, admins/members see only their own)
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
 
     const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
-    // Admins (level <= 3) manage company finance and see all expenses (consistent with the
-    // income API and the finance dashboard). Members see only their own.
-    const isAdmin = auth.employee.roleLevel <= 3
+    // Only Super Admin (level <= 2) has cross-user visibility into who's spending what —
+    // a plain Admin can approve/reject other people's expenses via the API, but browsing the
+    // list itself is scoped to their own submissions, same as a regular Member.
+    const isSuperAdmin = auth.employee.roleLevel <= 2
 
     const status = searchParams.get('status')
     const month = searchParams.get('month')
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
+    const submittedBy = searchParams.get('submitted_by')
 
     let query = supabase
         .from('expenses')
@@ -26,9 +28,12 @@ export async function GET(request: Request) {
         `)
         .order('created_at', { ascending: false })
 
-    // Members only see their own expenses
-    if (!isAdmin) {
+    if (!isSuperAdmin) {
+        // Non-super-admins only ever see their own expenses.
         query = query.eq('submitted_by', auth.employee.id)
+    } else if (submittedBy) {
+        // Super Admin can narrow the list to a specific admin/member via the filter.
+        query = query.eq('submitted_by', submittedBy)
     }
 
     if (status && status !== 'all') query = query.eq('payment_status', status)
