@@ -30,7 +30,7 @@ export async function GET(request: Request) {
             authority_checked:employees!authority_check(id, name),
             verifier:employees!verified_by(id, name)
         `)
-        .order('sl', { ascending: true })
+        .order('created_at', { ascending: false })
 
     // Date filtering: support single date or range
     if (startDate && endDate) {
