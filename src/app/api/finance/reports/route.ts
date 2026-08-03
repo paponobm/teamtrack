@@ -9,14 +9,22 @@ export async function GET(request: Request) {
     const supabase = auth.supabase
     const isAdmin = auth.employee.roleLevel <= 3
     if (!isAdmin) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    // Only Super Admin sees company-wide reports; a plain Admin (level 3) only sees reports
+    // built from their own expenses/income, matching /api/expenses and /api/income's scoping.
+    const isSuperAdmin = auth.employee.roleLevel <= 2
 
     const { searchParams } = new URL(request.url)
     const month = searchParams.get('month')
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
 
-    let expenseQuery = supabase.from('expenses').select('id, amount, category, date')
-    let incomeQuery = supabase.from('income').select('id, amount, source, date')
+    let expenseQuery = supabase.from('expenses').select('id, amount, category, date, submitted_by')
+    let incomeQuery = supabase.from('income').select('id, amount, source, date, added_by')
+
+    if (!isSuperAdmin) {
+        expenseQuery = expenseQuery.eq('submitted_by', auth.employee.id)
+        incomeQuery = incomeQuery.eq('added_by', auth.employee.id)
+    }
 
     if (startDate) {
         expenseQuery = expenseQuery.gte('date', startDate)

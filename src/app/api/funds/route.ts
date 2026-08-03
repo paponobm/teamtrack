@@ -40,7 +40,9 @@ export async function GET() {
     emps.forEach(e => { empById[e.id] = { id: e.id, name: e.name, avatar_url: e.avatar_url || null, role: roleOf(e) } })
 
     // Every employee who has ever received an allocation is a fund holder.
-    const holderIds = Object.keys(allocatedMap)
+    // A plain Admin must never see another Admin's fund balance — only Super Admin gets the
+    // full cross-admin transparency view; a plain Admin's "Team Funds" is just their own card.
+    const holderIds = Object.keys(allocatedMap).filter(id => isSuperAdmin || id === auth.employee.id)
     const summary = holderIds.map(id => {
         const e = empById[id]
         const allocated = allocatedMap[id] || 0
@@ -57,9 +59,9 @@ export async function GET() {
     }).sort((a, b) => b.remaining - a.remaining)
 
     // Eligible allocation targets for the Super Admin dropdown: active admins (level <= 3).
-    const adminTargets = emps
-        .filter(e => (roleOf(e)?.level ?? 99) <= 3)
-        .map(e => ({ id: e.id, name: e.name }))
+    const adminTargets = isSuperAdmin
+        ? emps.filter(e => (roleOf(e)?.level ?? 99) <= 3).map(e => ({ id: e.id, name: e.name }))
+        : []
 
     const myAllocated = allocatedMap[auth.employee.id] || 0
     const myUsed = usedMap[auth.employee.id] || 0
@@ -68,13 +70,15 @@ export async function GET() {
         acc.allocated += s.allocated; acc.used += s.used; acc.remaining += s.remaining; return acc
     }, { allocated: 0, used: 0, remaining: 0 })
 
+    const visibleAllocations = isSuperAdmin ? allocations : allocations.filter(a => a.employee_id === auth.employee.id)
+
     return NextResponse.json({
         isSuperAdmin,
         summary,
         adminTargets,
         myFund: { allocated: myAllocated, used: myUsed, remaining: myAllocated - myUsed },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        allocations: allocations.map((a: any) => ({
+        allocations: visibleAllocations.map((a: any) => ({
             id: a.id,
             employee_id: a.employee_id,
             employee_name: empById[a.employee_id]?.name || 'Unknown',

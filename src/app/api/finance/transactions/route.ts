@@ -8,7 +8,9 @@ export async function GET(request: Request) {
 
     const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
-    const isAdmin = auth.employee.roleLevel <= 3
+    // Only Super Admin sees every admin's transactions; a plain Admin (level 3) only sees
+    // their own, same as a Member — matches the scoping already used by /api/expenses and /api/income.
+    const isSuperAdmin = auth.employee.roleLevel <= 2
 
     const month = searchParams.get('month')
     const startDate = searchParams.get('start_date')
@@ -30,9 +32,8 @@ export async function GET(request: Request) {
             adder:employees!added_by(id, name)
         `)
 
-    if (!isAdmin) {
+    if (!isSuperAdmin) {
         expenseQuery = expenseQuery.eq('submitted_by', auth.employee.id)
-        // Normal members don't usually see company income unless they added it, but income doesn't have an 'adder' role filter typically in Teamtrack, but let's restrict to what they added if they are a member.
         incomeQuery = incomeQuery.eq('added_by', auth.employee.id)
     }
 
