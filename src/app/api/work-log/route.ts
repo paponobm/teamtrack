@@ -79,11 +79,20 @@ export async function GET(request: Request) {
     const totalAmount = entries.reduce((s, e) => s + (Number(e.amount) || 0) + (Number(e.suggested_amount) || 0), 0)
     const totalAdvance = entries.reduce((s, e) => s + (Number(e.advance) || 0), 0)
     const advanceOrders = entries.filter(e => Number(e.advance) > 0)
-    const verifiedAdvanceAmount = advanceOrders.filter(e => e.advance_verified).reduce((s, e) => s + (Number(e.advance) || 0), 0)
+    const verifiedAdvanceOrders = advanceOrders.filter(e => e.advance_verified)
+    const verifiedAdvanceAmount = verifiedAdvanceOrders.reduce((s, e) => s + (Number(e.advance) || 0), 0)
+    const verifiedAdvanceCount = verifiedAdvanceOrders.length
     const pendingAdvanceOrders = advanceOrders.filter(e => !e.advance_verified)
     const pendingAdvanceAmount = pendingAdvanceOrders.reduce((s, e) => s + (Number(e.advance) || 0), 0)
     const pendingAdvanceCount = pendingAdvanceOrders.length
     const advanceOrderCount = advanceOrders.length
+    // Only verified advance payments count toward the gateway breakdown — matches
+    // verifiedAdvanceAmount's own filter so the two stay consistent with each other.
+    const paymentGatewaySummary = verifiedAdvanceOrders.reduce((acc: Record<string, number>, e) => {
+        const gw = e.payment_gateway || 'Other'
+        acc[gw] = (acc[gw] || 0) + (Number(e.advance) || 0)
+        return acc
+    }, {})
     const sources = entries.reduce((acc: Record<string, number>, e) => {
         const src = e.source || 'other'
         acc[src] = (acc[src] || 0) + 1
@@ -104,7 +113,8 @@ export async function GET(request: Request) {
         entries,
         stats: {
             totalOrders, totalAmount, totalAdvance, sources, orderTypes, statusBreakdown,
-            verifiedAdvanceAmount, pendingAdvanceAmount, pendingAdvanceCount, advanceOrderCount,
+            verifiedAdvanceAmount, verifiedAdvanceCount, pendingAdvanceAmount, pendingAdvanceCount, advanceOrderCount,
+            paymentGatewaySummary,
         },
     })
 }

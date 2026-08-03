@@ -11,7 +11,7 @@ import { formatLongDate } from '@/lib/format'
 import {
     IconDownload, IconBolt, IconBarChart3, IconPlus, IconChevronLeft, IconChevronRight,
     IconEdit, IconTrash, IconCheckCircle, IconTrophy, IconClipboard, IconBanknote,
-    IconWallet, IconLayers, IconFileText, IconX, IconSearch, IconClock
+    IconWallet, IconLayers, IconFileText, IconX, IconSearch, IconClock, IconTarget
 } from '@/components/icons/Icons'
 
 interface WorkEntry {
@@ -47,9 +47,11 @@ interface Stats {
     orderTypes: Record<string, number>
     statusBreakdown: Record<string, number>
     verifiedAdvanceAmount: number
+    verifiedAdvanceCount: number
     pendingAdvanceAmount: number
     pendingAdvanceCount: number
     advanceOrderCount: number
+    paymentGatewaySummary: Record<string, number>
 }
 
 interface RankingEntry {
@@ -114,6 +116,17 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
     partial: { label: 'Partial', color: '#3B82F6' },
 }
 
+// Matches PAYMENT_GATEWAYS in WorkEntryModal.tsx — 'Other' is the fallback for any
+// entry saved before that field existed or with an unrecognized value.
+const PAYMENT_GATEWAY_COLORS: Record<string, string> = {
+    'bKash': '#E2136E',
+    'Rocket': '#8C3494',
+    'Nagad': '#F7941D',
+    'Bank': '#2563EB',
+    'Cash': '#10B981',
+    'Other': '#6B7280',
+}
+
 type DateRangeMode = 'today' | 'custom' | 'week' | 'month'
 
 const getLocalDateString = (d: Date = new Date()) => {
@@ -141,7 +154,7 @@ export default function WorkLogPage() {
     const { data: perms } = usePermissions()
     const toast = useToast()
     const [entries, setEntries] = useState<WorkEntry[]>([])
-    const [stats, setStats] = useState<Stats>({ totalOrders: 0, totalAmount: 0, totalAdvance: 0, sources: {}, orderTypes: {}, statusBreakdown: {}, verifiedAdvanceAmount: 0, pendingAdvanceAmount: 0, pendingAdvanceCount: 0, advanceOrderCount: 0 })
+    const [stats, setStats] = useState<Stats>({ totalOrders: 0, totalAmount: 0, totalAdvance: 0, sources: {}, orderTypes: {}, statusBreakdown: {}, verifiedAdvanceAmount: 0, verifiedAdvanceCount: 0, pendingAdvanceAmount: 0, pendingAdvanceCount: 0, advanceOrderCount: 0, paymentGatewaySummary: {} })
     const [loading, setLoading] = useState(true)
     const [date, setDate] = useState(getLocalDateString())
     const [dateRangeMode, setDateRangeMode] = useState<DateRangeMode>('today')
@@ -493,7 +506,7 @@ export default function WorkLogPage() {
                     </span>
                 </motion.div>
 
-                {/* 5 Stats Cards */}
+                {/* Stats Cards */}
                 <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '24px' }}>
                     <div className="stat-card">
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClipboard size={14} color="var(--color-text-tertiary)" /> Total Orders</span>
@@ -501,25 +514,44 @@ export default function WorkLogPage() {
                     </div>
                     <div className="stat-card">
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconBanknote size={14} color="var(--color-text-tertiary)" /> Total Amount</span>
-                        <span className="stat-value" style={{ fontSize: '1.5rem' }}>৳{stats.totalAmount.toLocaleString()}</span>
+                        <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>৳{stats.totalAmount.toLocaleString()}</span>
                     </div>
-                    {/* <div className="stat-card">
-                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconWallet size={14} color="var(--color-text-tertiary)" /> Advance</span>
-                    <span className="stat-value" style={{ fontSize: '1.5rem' }}>৳{stats.totalAdvance.toLocaleString()}</span>
-                </div>
-                <div className="stat-card">
-                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconCheckCircle size={14} color="var(--color-text-tertiary)" /> Verified Advance</span>
-                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A' }}>৳{stats.verifiedAdvanceAmount.toLocaleString()}</span>
-                </div> */}
+                   
                     <div className="stat-card">
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Pending Verification</span>
                         <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{stats.pendingAdvanceAmount.toLocaleString()}</span>
                         <div style={{ fontSize: '0.6875rem', color: '#DC2626', marginTop: '4px' }}>Pending: {stats.pendingAdvanceCount}</div>
                     </div>
-                    {/* <div className="stat-card">
-                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconWallet size={14} color="var(--color-text-tertiary)" /> Advance Orders</span>
-                    <span className="stat-value" style={{ fontSize: '1.5rem' }}>{stats.advanceOrderCount}</span>
-                </div> */}
+                     <div className="stat-card">
+                        <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconCheckCircle size={14} color="var(--color-text-tertiary)" /> Verified Advance Payment</span>
+                        <span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A' }}>৳{stats.verifiedAdvanceAmount.toLocaleString()}</span>
+                        <div style={{ fontSize: '0.6875rem', color: '#16A34A', marginTop: '4px' }}>Verified: {stats.verifiedAdvanceCount} Orders</div>
+                    </div>
+                    <div className="stat-card">
+                        <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconWallet size={14} color="var(--color-text-tertiary)" /> Advance Payment Source</span>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                            {Object.entries(stats.paymentGatewaySummary || {}).map(([gw, amount]) => (
+                                <span key={gw} style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.625rem', fontWeight: 600, color: PAYMENT_GATEWAY_COLORS[gw] || '#6B7280', background: `${PAYMENT_GATEWAY_COLORS[gw] || '#6B7280'}15` }}>
+                                    {gw}: ৳{amount.toLocaleString()}
+                                </span>
+                            ))}
+                            {Object.keys(stats.paymentGatewaySummary || {}).length === 0 && <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>-</span>}
+                        </div>
+                    </div>
+                    <div className="stat-card">
+                        <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconTarget size={14} color="var(--color-text-tertiary)" /> Order Status</span>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                            {Object.entries(stats.statusBreakdown || {}).map(([st, count]) => {
+                                const cfg = STATUS_CONFIG[st] || { label: st, color: '#6B7280' }
+                                return (
+                                    <span key={st} style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.625rem', fontWeight: 600, color: cfg.color, background: `${cfg.color}15` }}>
+                                        {cfg.label}: {count}
+                                    </span>
+                                )
+                            })}
+                            {Object.keys(stats.statusBreakdown || {}).length === 0 && <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>-</span>}
+                        </div>
+                    </div>
                     <div className="stat-card">
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconLayers size={14} color="var(--color-text-tertiary)" /> Order Types</span>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
@@ -531,7 +563,6 @@ export default function WorkLogPage() {
                             {Object.keys(stats.orderTypes || {}).length === 0 && <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>-</span>}
                         </div>
                     </div>
-                    {/* 5th card: Sources */}
                     <div className="stat-card">
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <svg width="14" height="14" viewBox="0 0 20 20" fill="var(--color-text-tertiary)"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
