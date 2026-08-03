@@ -125,6 +125,9 @@ export default function ExpensesPage() {
     const [incomeSaving, setIncomeSaving] = useState(false)
     const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'categories' | 'budgets' | 'reports' | 'funds'>('overview')
     const [funds, setFunds] = useState<{ id: string; name: string }[]>([])
+    // Bulk-approve pending expenses (Super Admin only)
+    const [selectedIds, setSelectedIds] = useState<string[]>([])
+    const [bulkApproving, setBulkApproving] = useState(false)
 
     const getWeekRange = (d: Date) => {
         const day = d.getDay()
@@ -177,6 +180,11 @@ export default function ExpensesPage() {
     useEffect(() => {
         fetchExpenses()
     }, [fetchExpenses])
+
+    // Drop any bulk-approve selection that's no longer visible after a tab/filter switch.
+    useEffect(() => {
+        setSelectedIds([])
+    }, [activeFilter])
 
     useEffect(() => {
         const fetchFunds = async () => {
@@ -247,6 +255,32 @@ export default function ExpensesPage() {
         await fetchExpenses()
     }
 
+    const handleBulkApprove = async () => {
+        if (selectedIds.length === 0) return
+        if (!confirm(`Approve ${selectedIds.length} selected expense(s)?`)) return
+        setBulkApproving(true)
+        try {
+            const res = await fetch('/api/expenses/bulk-approve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: selectedIds }),
+            })
+            if (!res.ok) { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Failed to approve expenses'); return }
+            const result = await res.json()
+            if (result.skipped?.length > 0) {
+                toast.error(`Approved ${result.approved}, skipped ${result.skipped.length} (exceeded available fund)`)
+            } else {
+                toast.success(`Approved ${result.approved} expense(s)`)
+            }
+            setSelectedIds([])
+            await fetchExpenses()
+        } catch {
+            toast.error('Failed to approve expenses')
+        } finally {
+            setBulkApproving(false)
+        }
+    }
+
     const handleDelete = async (id: string) => {
         if (!confirm('Delete this expense?')) return
         const res = await fetch(`/api/expenses?id=${id}`, { method: 'DELETE' })
@@ -269,6 +303,10 @@ export default function ExpensesPage() {
         }
         return true
     })
+
+    // Only the pending rows currently on screen are selectable for bulk-approve.
+    const pendingVisibleIds = filtered.filter(e => e.payment_status === 'pending').map(e => e.id)
+    const allPendingSelected = pendingVisibleIds.length > 0 && pendingVisibleIds.every(id => selectedIds.includes(id))
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const getName = (obj: any) => {
@@ -489,6 +527,11 @@ export default function ExpensesPage() {
                         />
                     </div>
                 </div>
+                {isSuperAdmin && selectedIds.length > 0 && (
+                    <button className="btn btn-primary btn-sm" onClick={handleBulkApprove} disabled={bulkApproving} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        ✓ {bulkApproving ? 'Approving...' : `Approve Selected (${selectedIds.length})`}
+                    </button>
+                )}
             </motion.div>
 
             {/* Donut Charts: By Category & By User */}
@@ -697,6 +740,15 @@ export default function ExpensesPage() {
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
                             <thead>
                                 <tr style={{ borderBottom: '1px solid var(--color-border-light)' }}>
+                                    {isSuperAdmin && (
+                                        <th style={{ padding: '12px 16px', width: '32px' }}>
+                                            {pendingVisibleIds.length > 0 && (
+                                                <input type="checkbox" checked={allPendingSelected}
+                                                    onChange={e => setSelectedIds(e.target.checked ? pendingVisibleIds : [])}
+                                                    title="Select all pending" style={{ cursor: 'pointer' }} />
+                                            )}
+                                        </th>
+                                    )}
                                     <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Date</th>
                                     <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Category</th>
                                     <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Description</th>
@@ -714,6 +766,15 @@ export default function ExpensesPage() {
                                         <tr key={e.id} style={{ borderBottom: i < filtered.length - 1 ? '1px solid var(--color-border-light)' : 'none', transition: 'background 0.15s' }}
                                             onMouseEnter={ev => (ev.currentTarget.style.background = 'rgba(118,118,128,0.04)')}
                                             onMouseLeave={ev => (ev.currentTarget.style.background = 'transparent')}>
+                                            {isSuperAdmin && (
+                                                <td style={{ padding: '10px 16px' }}>
+                                                    {e.payment_status === 'pending' && (
+                                                        <input type="checkbox" checked={selectedIds.includes(e.id)}
+                                                            onChange={ev => setSelectedIds(ev.target.checked ? [...selectedIds, e.id] : selectedIds.filter(id => id !== e.id))}
+                                                            style={{ cursor: 'pointer' }} />
+                                                    )}
+                                                </td>
+                                            )}
                                             <td style={{ padding: '10px 16px', whiteSpace: 'nowrap', color: 'var(--color-text-secondary)' }}>
                                                 {new Date(e.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                                             </td>
