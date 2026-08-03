@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     if (id) {
         const { data: influencer, error } = await supabase
             .from('influencers')
-            .select(`*, pr_entries:pr_management(id, customer_name, send_date, address, parcel_details, source, delivery_status, video_status, payment_status, video_link, view_note, created_at)`)
+            .select(`*, pr_entries:pr_management(id, customer_name, send_date, address, parcel_details, source, delivery_status, video_status, payment_status, video_link, video_links, view_note, created_at)`)
             .eq('id', id)
             .single()
 

@@ -23,6 +23,7 @@ interface PrEntry {
     video_status: string | null
     payment_status: string | null
     video_link: string | null
+    video_links: string[] | null
     view_note: string | null
     created_at: string
 }
@@ -184,7 +185,7 @@ const emptyPrForm = {
     delivery_status: 'Product Sent',
     video_status: 'Pending',
     payment_status: 'Unpaid',
-    video_link: '',
+    video_links: [''] as string[],
     view_note: '',
 }
 
@@ -227,7 +228,8 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
     const [savingPr, setSavingPr] = useState(false)
 
     const [videoPromptId, setVideoPromptId] = useState<string | null>(null)
-    const [tempVideoLink, setTempVideoLink] = useState('')
+    const [videoLinksDraft, setVideoLinksDraft] = useState<string[]>([''])
+    const [savingVideoLinks, setSavingVideoLinks] = useState(false)
 
     const fetchDetail = useCallback(async () => {
         setLoading(true)
@@ -350,10 +352,15 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
         if (!isPrFormValid) return
         setSavingPr(true)
         try {
+            const { video_links, ...rest } = prForm
+            const cleanLinks = video_links.map(v => v.trim()).filter(Boolean)
             const res = await fetch('/api/pr-management', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...prForm, influencer_id: influencerId })
+                // video_link stays a single URL (the first one) so PR Management's own table —
+                // which only ever renders one video-link icon per row — keeps working unchanged
+                // for these entries too; video_links carries the full list for this page's own display.
+                body: JSON.stringify({ ...rest, video_link: cleanLinks[0] || null, video_links: cleanLinks, influencer_id: influencerId })
             })
             if (res.ok) {
                 toast.success('PR entry added')
@@ -387,6 +394,34 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
         } catch {
             toast.error('Failed to save changes')
             if (prev) setData(d => d ? { ...d, pr_entries: d.pr_entries.map(p => p.id === prId ? prev : p) } : d)
+        }
+    }
+
+    const openVideoLinksModal = (entry: PrEntry) => {
+        const existing = (entry.video_links && entry.video_links.length > 0) ? entry.video_links : (entry.video_link ? [entry.video_link] : [''])
+        setVideoLinksDraft(existing)
+        setVideoPromptId(entry.id)
+    }
+
+    const handleSaveVideoLinks = async () => {
+        if (!videoPromptId) return
+        const cleanLinks = videoLinksDraft.map(v => v.trim()).filter(Boolean)
+        setSavingVideoLinks(true)
+        try {
+            const res = await fetch('/api/pr-management', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: videoPromptId, video_link: cleanLinks[0] || null, video_links: cleanLinks })
+            })
+            if (!res.ok) throw new Error('Update failed')
+            setData(d => d ? { ...d, pr_entries: d.pr_entries.map(p => p.id === videoPromptId ? { ...p, video_link: cleanLinks[0] || null, video_links: cleanLinks } : p) } : d)
+            toast.success('Video links saved')
+            onUpdated()
+            setVideoPromptId(null)
+        } catch {
+            toast.error('Failed to save video links')
+        } finally {
+            setSavingVideoLinks(false)
         }
     }
 
@@ -548,15 +583,9 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
                                                             <td style={tdStyle}><EditableNote value={p.view_note} onSave={v => handleUpdatePrField(p.id, 'view_note', v)} /></td>
                                                             <td style={{ ...tdStyle, textAlign: 'center' }}>
                                                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                                                                    {p.video_link ? (
-                                                                        <a href={p.video_link.startsWith('http') ? p.video_link : `https://${p.video_link}`} target="_blank" rel="noreferrer" title="Watch Video" style={{ display: 'flex', color: '#3B82F6' }}>
-                                                                            <IconPlay size={15} />
-                                                                        </a>
-                                                                    ) : (
-                                                                        <button onClick={() => { setVideoPromptId(p.id); setTempVideoLink('') }} title="Add Video Link" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-tertiary)', display: 'flex' }}>
-                                                                            <IconCamera size={15} />
-                                                                        </button>
-                                                                    )}
+                                                                    <button onClick={() => openVideoLinksModal(p)} title="Manage Video Links" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: (p.video_links?.length || p.video_link) ? '#3B82F6' : 'var(--color-text-tertiary)', display: 'flex' }}>
+                                                                        <IconCamera size={15} />
+                                                                    </button>
                                                                     {isAdmin && (
                                                                         <button onClick={() => handleDeletePr(p.id)} title="Delete" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-tertiary)', display: 'flex' }}>
                                                                             <IconTrash size={14} />
@@ -667,7 +696,39 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
                                                 </select>
                                             </div>
                                         </div>
-                                        <div className="form-group"><label className="form-label">Video Link</label><input className="form-input" value={prForm.video_link} onChange={e => setPrForm({ ...prForm, video_link: e.target.value })} placeholder="https://..." /></div>
+                                        <div className="form-group">
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                                <label className="form-label">Video Link{prForm.video_links.length > 1 ? 's' : ''}</label>
+                                                <button type="button" onClick={() => setPrForm({ ...prForm, video_links: [...prForm.video_links, ''] })}
+                                                    style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'transparent', border: 'none', color: 'var(--color-primary)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: '2px 4px' }}>
+                                                    <IconPlus size={13} /> Add
+                                                </button>
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                {prForm.video_links.map((link, idx) => (
+                                                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, borderRadius: '50%', background: 'rgba(118,118,128,0.1)', color: 'var(--color-text-secondary)', fontSize: '0.6875rem', fontWeight: 600, flexShrink: 0 }}>
+                                                            {idx + 1}
+                                                        </span>
+                                                        <input className="form-input" value={link} placeholder="https://..."
+                                                            onChange={e => setPrForm({ ...prForm, video_links: prForm.video_links.map((v, i) => i === idx ? e.target.value : v) })}
+                                                            onKeyDown={e => {
+                                                                if (e.key === 'Enter') {
+                                                                    e.preventDefault()
+                                                                    if (idx === prForm.video_links.length - 1) setPrForm({ ...prForm, video_links: [...prForm.video_links, ''] })
+                                                                }
+                                                            }}
+                                                            style={{ flex: 1 }} />
+                                                        {prForm.video_links.length > 1 && (
+                                                            <button type="button" onClick={() => setPrForm({ ...prForm, video_links: prForm.video_links.filter((_, i) => i !== idx) })}
+                                                                style={{ display: 'flex', background: 'transparent', border: 'none', color: 'var(--color-text-tertiary)', cursor: 'pointer', padding: '2px', flexShrink: 0 }} title="Remove">
+                                                                <IconX size={14} />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
                                         <div className="form-group"><label className="form-label">Note</label><textarea className="form-input" rows={2} value={prForm.view_note} onChange={e => setPrForm({ ...prForm, view_note: e.target.value })} /></div>
                                     </div>
                                     <div className="modal-footer">
@@ -764,33 +825,52 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
                             </div>
                         )}
 
-                        {/* Add Video Link prompt */}
+                        {/* Manage Video Links modal — view/open existing links and add more */}
                         {videoPromptId && (
                             <div className="modal-overlay" onClick={() => setVideoPromptId(null)} style={{ zIndex: 210 }}>
-                                <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px', width: '100%', padding: '24px', textAlign: 'center' }}>
-                                    <div style={{ display: 'inline-flex', padding: '12px', borderRadius: '50%', background: 'rgba(59,130,246,0.1)', color: '#3B82F6', marginBottom: '16px' }}>
-                                        <IconCamera size={24} />
+                                <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px', width: '100%', padding: '24px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                        <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Video Links</h3>
+                                        <button className="btn btn-ghost btn-sm" onClick={() => setVideoPromptId(null)}><IconX size={18} /></button>
                                     </div>
-                                    <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '8px', color: 'var(--color-text-primary)' }}>Add Video Link</h3>
-                                    <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '20px' }}>Enter the URL of the uploaded review video</p>
-                                    <input autoFocus className="form-input" value={tempVideoLink} onChange={e => setTempVideoLink(e.target.value)} placeholder="https://youtube.com/..."
-                                        style={{ marginBottom: '20px', textAlign: 'left', width: '100%' }}
-                                        onKeyDown={e => {
-                                            if (e.key === 'Enter' && tempVideoLink) {
-                                                handleUpdatePrField(videoPromptId, 'video_link', tempVideoLink)
-                                                setVideoPromptId(null)
-                                            }
-                                        }} />
+                                    <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '16px' }}>Open an existing link, or add more below.</p>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+                                        {videoLinksDraft.map((link, idx) => (
+                                            <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, borderRadius: '50%', background: 'rgba(118,118,128,0.1)', color: 'var(--color-text-secondary)', fontSize: '0.6875rem', fontWeight: 600, flexShrink: 0 }}>
+                                                    {idx + 1}
+                                                </span>
+                                                <input autoFocus={idx === 0} className="form-input" value={link} placeholder="https://youtube.com/..."
+                                                    onChange={e => setVideoLinksDraft(videoLinksDraft.map((v, i) => i === idx ? e.target.value : v))}
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter') {
+                                                            e.preventDefault()
+                                                            if (idx === videoLinksDraft.length - 1) setVideoLinksDraft([...videoLinksDraft, ''])
+                                                        }
+                                                    }}
+                                                    style={{ flex: 1 }} />
+                                                {link.trim() && (
+                                                    <a href={link.startsWith('http') ? link : `https://${link}`} target="_blank" rel="noreferrer" title="Open video" style={{ display: 'flex', color: '#3B82F6', flexShrink: 0 }}>
+                                                        <IconPlay size={16} />
+                                                    </a>
+                                                )}
+                                                {videoLinksDraft.length > 1 && (
+                                                    <button type="button" onClick={() => setVideoLinksDraft(videoLinksDraft.filter((_, i) => i !== idx))}
+                                                        style={{ display: 'flex', background: 'transparent', border: 'none', color: 'var(--color-text-tertiary)', cursor: 'pointer', padding: '2px', flexShrink: 0 }} title="Remove">
+                                                        <IconX size={14} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <button type="button" onClick={() => setVideoLinksDraft([...videoLinksDraft, ''])}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'transparent', border: 'none', color: 'var(--color-primary)', fontSize: '0.8125rem', fontWeight: 600, cursor: 'pointer', padding: '4px', marginBottom: '16px' }}>
+                                        <IconPlus size={14} /> Add another link
+                                    </button>
                                     <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
                                         <button className="btn btn-secondary btn-sm" onClick={() => setVideoPromptId(null)} style={{ flex: 1 }}>Cancel</button>
-                                        <button className="btn btn-primary btn-sm" disabled={!tempVideoLink.trim()} style={{ flex: 1 }}
-                                            onClick={() => {
-                                                if (tempVideoLink) {
-                                                    handleUpdatePrField(videoPromptId, 'video_link', tempVideoLink)
-                                                    setVideoPromptId(null)
-                                                }
-                                            }}>
-                                            Save Link
+                                        <button className="btn btn-primary btn-sm" disabled={savingVideoLinks} style={{ flex: 1 }} onClick={handleSaveVideoLinks}>
+                                            {savingVideoLinks ? 'Saving...' : 'Save'}
                                         </button>
                                     </div>
                                 </div>
