@@ -5,10 +5,11 @@ import { createPortal } from 'react-dom'
 import { motion } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 import StarRating from '@/components/common/StarRating'
+import { CONTACT_SOURCES, PLATFORMS } from '@/components/pr-management/influencerConstants'
 import {
     IconX, IconEdit, IconPhone, IconPin, IconFacebook, IconWhatsApp, IconInstagram,
-    IconTikTok, IconYouTube, IconUser, IconCamera, IconPackage,
-    IconStar, IconPlay, IconAward, IconPlus, IconChevronLeft, IconTrash
+    IconYouTube, IconUser, IconCamera, IconPackage,
+    IconStar, IconPlay, IconAward, IconPlus, IconTrash
 } from '@/components/icons/Icons'
 
 interface PrEntry {
@@ -45,9 +46,13 @@ interface InfluencerDetail {
     tiktok_url: string | null
     youtube_url: string | null
     photo_url: string | null
+    contact_source: string | null
+    contact_value: string | null
     address: string | null
     status: string
+    payment_status: string
     follower_count: number
+    uploaded_platforms: string[]
     rating: number
     rating_responsiveness: number | null
     rating_quality: number | null
@@ -69,8 +74,8 @@ const RATING_CRITERIA: { key: 'rating_responsiveness' | 'rating_quality' | 'rati
     { key: 'rating_reliability', label: 'Reliability' },
 ]
 
-const thStyle: React.CSSProperties = { textAlign: 'left', padding: '10px 14px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }
-const tdStyle: React.CSSProperties = { padding: '10px 14px', fontSize: '0.8125rem', verticalAlign: 'middle' }
+const thStyle: React.CSSProperties = { textAlign: 'left', padding: '10px 14px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }
+const tdStyle: React.CSSProperties = { padding: '10px 14px', fontSize: '0.875rem', verticalAlign: 'middle' }
 
 const platformIcon: Record<string, React.ReactNode> = {
     'FB': <IconFacebook size={12} color="#1877F2" />,
@@ -183,16 +188,31 @@ const emptyPrForm = {
     view_note: '',
 }
 
+const emptyEditForm = { name: '', phone: '', address: '', follower_count: '', status: 'Active', payment_status: 'Unpaid', uploaded_platforms: [] as string[], photo_url: '', contact_source: '', contact_value: '' }
+
 export default function InfluencerProfileModal({ influencerId, isAdmin, onClose, onUpdated }: { influencerId: string; isAdmin: boolean; onClose: () => void; onUpdated: () => void }) {
     const toast = useToast()
-    const fileInputRef = useRef<HTMLInputElement>(null)
+    const editPhotoInputRef = useRef<HTMLInputElement>(null)
 
     const [data, setData] = useState<InfluencerDetail | null>(null)
     const [loading, setLoading] = useState(true)
     const [activeTab, setActiveTab] = useState<'history' | 'rating' | 'activity'>('history')
 
-    const [editMode, setEditMode] = useState(false)
-    const [editForm, setEditForm] = useState<Record<string, string>>({})
+    // This is a full-screen overlay, not a real route, but it should still feel like a
+    // "page" you can leave with the browser's own Back button rather than a bespoke UI
+    // button. Push a history entry on open and close on popstate; nothing else calls
+    // history.back(), so the only way out is the real back button (or another explicit
+    // close call from within this component, e.g. after a delete).
+    useEffect(() => {
+        window.history.pushState({ influencerProfile: influencerId }, '', window.location.href)
+        const handlePopState = () => onClose()
+        window.addEventListener('popstate', handlePopState)
+        return () => window.removeEventListener('popstate', handlePopState)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
+    const [showEditModal, setShowEditModal] = useState(false)
+    const [editForm, setEditForm] = useState(emptyEditForm)
     const [savingProfile, setSavingProfile] = useState(false)
     const [uploadingPhoto, setUploadingPhoto] = useState(false)
 
@@ -247,11 +267,12 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
     const openEdit = () => {
         if (!data) return
         setEditForm({
-            name: data.name || '', phone: data.phone || '', page_url: data.page_url || '',
-            instagram_url: data.instagram_url || '', tiktok_url: data.tiktok_url || '', youtube_url: data.youtube_url || '',
-            address: data.address || '', follower_count: String(data.follower_count || 0), status: data.status || 'Active',
+            name: data.name || '', phone: data.phone || '', address: data.address || '',
+            follower_count: String(data.follower_count || 0), status: data.status || 'Active',
+            payment_status: data.payment_status || 'Unpaid', uploaded_platforms: data.uploaded_platforms || [],
+            photo_url: data.photo_url || '', contact_source: data.contact_source || '', contact_value: data.contact_value || '',
         })
-        setEditMode(true)
+        setShowEditModal(true)
     }
 
     const handleSaveProfile = async () => {
@@ -259,7 +280,7 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
         try {
             await saveField({ ...editForm, follower_count: Number(editForm.follower_count) || 0 })
             toast.success('Profile updated')
-            setEditMode(false)
+            setShowEditModal(false)
             await fetchDetail()
             onUpdated()
         } catch {
@@ -269,7 +290,7 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
         }
     }
 
-    const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleEditPhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (!file) return
         setUploadingPhoto(true)
@@ -281,15 +302,12 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
             const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData })
             if (!uploadRes.ok) throw new Error('Upload failed')
             const { url } = await uploadRes.json()
-            await saveField({ photo_url: url })
-            toast.success('Photo updated')
-            await fetchDetail()
-            onUpdated()
+            setEditForm(f => ({ ...f, photo_url: url }))
         } catch {
             toast.error('Failed to upload photo')
         } finally {
             setUploadingPhoto(false)
-            if (fileInputRef.current) fileInputRef.current.value = ''
+            if (editPhotoInputRef.current) editPhotoInputRef.current.value = ''
         }
     }
 
@@ -409,93 +427,63 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
                     <>
                         {/* Left sidebar */}
                         <div style={{ width: '300px', flexShrink: 0, borderRight: '1px solid var(--color-border-light)', overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-                            <button className="btn btn-ghost btn-sm" onClick={onClose} style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                <IconChevronLeft size={16} /> Back
-                            </button>
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', textAlign: 'center' }}>
-                                <div style={{ position: 'relative' }}>
-                                    {data.photo_url ? (
-                                        // eslint-disable-next-line @next/next/no-img-element
-                                        <img src={data.photo_url} alt={data.name} style={{ width: 84, height: 84, borderRadius: '50%', objectFit: 'cover' }} />
-                                    ) : (
-                                        <div style={{ width: 84, height: 84, borderRadius: '50%', background: 'var(--color-bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                            <IconUser size={32} color="var(--color-text-tertiary)" />
-                                        </div>
-                                    )}
-                                    {isAdmin && (
-                                        <>
-                                            <button onClick={() => fileInputRef.current?.click()} disabled={uploadingPhoto}
-                                                style={{ position: 'absolute', bottom: 0, right: 0, width: 26, height: 26, borderRadius: '50%', background: 'var(--color-primary)', border: '2px solid var(--color-bg-primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} title="Change photo">
-                                                <IconCamera size={12} color="#fff" />
-                                            </button>
-                                            <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhotoUpload} style={{ display: 'none' }} />
-                                        </>
-                                    )}
-                                </div>
-
-                                {editMode ? (
-                                    <input className="form-input" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} style={{ textAlign: 'center', fontWeight: 600 }} />
+                                {data.photo_url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={data.photo_url} alt={data.name} style={{ width: 84, height: 84, borderRadius: '50%', objectFit: 'cover' }} />
                                 ) : (
-                                    <div style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{data.name}</div>
+                                    <div style={{ width: 84, height: 84, borderRadius: '50%', background: 'var(--color-bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        <IconUser size={32} color="var(--color-text-tertiary)" />
+                                    </div>
                                 )}
 
-                                <span style={{ fontSize: '0.6875rem', fontWeight: 600, padding: '2px 10px', borderRadius: '20px', background: (data.status || 'Active') === 'Active' ? 'rgba(16,185,129,0.1)' : 'rgba(118,118,128,0.1)', color: (data.status || 'Active') === 'Active' ? '#059669' : 'var(--color-text-tertiary)' }}>
+                                <div style={{ fontSize: '1.5rem', fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--color-text-primary)' }}>{data.name}</div>
+
+                                <span style={{ fontSize: '0.6875rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.02em', padding: '2px 10px', borderRadius: '20px', background: (data.status || 'Active') === 'Active' ? 'rgba(16,185,129,0.1)' : 'rgba(118,118,128,0.1)', color: (data.status || 'Active') === 'Active' ? '#059669' : 'var(--color-text-tertiary)' }}>
                                     {data.status || 'Active'}
                                 </span>
 
                                 <StarRating value={data.rating || 0} readOnly size={16} />
                                 <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{data.rating ? `${data.rating}/5 overall` : 'Not rated yet'}</div>
 
-                                {isAdmin && !editMode && (
+                                {isAdmin && (
                                     <button className="btn btn-secondary btn-sm" onClick={openEdit} style={{ marginTop: '4px' }}><IconEdit size={13} /> Edit Profile</button>
                                 )}
                             </div>
 
-                            {editMode ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                                    <div className="form-group"><label className="form-label">Phone (WhatsApp)</label><input className="form-input" value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} /></div>
-                                    <div className="form-group"><label className="form-label">Address</label><input className="form-input" value={editForm.address} onChange={e => setEditForm({ ...editForm, address: e.target.value })} /></div>
-                                    <div className="form-group"><label className="form-label">Facebook URL</label><input className="form-input" value={editForm.page_url} onChange={e => setEditForm({ ...editForm, page_url: e.target.value })} /></div>
-                                    <div className="form-group"><label className="form-label">Instagram URL</label><input className="form-input" value={editForm.instagram_url} onChange={e => setEditForm({ ...editForm, instagram_url: e.target.value })} /></div>
-                                    <div className="form-group"><label className="form-label">TikTok URL</label><input className="form-input" value={editForm.tiktok_url} onChange={e => setEditForm({ ...editForm, tiktok_url: e.target.value })} /></div>
-                                    <div className="form-group"><label className="form-label">YouTube URL</label><input className="form-input" value={editForm.youtube_url} onChange={e => setEditForm({ ...editForm, youtube_url: e.target.value })} /></div>
-                                    <div className="form-group"><label className="form-label">Followers</label><input type="number" className="form-input" value={editForm.follower_count} onChange={e => setEditForm({ ...editForm, follower_count: e.target.value })} /></div>
-                                    <div className="form-group"><label className="form-label">Status</label>
-                                        <select className="form-input" value={editForm.status} onChange={e => setEditForm({ ...editForm, status: e.target.value })}>
-                                            <option value="Active">Active</option>
-                                            <option value="Inactive">Inactive</option>
-                                        </select>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.8125rem' }}>
+                                {data.phone && <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-secondary)' }}><IconPhone size={13} /> {data.phone}</div>}
+                                {data.address && <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-secondary)' }}><IconPin size={13} /> {data.address}</div>}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-secondary)' }}><IconUser size={13} /> {data.follower_count?.toLocaleString() || 0} followers</div>
+                                {data.contact_value && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-secondary)' }}>
+                                        {data.contact_source === 'facebook' && <IconFacebook size={13} color="#1877F2" />}
+                                        {data.contact_source === 'whatsapp' && <IconWhatsApp size={13} color="#25D366" />}
+                                        {data.contact_source === 'email' && <IconPhone size={13} />}
+                                        {data.contact_source === 'phone' && <IconPhone size={13} />}
+                                        {data.contact_value}
                                     </div>
-                                    <div style={{ display: 'flex', gap: '8px' }}>
-                                        <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => setEditMode(false)}>Cancel</button>
-                                        <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={handleSaveProfile} disabled={savingProfile}>{savingProfile ? 'Saving...' : 'Save'}</button>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.8125rem' }}>
-                                    {data.phone && <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-secondary)' }}><IconPhone size={13} /> {data.phone}</div>}
-                                    {data.address && <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-secondary)' }}><IconPin size={13} /> {data.address}</div>}
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-secondary)' }}><IconUser size={13} /> {data.follower_count?.toLocaleString() || 0} followers</div>
+                                )}
+                                {(data.uploaded_platforms || []).length > 0 && (
                                     <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                                        {data.page_url && <a href={data.page_url} target="_blank" rel="noreferrer" title="Facebook" style={{ display: 'flex', width: 28, height: 28, borderRadius: '6px', background: 'rgba(118,118,128,0.08)', alignItems: 'center', justifyContent: 'center' }}><IconFacebook size={14} color="#1877F2" /></a>}
-                                        {data.phone && <a href={`https://wa.me/${data.phone.replace(/[^0-9]/g, '')}`} target="_blank" rel="noreferrer" title="WhatsApp" style={{ display: 'flex', width: 28, height: 28, borderRadius: '6px', background: 'rgba(118,118,128,0.08)', alignItems: 'center', justifyContent: 'center' }}><IconWhatsApp size={14} color="#25D366" /></a>}
-                                        {data.instagram_url && <a href={data.instagram_url} target="_blank" rel="noreferrer" title="Instagram" style={{ display: 'flex', width: 28, height: 28, borderRadius: '6px', background: 'rgba(118,118,128,0.08)', alignItems: 'center', justifyContent: 'center' }}><IconInstagram size={14} color="#E1306C" /></a>}
-                                        {data.tiktok_url && <a href={data.tiktok_url} target="_blank" rel="noreferrer" title="TikTok" style={{ display: 'flex', width: 28, height: 28, borderRadius: '6px', background: 'rgba(118,118,128,0.08)', alignItems: 'center', justifyContent: 'center' }}><IconTikTok size={14} /></a>}
-                                        {data.youtube_url && <a href={data.youtube_url} target="_blank" rel="noreferrer" title="YouTube" style={{ display: 'flex', width: 28, height: 28, borderRadius: '6px', background: 'rgba(118,118,128,0.08)', alignItems: 'center', justifyContent: 'center' }}><IconYouTube size={14} color="#FF0000" /></a>}
+                                        {data.uploaded_platforms.map(key => {
+                                            const p = PLATFORMS.find(pl => pl.key === key)
+                                            return p ? <span key={key} title={p.label} style={{ display: 'flex', width: 28, height: 28, borderRadius: '6px', background: 'rgba(118,118,128,0.08)', alignItems: 'center', justifyContent: 'center' }}>{p.icon}</span> : null
+                                        })}
                                     </div>
-                                </div>
-                            )}
+                                )}
+                            </div>
 
                             <div className="card" style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem' }}><span style={{ color: 'var(--color-text-secondary)' }}>Total PR Sent</span><strong>{data.stats.total_prs}</strong></div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem' }}><span style={{ color: 'var(--color-text-secondary)' }}>Videos Uploaded</span><strong>{data.stats.total_videos}</strong></div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem' }}><span style={{ color: 'var(--color-text-secondary)' }}>Pending Products</span><strong>{data.stats.pending_products}</strong></div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem' }}><span style={{ color: 'var(--color-text-secondary)' }}>Conversion Rate</span><strong>{data.stats.conversion_rate}%</strong></div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total PR Sent</span><strong style={{ fontSize: '0.875rem' }}>{data.stats.total_prs}</strong></div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Videos Uploaded</span><strong style={{ fontSize: '0.875rem' }}>{data.stats.total_videos}</strong></div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Pending Products</span><strong style={{ fontSize: '0.875rem' }}>{data.stats.pending_products}</strong></div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Conversion Rate</span><strong style={{ fontSize: '0.875rem' }}>{data.stats.conversion_rate}%</strong></div>
                             </div>
 
                             {isAdmin && (
                                 <div>
-                                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px', color: 'var(--color-text-primary)' }}>Admin Notes (private)</div>
+                                    <div style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '6px', color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Admin Notes (private)</div>
                                     <textarea className="form-input" rows={4} value={notesDraft} onChange={e => setNotesDraft(e.target.value)} placeholder="Internal notes about this influencer..." />
                                     <button className="btn btn-secondary btn-sm" style={{ marginTop: '6px', width: '100%' }} onClick={handleSaveNotes} disabled={savingNotes || notesDraft === (data.notes || '')}>{savingNotes ? 'Saving...' : 'Save Notes'}</button>
                                 </div>
@@ -694,6 +682,92 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
                                     <div className="modal-footer">
                                         <button className="btn btn-secondary btn-sm" onClick={() => setShowAddPr(false)}>Cancel</button>
                                         <button className="btn btn-primary btn-sm" onClick={handleAddPr} disabled={savingPr || !isPrFormValid}>{savingPr ? 'Saving...' : 'Save'}</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Edit Profile modal — mirrors the Add Influencer form's fields/layout, pre-filled */}
+                        {showEditModal && (
+                            <div className="modal-overlay" onClick={() => setShowEditModal(false)} style={{ zIndex: 210 }}>
+                                <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '520px', width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
+                                    <div className="modal-header">
+                                        <h2 className="modal-title">Edit Influencer</h2>
+                                        <button className="btn btn-ghost btn-sm" onClick={() => setShowEditModal(false)}><IconX size={20} /></button>
+                                    </div>
+                                    <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                                        <div className="form-group">
+                                            <label className="form-label">Photo</label>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                                                {editForm.photo_url ? (
+                                                    // eslint-disable-next-line @next/next/no-img-element
+                                                    <img src={editForm.photo_url} alt="Preview" style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover' }} />
+                                                ) : (
+                                                    <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--color-bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                        <IconUser size={24} color="var(--color-text-tertiary)" />
+                                                    </div>
+                                                )}
+                                                <input ref={editPhotoInputRef} type="file" accept="image/*" onChange={handleEditPhotoSelect} style={{ display: 'none' }} />
+                                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => editPhotoInputRef.current?.click()} disabled={uploadingPhoto}>
+                                                    <IconCamera size={14} /> {uploadingPhoto ? 'Uploading...' : editForm.photo_url ? 'Change Photo' : 'Upload Photo'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="form-group"><label className="form-label">Name *</label><input className="form-input" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} /></div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                            <div className="form-group"><label className="form-label">Phone (WhatsApp)</label><input className="form-input" value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} /></div>
+                                            <div className="form-group"><label className="form-label">Followers</label><input type="number" className="form-input" value={editForm.follower_count} onChange={e => setEditForm({ ...editForm, follower_count: e.target.value })} /></div>
+                                        </div>
+                                        <div className="form-group"><label className="form-label">Address</label><input className="form-input" value={editForm.address} onChange={e => setEditForm({ ...editForm, address: e.target.value })} /></div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '12px' }}>
+                                            <div className="form-group"><label className="form-label">Contact Source</label>
+                                                <select className="form-input" value={editForm.contact_source} onChange={e => setEditForm({ ...editForm, contact_source: e.target.value })}>
+                                                    <option value="">— None —</option>
+                                                    {CONTACT_SOURCES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="form-group"><label className="form-label">Contact Link / Number</label>
+                                                <input className="form-input" value={editForm.contact_value} onChange={e => setEditForm({ ...editForm, contact_value: e.target.value })} placeholder={CONTACT_SOURCES.find(c => c.key === editForm.contact_source)?.placeholder} />
+                                            </div>
+                                        </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Uploads Video On</label>
+                                            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                                {PLATFORMS.map(p => {
+                                                    const checked = editForm.uploaded_platforms.includes(p.key)
+                                                    return (
+                                                        <label key={p.key} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '8px', border: `1px solid ${checked ? 'var(--color-primary)' : 'var(--color-border-light)'}`, background: checked ? 'rgba(59,130,246,0.08)' : 'transparent', cursor: 'pointer', fontSize: '0.8125rem' }}>
+                                                            <input type="checkbox" checked={checked} onChange={e => {
+                                                                const next = e.target.checked
+                                                                    ? [...editForm.uploaded_platforms, p.key]
+                                                                    : editForm.uploaded_platforms.filter(k => k !== p.key)
+                                                                setEditForm({ ...editForm, uploaded_platforms: next })
+                                                            }} />
+                                                            {p.icon} {p.label}
+                                                        </label>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                            <div className="form-group"><label className="form-label">Status</label>
+                                                <select className="form-input" value={editForm.status} onChange={e => setEditForm({ ...editForm, status: e.target.value })}>
+                                                    <option value="Active">Active</option>
+                                                    <option value="Inactive">Inactive</option>
+                                                </select>
+                                            </div>
+                                            <div className="form-group"><label className="form-label">Payment Status</label>
+                                                <select className="form-input" value={editForm.payment_status} onChange={e => setEditForm({ ...editForm, payment_status: e.target.value })}>
+                                                    <option value="Paid">Paid</option>
+                                                    <option value="Unpaid">Unpaid</option>
+                                                    <option value="Free">Free</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="modal-footer">
+                                        <button className="btn btn-secondary btn-sm" onClick={() => setShowEditModal(false)}>Cancel</button>
+                                        <button className="btn btn-primary btn-sm" onClick={handleSaveProfile} disabled={savingProfile || !editForm.name.trim()}>{savingProfile ? 'Saving...' : 'Save'}</button>
                                     </div>
                                 </div>
                             </div>

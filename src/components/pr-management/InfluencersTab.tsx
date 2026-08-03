@@ -6,10 +6,11 @@ import { useToast } from '@/lib/ToastContext'
 import { usePermissions } from '@/lib/PermissionsContext'
 import StarRating from '@/components/common/StarRating'
 import InfluencerProfileModal from '@/components/pr-management/InfluencerProfileModal'
+import { CONTACT_SOURCES, PLATFORMS } from '@/components/pr-management/influencerConstants'
 import {
     IconUsers, IconPackage, IconCheckCircle, IconClock, IconBanknote, IconStar,
-    IconSearch, IconPlus, IconX, IconPin, IconPhone, IconTrash, IconFacebook,
-    IconWhatsApp, IconInstagram, IconYouTube, IconTikTok, IconUser, IconCamera
+    IconSearch, IconPlus, IconX, IconPin, IconPhone, IconTrash,
+    IconYouTube, IconUser, IconCamera
 } from '@/components/icons/Icons'
 
 export interface InfluencerListItem {
@@ -58,22 +59,6 @@ const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transiti
 
 const emptyForm = { name: '', phone: '', address: '', follower_count: '', status: 'Active', payment_status: 'Unpaid', uploaded_platforms: [] as string[], photo_url: '', contact_source: '', contact_value: '' }
 
-const CONTACT_SOURCES: { key: string; label: string; placeholder: string }[] = [
-    { key: 'facebook', label: 'Facebook', placeholder: 'https://facebook.com/...' },
-    { key: 'whatsapp', label: 'WhatsApp', placeholder: '01XXXXXXXXX' },
-    { key: 'email', label: 'Email', placeholder: 'name@example.com' },
-    { key: 'phone', label: 'Phone', placeholder: '01XXXXXXXXX' },
-]
-
-// Platforms an influencer can be checked off as uploading video content to — used by
-// both the Add Influencer form (checkboxes) and the card (icon-only, no links).
-const PLATFORMS: { key: string; label: string; icon: React.ReactNode }[] = [
-    { key: 'facebook', label: 'Facebook', icon: <IconFacebook size={15} color="#1877F2" /> },
-    { key: 'whatsapp', label: 'WhatsApp', icon: <IconWhatsApp size={15} color="#25D366" /> },
-    { key: 'instagram', label: 'Instagram', icon: <IconInstagram size={15} color="#E1306C" /> },
-    { key: 'tiktok', label: 'TikTok', icon: <IconTikTok size={15} color="var(--color-text-primary)" /> },
-    { key: 'youtube', label: 'YouTube', icon: <IconYouTube size={15} color="#FF0000" /> },
-]
 const platformIconMap: Record<string, React.ReactNode> = Object.fromEntries(PLATFORMS.map(p => [p.key, p.icon]))
 const platformLabelMap: Record<string, string> = Object.fromEntries(PLATFORMS.map(p => [p.key, p.label]))
 
@@ -229,7 +214,7 @@ export default function InfluencersTab() {
         { label: 'Pending Products', value: summary.pendingProducts, color: '#F59E0B', icon: <IconClock size={20} color="#F59E0B" /> },
         { label: 'Paid Influencers', value: summary.paidInfluencers, color: '#059669', icon: <IconBanknote size={20} color="#059669" /> },
         { label: 'Unpaid Influencers', value: summary.unpaidInfluencers, color: '#DC2626', icon: <IconBanknote size={20} color="#DC2626" /> },
-        { label: 'Average Rating', value: `${summary.averageRating}/5`, color: '#F59E0B', icon: <IconStar size={20} color="#F59E0B" /> },
+        // { label: 'Average Rating', value: `${summary.averageRating}/5`, color: '#F59E0B', icon: <IconStar size={20} color="#F59E0B" /> },
     ] : []
 
     return (
@@ -407,7 +392,7 @@ export default function InfluencersTab() {
             {/* Add Influencer modal */}
             <AnimatePresence>
                 {showAddModal && (
-                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddModal(false)}>
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                         <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
                             onClick={e => e.stopPropagation()} style={{ maxWidth: '520px', width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
                             <div className="modal-header">
