@@ -636,22 +636,13 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
                                     </div>
                                     <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                                            <div className="form-group"><label className="form-label">Customer Name *</label><input className="form-input" value={prForm.customer_name} onChange={e => setPrForm({ ...prForm, customer_name: e.target.value })} /></div>
+                                            <div className="form-group"><label className="form-label">Customer Name *</label><input className="form-input" value={prForm.customer_name} readOnly disabled style={{ background: 'var(--color-bg-secondary)', cursor: 'not-allowed' }} /></div>
                                             <div className="form-group"><label className="form-label">Phone *</label><input className="form-input" value={prForm.customer_phone} onChange={e => setPrForm({ ...prForm, customer_phone: e.target.value })} /></div>
                                         </div>
                                         <div className="form-group"><label className="form-label">Parcel Details *</label><input className="form-input" value={prForm.parcel_details} onChange={e => setPrForm({ ...prForm, parcel_details: e.target.value })} placeholder="e.g. 1450/- or product name" /></div>
                                         <div className="form-group"><label className="form-label">Address</label><textarea className="form-input" rows={2} value={prForm.address} onChange={e => setPrForm({ ...prForm, address: e.target.value })} /></div>
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                                            <div className="form-group"><label className="form-label">Send Date</label><input type="date" className="form-input" value={prForm.send_date} onChange={e => setPrForm({ ...prForm, send_date: e.target.value })} /></div>
-                                            <div className="form-group"><label className="form-label">Source</label>
-                                                <select className="form-input" value={prForm.source} onChange={e => setPrForm({ ...prForm, source: e.target.value })}>
-                                                    <option value="FB">FB</option>
-                                                    <option value="WhatsApp">WhatsApp</option>
-                                                    <option value="Instagram">Instagram</option>
-                                                    <option value="YouTube">YouTube</option>
-                                                    <option value="Other">Other</option>
-                                                </select>
-                                            </div>
+                                        <div className="form-group">
+                                            <label className="form-label">Send Date</label><input type="date" className="form-input" value={prForm.send_date} onChange={e => setPrForm({ ...prForm, send_date: e.target.value })} />
                                         </div>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
                                             <div className="form-group"><label className="form-label">Delivery Status</label>

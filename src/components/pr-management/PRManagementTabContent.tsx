@@ -530,7 +530,7 @@ export default function PRManagementTabContent() {
                                         <th style={{ minWidth: '100px' }}>Date</th>
                                         <th style={{ minWidth: '150px' }}>Customer / Phone</th>
                                         <th style={{ minWidth: '200px' }}>Address & Parcel</th>
-                                        <th>Source</th>
+                                        {/* <th>Source</th> */}
                                         <th>Delivery Status</th>
                                         <th>Video Status</th>
                                         <th>Payment</th>
@@ -586,14 +586,14 @@ export default function PRManagementTabContent() {
                                                         <EditableCell value={p.address} placeholder="Address" onSave={(val: string) => handleInlineUpdate(p.id, 'address', val)} />
                                                     </div>
                                                 </td>
-                                                <td>
+                                                {/* <td>
                                                     <ModernSelect 
                                                         value={p.source || 'FB'} 
                                                         options={['FB', 'WhatsApp', 'Instagram', 'YouTube', 'Other']}
                                                         onChange={(val: string) => handleInlineUpdate(p.id, 'source', val)}
                                                         iconMap={sourceIconMap}
                                                     />
-                                                </td>
+                                                </td> */}
                                                 <td>
                                                     <ModernSelect 
                                                         value={p.delivery_status || 'Product Sent'} 
