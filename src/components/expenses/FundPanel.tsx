@@ -47,7 +47,12 @@ function healthColor(remaining: number, allocated: number) {
     return '#10B981'
 }
 
-export default function FundPanel() {
+interface FundPanelProps {
+    activeEmployeeId?: string | null
+    onSelectEmployee?: (employeeId: string | null) => void
+}
+
+export default function FundPanel({ activeEmployeeId, onSelectEmployee }: FundPanelProps) {
     const toast = useToast()
     const [data, setData] = useState<FundData | null>(null)
     const [loading, setLoading] = useState(true)
@@ -140,9 +145,19 @@ export default function FundPanel() {
                                 {holders.map((h, i) => {
                                     const color = healthColor(h.remaining, h.allocated)
                                     const usedPct = h.allocated > 0 ? Math.min(100, (h.used / h.allocated) * 100) : 0
+                                    const isActive = !!onSelectEmployee && activeEmployeeId === h.employee_id
                                     return (
                                         <motion.div key={h.employee_id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
-                                            style={{ border: '1px solid var(--color-border-light)', borderRadius: '12px', padding: '14px', background: 'var(--color-surface)' }}>
+                                            onClick={onSelectEmployee ? () => onSelectEmployee(isActive ? null : h.employee_id) : undefined}
+                                            title={onSelectEmployee ? (isActive ? 'Click to clear filter' : `Click to view only ${h.name}'s expenses`) : undefined}
+                                            style={{
+                                                border: `1px solid ${isActive ? 'var(--color-primary)' : 'var(--color-border-light)'}`,
+                                                borderRadius: '12px', padding: '14px',
+                                                background: isActive ? 'rgba(37,99,235,0.06)' : 'var(--color-surface)',
+                                                cursor: onSelectEmployee ? 'pointer' : 'default',
+                                                boxShadow: isActive ? '0 0 0 1px var(--color-primary)' : 'none',
+                                                transition: 'border-color 0.15s, background 0.15s',
+                                            }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
                                                 <div className="avatar avatar-sm" style={{ background: getAvatarColor(h.name), overflow: 'hidden', flexShrink: 0 }}>
                                                     {h.avatar_url

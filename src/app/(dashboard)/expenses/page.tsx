@@ -130,7 +130,6 @@ export default function ExpensesPage() {
     const [bulkApproving, setBulkApproving] = useState(false)
     // Admin filter (Super Admin only) — who submitted the expenses being viewed
     const [filterSubmitter, setFilterSubmitter] = useState('')
-    const [employees, setEmployees] = useState<{ id: string; name: string; employee_id: string; role?: { level: number } }[]>([])
 
     const getWeekRange = (d: Date) => {
         const day = d.getDay()
@@ -210,19 +209,6 @@ export default function ExpensesPage() {
         setIsSuperAdmin(perms.is_super)
     }, [perms])
 
-    // Options for the Super-Admin-only "filter by submitter" dropdown.
-    useEffect(() => {
-        if (!isSuperAdmin) return
-        const fetchEmployees = async () => {
-            try {
-                const res = await fetch('/api/members?status=active')
-                const data = await res.json()
-                // "Admin filter" — only Owner/Super Admin/Admin (role level <= 3), not Manager/Member.
-                if (Array.isArray(data)) setEmployees(data.filter((m: { role?: { level: number } }) => (m.role?.level ?? 99) <= 3))
-            } catch { /* ignore */ }
-        }
-        fetchEmployees()
-    }, [isSuperAdmin])
 
     const openAddModal = () => { setEditingExpense(null); setForm(emptyForm); setShowExtraFields(false); setShowModal(true) }
     const openEditModal = (e: Expense) => {
@@ -471,8 +457,15 @@ export default function ExpensesPage() {
                 ))}
             </motion.div>
 
-            {/* Fund system (#18/#19) — admins see the transparent gamified fund overview */}
-            {isAdmin && <FundPanel />}
+            {/* Fund system (#18/#19) — admins see the transparent gamified fund overview.
+                Super Admin can click an admin's card to filter the expense list/charts to
+                just their expenses (click again to clear). */}
+            {isAdmin && (
+                <FundPanel
+                    activeEmployeeId={isSuperAdmin ? (filterSubmitter || null) : undefined}
+                    onSelectEmployee={isSuperAdmin ? (id) => setFilterSubmitter(id || '') : undefined}
+                />
+            )}
 
             {/* Date Range Filter */}
             <motion.div variants={item} style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
@@ -510,13 +503,6 @@ export default function ExpensesPage() {
                         <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8125rem' }}>to</span>
                         <div style={{ width: '150px' }}><ModernDatePicker value={customEnd} onChange={setCustomEnd} placeholder="End Date" /></div>
                     </div>
-                )}
-                {isSuperAdmin && (
-                    <select className="form-input" value={filterSubmitter} onChange={e => setFilterSubmitter(e.target.value)}
-                        style={{ width: '180px', height: '36px', fontSize: '0.8125rem' }}>
-                        <option value="">All Admins</option>
-                        {employees.map(emp => (<option key={emp.id} value={emp.id}>{emp.name}</option>))}
-                    </select>
                 )}
             </motion.div>
 
