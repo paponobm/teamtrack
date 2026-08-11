@@ -10,7 +10,7 @@ import InfluencersTab from '@/components/pr-management/InfluencersTab'
 
 export default function PRManagementPage() {
     const { t } = useLanguage()
-    const [mainTab, setMainTab] = useState<'pr' | 'influencers'>('pr')
+    const [mainTab, setMainTab] = useState<'pr' | 'influencers'>('influencers')
 
     return (
         <RequireFeature slugs={['pr-sending']}>
@@ -18,8 +18,8 @@ export default function PRManagementPage() {
                 <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
                     style={{ display: 'flex', position: 'relative', background: 'rgba(118,118,128,0.08)', borderRadius: '12px', padding: '3px', marginBottom: '16px', width: 'fit-content' }}>
                     {[
-                        { key: 'pr' as const, label: t('pr.title') || 'PR Management', icon: <IconClipboard size={15} /> },
                         { key: 'influencers' as const, label: 'Influencers', icon: <IconUsers size={15} /> },
+                        { key: 'pr' as const, label: t('pr.title') || 'PR Management', icon: <IconClipboard size={15} /> },
                     ].map(tab => (
                         <button key={tab.key} onClick={() => setMainTab(tab.key)}
                             style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 18px', borderRadius: '9px', border: 'none', fontSize: '0.875rem', fontWeight: 600, background: 'transparent', color: mainTab === tab.key ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)', cursor: 'pointer', zIndex: 1 }}>

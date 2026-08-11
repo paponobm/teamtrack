@@ -87,11 +87,16 @@ const platformIcon: Record<string, React.ReactNode> = {
 
 const DELIVERY_OPTIONS = ['Product Sent', 'Product Received', 'Returned']
 const VIDEO_OPTIONS = ['Pending', 'Video Received', 'Video Uploaded']
-const PAYMENT_OPTIONS = ['Paid', 'Unpaid', 'Free']
+// Replaces the old 3-way Paid/Unpaid/Free set with a real "Advance Paid" state in
+// between, backed by actual total/advance/due amounts (see the Add PR Entry form).
+const PAYMENT_STATUS_OPTIONS = ['Unpaid', 'Advance Paid', 'Fully Paid', 'Free']
+const PAYMENT_OPTIONS = PAYMENT_STATUS_OPTIONS
+const PAYMENT_METHOD_OPTIONS = ['Cash', 'bKash', 'Nagad', 'Bank Transfer', 'Other']
 
 function statusColor(value: string) {
-    if (value === 'Product Received' || value === 'Video Uploaded' || value === 'Paid') return { bg: 'rgba(16,185,129,0.1)', text: '#059669' }
+    if (value === 'Product Received' || value === 'Video Uploaded' || value === 'Fully Paid') return { bg: 'rgba(16,185,129,0.1)', text: '#059669' }
     if (value === 'Returned' || value === 'Unpaid') return { bg: 'rgba(220,38,38,0.1)', text: '#DC2626' }
+    if (value === 'Advance Paid') return { bg: 'rgba(245,158,11,0.1)', text: '#D97706' }
     return { bg: 'rgba(118,118,128,0.08)', text: 'var(--color-text-secondary)' }
 }
 
@@ -185,7 +190,10 @@ const emptyPrForm = {
     delivery_status: 'Product Sent',
     video_status: 'Pending',
     payment_status: 'Unpaid',
-    video_links: [''] as string[],
+    total_amount: '',
+    advance_amount: '',
+    payment_method: '',
+    transaction_id: '',
     view_note: '',
 }
 
@@ -346,21 +354,59 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
         setShowAddPr(true)
     }
 
-    const isPrFormValid = prForm.customer_name.trim() && prForm.customer_phone.trim() && prForm.parcel_details.trim()
+    // Due Amount is always derived, never entered — recomputed live from whatever's
+    // currently typed into Total/Advance so the preview never lags the inputs.
+    const prTotalAmount = Number(prForm.total_amount) || 0
+    const prAdvanceAmount = Number(prForm.advance_amount) || 0
+    const prDueAmount = Math.max(0, prTotalAmount - prAdvanceAmount)
+
+    const paymentValidationError = (() => {
+        if (prForm.payment_status === 'Advance Paid') {
+            if (prTotalAmount <= 0) return 'Total Amount must be greater than 0'
+            if (prAdvanceAmount <= 0) return 'Advance Amount must be greater than 0'
+            if (prAdvanceAmount > prTotalAmount) return 'Advance Amount cannot exceed Total Amount'
+            if (!prForm.payment_method) return 'Payment Method is required'
+        } else if (prForm.payment_status === 'Fully Paid') {
+            if (prTotalAmount <= 0) return 'Total Amount must be greater than 0'
+            if (!prForm.payment_method) return 'Payment Method is required'
+        }
+        return null
+    })()
+
+    const isPrFormValid = !!(prForm.customer_name.trim() && prForm.customer_phone.trim() && prForm.parcel_details.trim() && !paymentValidationError)
 
     const handleAddPr = async () => {
         if (!isPrFormValid) return
         setSavingPr(true)
         try {
-            const { video_links, ...rest } = prForm
-            const cleanLinks = video_links.map(v => v.trim()).filter(Boolean)
+            const { total_amount, advance_amount, payment_method, transaction_id, ...rest } = prForm
+
+            // Amounts are always derived from Payment Status server-side-equivalent rules
+            // here (never trusted as free-standing input) — Free never carries stray amounts,
+            // Fully Paid always mirrors its own total, Advance Paid's due is always
+            // total - advance, and Unpaid's due (when a total is tracked) is the full total
+            // since nothing has been paid toward it yet.
+            let paymentFields: { total_amount: number | null; advance_amount: number | null; due_amount: number | null; payment_method: string | null; transaction_id: string | null }
+            if (prForm.payment_status === 'Free') {
+                paymentFields = { total_amount: 0, advance_amount: 0, due_amount: 0, payment_method: null, transaction_id: null }
+            } else if (prForm.payment_status === 'Fully Paid') {
+                const total = Number(total_amount) || 0
+                paymentFields = { total_amount: total, advance_amount: total, due_amount: 0, payment_method, transaction_id: transaction_id.trim() || null }
+            } else if (prForm.payment_status === 'Advance Paid') {
+                const total = Number(total_amount) || 0
+                const advance = Number(advance_amount) || 0
+                paymentFields = { total_amount: total, advance_amount: advance, due_amount: total - advance, payment_method, transaction_id: transaction_id.trim() || null }
+            } else {
+                // Unpaid — no payment made, but the quoted total (if entered) is still tracked
+                // so Due Amount reflects the full outstanding balance.
+                const total = total_amount ? Number(total_amount) || 0 : null
+                paymentFields = { total_amount: total, advance_amount: 0, due_amount: total, payment_method: null, transaction_id: null }
+            }
+
             const res = await fetch('/api/pr-management', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                // video_link stays a single URL (the first one) so PR Management's own table —
-                // which only ever renders one video-link icon per row — keeps working unchanged
-                // for these entries too; video_links carries the full list for this page's own display.
-                body: JSON.stringify({ ...rest, video_link: cleanLinks[0] || null, video_links: cleanLinks, influencer_id: influencerId })
+                body: JSON.stringify({ ...rest, ...paymentFields, influencer_id: influencerId })
             })
             if (res.ok) {
                 toast.success('PR entry added')
@@ -688,47 +734,71 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
                                                     <option value="Video Uploaded">Video Uploaded</option>
                                                 </select>
                                             </div>
-                                            <div className="form-group"><label className="form-label">Payment Status</label>
+                                            <div className="form-group"><label className="form-label">Payment Status *</label>
                                                 <select className="form-input" value={prForm.payment_status} onChange={e => setPrForm({ ...prForm, payment_status: e.target.value })}>
-                                                    <option value="Paid">Paid</option>
-                                                    <option value="Unpaid">Unpaid</option>
-                                                    <option value="Free">Free</option>
+                                                    {PAYMENT_STATUS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                                                 </select>
                                             </div>
                                         </div>
-                                        <div className="form-group">
-                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                                <label className="form-label">Video Link{prForm.video_links.length > 1 ? 's' : ''}</label>
-                                                <button type="button" onClick={() => setPrForm({ ...prForm, video_links: [...prForm.video_links, ''] })}
-                                                    style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'transparent', border: 'none', color: 'var(--color-primary)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: '2px 4px' }}>
-                                                    <IconPlus size={13} /> Add
-                                                </button>
+
+                                        {prForm.payment_status === 'Unpaid' && (
+                                            <div className="form-group"><label className="form-label">Total Amount</label>
+                                                <input type="number" min="0" step="0.01" className="form-input" value={prForm.total_amount} onChange={e => setPrForm({ ...prForm, total_amount: e.target.value })} placeholder="৳0" />
                                             </div>
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                                {prForm.video_links.map((link, idx) => (
-                                                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, borderRadius: '50%', background: 'rgba(118,118,128,0.1)', color: 'var(--color-text-secondary)', fontSize: '0.6875rem', fontWeight: 600, flexShrink: 0 }}>
-                                                            {idx + 1}
-                                                        </span>
-                                                        <input className="form-input" value={link} placeholder="https://..."
-                                                            onChange={e => setPrForm({ ...prForm, video_links: prForm.video_links.map((v, i) => i === idx ? e.target.value : v) })}
-                                                            onKeyDown={e => {
-                                                                if (e.key === 'Enter') {
-                                                                    e.preventDefault()
-                                                                    if (idx === prForm.video_links.length - 1) setPrForm({ ...prForm, video_links: [...prForm.video_links, ''] })
-                                                                }
-                                                            }}
-                                                            style={{ flex: 1 }} />
-                                                        {prForm.video_links.length > 1 && (
-                                                            <button type="button" onClick={() => setPrForm({ ...prForm, video_links: prForm.video_links.filter((_, i) => i !== idx) })}
-                                                                style={{ display: 'flex', background: 'transparent', border: 'none', color: 'var(--color-text-tertiary)', cursor: 'pointer', padding: '2px', flexShrink: 0 }} title="Remove">
-                                                                <IconX size={14} />
-                                                            </button>
-                                                        )}
+                                        )}
+
+                                        {prForm.payment_status === 'Advance Paid' && (
+                                            <div className="form-group">
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                                                    <div className="form-group"><label className="form-label">Total Amount *</label>
+                                                        <input type="number" min="0" step="0.01" className="form-input" value={prForm.total_amount} onChange={e => setPrForm({ ...prForm, total_amount: e.target.value })} placeholder="৳0" />
                                                     </div>
-                                                ))}
+                                                    <div className="form-group"><label className="form-label">Advance Amount *</label>
+                                                        <input type="number" min="0" step="0.01" className="form-input" value={prForm.advance_amount} onChange={e => setPrForm({ ...prForm, advance_amount: e.target.value })} placeholder="৳0" />
+                                                    </div>
+                                                    <div className="form-group"><label className="form-label">Due Amount</label>
+                                                        <input className="form-input" value={`৳${prDueAmount.toLocaleString()}`} readOnly disabled style={{ background: 'var(--color-bg-secondary)', cursor: 'not-allowed' }} />
+                                                    </div>
+                                                </div>
+                                                <div className="form-group" style={{ marginTop: '12px' }}><label className="form-label">Payment Method *</label>
+                                                    <select className="form-input" value={prForm.payment_method} onChange={e => setPrForm({ ...prForm, payment_method: e.target.value })}>
+                                                        <option value="">Select method...</option>
+                                                        {PAYMENT_METHOD_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                                    </select>
+                                                </div>
+                                                {prForm.payment_method && (
+                                                    <div className="form-group" style={{ marginTop: '12px' }}><label className="form-label">Transaction ID (optional)</label>
+                                                        <input className="form-input" value={prForm.transaction_id} onChange={e => setPrForm({ ...prForm, transaction_id: e.target.value })} placeholder="e.g. TXN123456" />
+                                                    </div>
+                                                )}
                                             </div>
-                                        </div>
+                                        )}
+
+                                        {prForm.payment_status === 'Fully Paid' && (
+                                            <div className="form-group">
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                                    <div className="form-group"><label className="form-label">Total Amount *</label>
+                                                        <input type="number" min="0" step="0.01" className="form-input" value={prForm.total_amount} onChange={e => setPrForm({ ...prForm, total_amount: e.target.value })} placeholder="৳0" />
+                                                    </div>
+                                                    <div className="form-group"><label className="form-label">Payment Method *</label>
+                                                        <select className="form-input" value={prForm.payment_method} onChange={e => setPrForm({ ...prForm, payment_method: e.target.value })}>
+                                                            <option value="">Select method...</option>
+                                                            {PAYMENT_METHOD_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                {prForm.payment_method && (
+                                                    <div className="form-group" style={{ marginTop: '12px' }}><label className="form-label">Transaction ID (optional)</label>
+                                                        <input className="form-input" value={prForm.transaction_id} onChange={e => setPrForm({ ...prForm, transaction_id: e.target.value })} placeholder="e.g. TXN123456" />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {paymentValidationError && (
+                                            <div style={{ fontSize: '0.75rem', color: '#DC2626', marginTop: '-6px' }}>{paymentValidationError}</div>
+                                        )}
+
                                         <div className="form-group"><label className="form-label">Note</label><textarea className="form-input" rows={2} value={prForm.view_note} onChange={e => setPrForm({ ...prForm, view_note: e.target.value })} /></div>
                                     </div>
                                     <div className="modal-footer">
