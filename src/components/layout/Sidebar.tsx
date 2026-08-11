@@ -53,6 +53,7 @@ const navItems = [
         items: [
             { labelKey: 'nav.courier', href: '/courier', icon: 'courier', slugs: ['courier'], adminOnly: false },
             { labelKey: 'nav.expenses', href: '/expenses', icon: 'expense', slugs: null, adminOnly: true },
+            { labelKey: 'Payroll Management', href: '/payroll-management', icon: 'payroll', slugs: null, adminOnly: 'super' as const },
             { labelKey: 'nav.requisitions', href: '/requisitions', icon: 'requisition', slugs: ['requisitions'], adminOnly: false },
             { labelKey: 'nav.ideas', href: '/ideas', icon: 'idea', slugs: ['idea-sharing'], adminOnly: false },
             { labelKey: 'nav.content', href: '/content', icon: 'content', slugs: ['content'], adminOnly: false },
@@ -92,6 +93,7 @@ function NavIcon({ type }: { type: string }) {
         profile: (<svg viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>),
         audit: (<svg viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" /></svg>),
         leaderboard: (<svg viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" /></svg>),
+        payroll: (<svg viewBox="0 0 20 20" fill="currentColor"><path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" /><path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zm-8 1a2 2 0 100 4 2 2 0 000-4z" clipRule="evenodd" /></svg>),
     }
     return icons[type] || <svg viewBox="0 0 20 20" fill="currentColor"><circle cx="10" cy="10" r="3" /></svg>
 }

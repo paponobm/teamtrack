@@ -20,3 +20,12 @@ export function getMonthRange(date: Date) {
     const end = new Date(date.getFullYear(), date.getMonth() + 1, 0)
     return { start: getLocalDateString(start), end: getLocalDateString(end) }
 }
+
+// Same as getMonthRange, but takes a 'YYYY-MM' string (the shape <input type="month">
+// and the payroll module's `salary_sheets.month` column both use) instead of a Date.
+export function getMonthRangeFromString(month: string) {
+    const [y, m] = month.split('-').map(Number)
+    const start = new Date(y, m - 1, 1)
+    const end = new Date(y, m, 0)
+    return { start: getLocalDateString(start), end: getLocalDateString(end) }
+}
