@@ -142,7 +142,7 @@ export default function SalarySheet() {
 
             {!loading && sheetExists && (
                 <div className="card" style={{ overflowX: 'auto', padding: 0 }}>
-                    <table className="table" style={{ whiteSpace: 'nowrap' }}>
+                    <table className="table payroll-grid-table" style={{ whiteSpace: 'nowrap' }}>
                         <thead>
                             <tr>
                                 <th>SL</th>
@@ -230,6 +230,18 @@ export default function SalarySheet() {
                     />
                 )}
             </AnimatePresence>
+
+            {/* Excel/Sheets-style grid borders, scoped to this table only — the shared
+                .table class elsewhere in the app keeps its row-only borders. */}
+            <style jsx>{`
+                .payroll-grid-table {
+                    border-collapse: collapse;
+                }
+                .payroll-grid-table th,
+                .payroll-grid-table td {
+                    border: 1px solid var(--color-border-light);
+                }
+            `}</style>
         </div>
     )
 }
