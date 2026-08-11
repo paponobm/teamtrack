@@ -233,6 +233,20 @@ export default function InfluencersTab() {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <motion.div variants={container} animate="show" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                <motion.div className="page-header" variants={item}>
+                    <div>
+                        <h1 className="page-title">Influencers</h1>
+                        <p className="page-subtitle">Manage influencer partnerships and PR collaborations</p>
+                    </div>
+                    {isAdmin && (
+                        <div style={{ display: 'flex', gap: '12px' }}>
+                            <button className="btn btn-primary btn-sm" onClick={() => { setForm(emptyForm); setShowAddModal(true) }}>
+                                <IconPlus size={16} /> Add Influencer
+                            </button>
+                        </div>
+                    )}
+                </motion.div>
+
                 {/* Summary cards */}
                 <motion.div variants={item} className="grid grid-4" style={{ gap: '14px', marginBottom: '20px' }}>
                     {loading && !summary ? (
@@ -308,11 +322,6 @@ export default function InfluencersTab() {
                         <option value="rating">Sort: Rating</option>
                         <option value="total_prs">Sort: Total PRs</option>
                     </select>
-                    {isAdmin && (
-                        <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={() => { setForm(emptyForm); setShowAddModal(true) }}>
-                            <IconPlus size={16} /> Add Influencer
-                        </button>
-                    )}
                 </motion.div>
 
                 {/* Card grid */}
