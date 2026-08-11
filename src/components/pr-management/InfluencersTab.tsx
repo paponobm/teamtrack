@@ -7,11 +7,14 @@ import { usePermissions } from '@/lib/PermissionsContext'
 import StarRating from '@/components/common/StarRating'
 import InfluencerProfileModal from '@/components/pr-management/InfluencerProfileModal'
 import { CONTACT_SOURCES, PLATFORMS } from '@/components/pr-management/influencerConstants'
+import { getLocalDateString, getWeekRange, getMonthRange } from '@/lib/dateRange'
 import {
-    IconUsers, IconPackage, IconCheckCircle, IconClock, IconBanknote, IconStar,
+    IconUsers, IconPackage, IconCheckCircle, IconClock, IconBanknote,
     IconSearch, IconPlus, IconX, IconPin, IconPhone, IconTrash,
-    IconYouTube, IconUser, IconCamera
+    IconYouTube, IconUser, IconCamera, IconChevronLeft, IconChevronRight, IconCalendar
 } from '@/components/icons/Icons'
+
+type DateRangeMode = 'all' | 'today' | 'week' | 'month' | 'custom'
 
 export interface InfluencerListItem {
     id: string
@@ -40,6 +43,8 @@ export interface InfluencerListItem {
         conversion_rate: number
         uploadedPlatforms: string[]
         lastActivity: string | null
+        lastPrDate: string | null
+        latestVideoStatus: string | null
     }
 }
 
@@ -68,6 +73,16 @@ function PaymentBadge({ status }: { status: string }) {
     return <span style={{ fontSize: '0.75rem', fontWeight: 600, padding: '4px 10px', borderRadius: '20px', background: 'rgba(220,38,38,0.1)', color: '#DC2626' }}>Unpaid</span>
 }
 
+// Same tri-state convention used for video_status elsewhere (Video Uploaded = green,
+// Video Received = blue, Pending/unknown = amber).
+function VideoStatusBadge({ status }: { status: string | null }) {
+    if (status === 'Video Uploaded') return <span style={{ fontSize: '0.75rem', fontWeight: 600, padding: '3px 10px', borderRadius: '20px', background: 'rgba(16,185,129,0.1)', color: '#059669' }}>Video Uploaded</span>
+    if (status === 'Video Received') return <span style={{ fontSize: '0.75rem', fontWeight: 600, padding: '3px 10px', borderRadius: '20px', background: 'rgba(59,130,246,0.1)', color: '#2563EB' }}>Video Received</span>
+    return <span style={{ fontSize: '0.75rem', fontWeight: 600, padding: '3px 10px', borderRadius: '20px', background: 'rgba(245,158,11,0.1)', color: '#D97706' }}>Pending</span>
+}
+
+const formatCardDate = (d: string | null) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '--'
+
 export default function InfluencersTab() {
     const { data: perms } = usePermissions()
     const toast = useToast()
@@ -79,11 +94,12 @@ export default function InfluencersTab() {
     const [saving, setSaving] = useState(false)
 
     const [search, setSearch] = useState('')
-    const [statusFilter, setStatusFilter] = useState('all')
-    const [platformFilter, setPlatformFilter] = useState('all')
     const [paymentFilter, setPaymentFilter] = useState('all')
-    const [ratingFilter, setRatingFilter] = useState('all')
     const [sortBy, setSortBy] = useState('recent')
+    const [dateRangeMode, setDateRangeMode] = useState<DateRangeMode>('all')
+    const [refDate, setRefDate] = useState(() => getLocalDateString())
+    const [customStart, setCustomStart] = useState('')
+    const [customEnd, setCustomEnd] = useState('')
 
     const [selectedId, setSelectedId] = useState<string | null>(null)
     const [showAddModal, setShowAddModal] = useState(false)
@@ -115,7 +131,23 @@ export default function InfluencersTab() {
     const fetchInfluencers = useCallback(async () => {
         setLoading(true)
         try {
-            const res = await fetch('/api/influencers')
+            const params = new URLSearchParams()
+            if (dateRangeMode === 'today') {
+                params.set('start_date', refDate)
+                params.set('end_date', refDate)
+            } else if (dateRangeMode === 'week') {
+                const r = getWeekRange(new Date(refDate))
+                params.set('start_date', r.start)
+                params.set('end_date', r.end)
+            } else if (dateRangeMode === 'month') {
+                const r = getMonthRange(new Date(refDate))
+                params.set('start_date', r.start)
+                params.set('end_date', r.end)
+            } else if (dateRangeMode === 'custom' && customStart && customEnd) {
+                params.set('start_date', customStart)
+                params.set('end_date', customEnd)
+            }
+            const res = await fetch(`/api/influencers?${params}`)
             if (res.ok) {
                 const json = await res.json()
                 setInfluencers(json.data || [])
@@ -126,7 +158,7 @@ export default function InfluencersTab() {
         } finally {
             setLoading(false)
         }
-    }, [])
+    }, [dateRangeMode, refDate, customStart, customEnd])
 
     useEffect(() => { fetchInfluencers() }, [fetchInfluencers])
 
@@ -145,24 +177,6 @@ export default function InfluencersTab() {
         }
     }
 
-    // Toggles a single platform in an influencer's `uploaded_platforms` set directly
-    // from the card — this is the "which platform does he use to upload video" marker.
-    const handleTogglePlatform = async (inf: InfluencerListItem, platformKey: string) => {
-        const current = inf.uploaded_platforms || []
-        const next = current.includes(platformKey) ? current.filter(p => p !== platformKey) : [...current, platformKey]
-        setInfluencers(prev => prev.map(i => i.id === inf.id ? { ...i, uploaded_platforms: next } : i))
-        try {
-            const res = await fetch('/api/influencers', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: inf.id, uploaded_platforms: next })
-            })
-            if (!res.ok) throw new Error('Failed')
-        } catch {
-            toast.error('Failed to update platforms')
-            setInfluencers(prev => prev.map(i => i.id === inf.id ? { ...i, uploaded_platforms: current } : i))
-        }
-    }
 
     const handleCreate = async () => {
         if (!form.name.trim()) return
@@ -194,10 +208,7 @@ export default function InfluencersTab() {
             const q = search.toLowerCase()
             if (!(i.name || '').toLowerCase().includes(q) && !(i.phone || '').toLowerCase().includes(q)) return false
         }
-        if (statusFilter !== 'all' && (i.status || 'Active') !== statusFilter) return false
-        if (platformFilter !== 'all' && !(i.uploaded_platforms || []).includes(platformFilter)) return false
         if (paymentFilter !== 'all' && (i.payment_status || 'Unpaid') !== paymentFilter) return false
-        if (ratingFilter !== 'all' && (i.rating || 0) < parseInt(ratingFilter, 10)) return false
         return true
     }).sort((a, b) => {
         if (sortBy === 'name') return (a.name || '').localeCompare(b.name || '')
@@ -249,31 +260,47 @@ export default function InfluencersTab() {
                         <input className="form-input" type="text" placeholder="Search by name or phone..." value={search} onChange={e => setSearch(e.target.value)}
                             style={{ paddingLeft: '34px', height: '34px', fontSize: '0.8125rem', background: 'rgba(118,118,128,0.08)', border: 'none', borderRadius: '10px', width: '100%' }} />
                     </div>
-                    <select className="form-input" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ height: '34px', fontSize: '0.8125rem', width: 'auto' }}>
-                        <option value="all">All Status</option>
-                        <option value="Active">Active</option>
-                        <option value="Inactive">Inactive</option>
-                    </select>
-                    <select className="form-input" value={platformFilter} onChange={e => setPlatformFilter(e.target.value)} style={{ height: '34px', fontSize: '0.8125rem', width: 'auto' }}>
-                        <option value="all">All Platforms</option>
-                        <option value="facebook">Facebook</option>
-                        <option value="whatsapp">WhatsApp</option>
-                        <option value="instagram">Instagram</option>
-                        <option value="tiktok">TikTok</option>
-                        <option value="youtube">YouTube</option>
-                    </select>
+                    <div style={{ display: 'flex', position: 'relative', background: 'rgba(118,118,128,0.08)', borderRadius: '10px', padding: '2px' }}>
+                        {([{ key: 'all', label: 'All' }, { key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' }, { key: 'month', label: 'This Month' }, { key: 'custom', label: 'Custom' }] as const).map(opt => (
+                            <button key={opt.key} onClick={() => setDateRangeMode(opt.key)}
+                                style={{ position: 'relative', padding: '6px 12px', borderRadius: '8px', border: 'none', fontSize: '0.8125rem', fontWeight: 500, background: 'transparent', color: dateRangeMode === opt.key ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)', cursor: 'pointer', transition: 'color 0.2s', zIndex: 1 }}>
+                                {dateRangeMode === opt.key && (
+                                    <motion.div layoutId="influencerDateTab" style={{ position: 'absolute', inset: 0, background: 'var(--color-bg-primary)', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
+                                )}
+                                <span style={{ position: 'relative', zIndex: 1 }}>{opt.label}</span>
+                            </button>
+                        ))}
+                    </div>
+                    {(dateRangeMode === 'today' || dateRangeMode === 'week' || dateRangeMode === 'month') && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', borderRadius: '10px', padding: '4px' }}>
+                            <button className="btn btn-ghost btn-icon" onClick={() => {
+                                const d = new Date(refDate); d.setDate(d.getDate() - (dateRangeMode === 'week' ? 7 : dateRangeMode === 'month' ? 30 : 1)); setRefDate(getLocalDateString(d))
+                            }} style={{ borderRadius: '8px' }}>
+                                <IconChevronLeft size={16} />
+                            </button>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 4px', fontSize: '0.8125rem' }}>
+                                <IconCalendar size={14} color="var(--color-text-tertiary)" />
+                                <input type="date" value={refDate} onChange={e => setRefDate(e.target.value)} className="input" style={{ border: 'none', background: 'transparent', padding: '0', fontSize: '0.8125rem', width: '130px' }} />
+                            </div>
+                            <button className="btn btn-ghost btn-icon" onClick={() => {
+                                const d = new Date(refDate); d.setDate(d.getDate() + (dateRangeMode === 'week' ? 7 : dateRangeMode === 'month' ? 30 : 1)); setRefDate(getLocalDateString(d))
+                            }} style={{ borderRadius: '8px' }}>
+                                <IconChevronRight size={16} />
+                            </button>
+                        </div>
+                    )}
+                    {dateRangeMode === 'custom' && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} className="input" style={{ padding: '6px 8px', fontSize: '0.8125rem', width: '150px', border: '1px solid var(--color-border-light)', borderRadius: '8px' }} />
+                            <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8125rem' }}>to</span>
+                            <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="input" style={{ padding: '6px 8px', fontSize: '0.8125rem', width: '150px', border: '1px solid var(--color-border-light)', borderRadius: '8px' }} />
+                        </div>
+                    )}
                     <select className="form-input" value={paymentFilter} onChange={e => setPaymentFilter(e.target.value)} style={{ height: '34px', fontSize: '0.8125rem', width: 'auto' }}>
                         <option value="all">All Payments</option>
                         <option value="Paid">Paid</option>
                         <option value="Unpaid">Unpaid</option>
                         <option value="Free">Free</option>
-                    </select>
-                    <select className="form-input" value={ratingFilter} onChange={e => setRatingFilter(e.target.value)} style={{ height: '34px', fontSize: '0.8125rem', width: 'auto' }}>
-                        <option value="all">All Ratings</option>
-                        <option value="4">4+ Stars</option>
-                        <option value="3">3+ Stars</option>
-                        <option value="2">2+ Stars</option>
-                        <option value="1">1+ Stars</option>
                     </select>
                     <select className="form-input" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ height: '34px', fontSize: '0.8125rem', width: 'auto' }}>
                         <option value="recent">Sort: Recent</option>
@@ -343,17 +370,12 @@ export default function InfluencersTab() {
                                         {activePlatforms.length > 0 && (
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>
                                                 Uploads on:
+                                                {/* Read-only here — editing lives in the Edit Profile modal (full add/remove
+                                                    checkbox list), so this can't drift into a confusing remove-only click. */}
                                                 {activePlatforms.map(p => (
-                                                    isAdmin ? (
-                                                        <button key={p} title={`${platformLabelMap[p] || p} (click to remove)`} onClick={e => { e.stopPropagation(); handleTogglePlatform(inf, p) }}
-                                                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: '6px', border: 'none', cursor: 'pointer', background: 'rgba(118,118,128,0.1)' }}>
-                                                            {platformIconMap[p]}
-                                                        </button>
-                                                    ) : (
-                                                        <span key={p} title={platformLabelMap[p] || p} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: '6px', background: 'rgba(118,118,128,0.08)' }}>
-                                                            {platformIconMap[p]}
-                                                        </span>
-                                                    )
+                                                    <span key={p} title={platformLabelMap[p] || p} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: '6px', background: 'rgba(118,118,128,0.08)' }}>
+                                                        {platformIconMap[p]}
+                                                    </span>
                                                 ))}
                                             </div>
                                         )}
@@ -370,6 +392,13 @@ export default function InfluencersTab() {
                                             <span><strong style={{ color: 'var(--color-text-primary)' }}>{inf.stats.total_prs}</strong> Sent</span>
                                             <span><strong style={{ color: 'var(--color-text-primary)' }}>{inf.stats.total_videos}</strong> Videos</span>
                                             <span><strong style={{ color: 'var(--color-text-primary)' }}>{inf.stats.pending_products}</strong> Pending</span>
+                                        </div>
+
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid var(--color-border-light)' }}>
+                                            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+                                                Last PR: <strong style={{ color: 'red', fontWeight: 600 }}>{formatCardDate(inf.stats.lastPrDate)}</strong>
+                                            </div>
+                                            {inf.stats.total_prs > 0 ? <VideoStatusBadge status={inf.stats.latestVideoStatus} /> : <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>--</span>}
                                         </div>
                                     </div>
                                 )

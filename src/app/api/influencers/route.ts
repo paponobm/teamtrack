@@ -15,7 +15,19 @@ function computeStats(prs: PrEntryRow[]) {
         if (!latest || (p.created_at && p.created_at > latest)) return p.created_at
         return latest
     }, null)
-    return { total_prs, total_videos, pending_products, unpaid_count, conversion_rate, uploadedPlatforms, lastActivity }
+    // Most recent PR by send_date (falls back to created_at if send_date is somehow
+    // missing) — this is computed from whatever subset of `prs` was passed in, so it's
+    // automatically scoped to the active date filter in list mode.
+    const latestPr = [...prs].sort((a, b) => {
+        const ad = a.send_date || a.created_at || ''
+        const bd = b.send_date || b.created_at || ''
+        return bd.localeCompare(ad)
+    })[0] || null
+    return {
+        total_prs, total_videos, pending_products, unpaid_count, conversion_rate, uploadedPlatforms, lastActivity,
+        lastPrDate: latestPr?.send_date || null,
+        latestVideoStatus: latestPr?.video_status || null,
+    }
 }
 
 // GET /api/influencers            -> list mode (search/status/platform/payment/rating/sort filters)
@@ -62,47 +74,49 @@ export async function GET(request: Request) {
     }
 
     const search = searchParams.get('search')?.trim().toLowerCase() || ''
-    const status = searchParams.get('status') || 'all'
-    const platform = searchParams.get('platform') || 'all'
     const payment = searchParams.get('payment') || 'all'
-    const rating = searchParams.get('rating') || 'all'
     const sort = searchParams.get('sort') || 'recent'
+    // Date filter (Today/Weekly/Monthly/Custom from the UI, or omitted for "All"). Drives:
+    // which PRs count toward each influencer's total_prs/total_videos/pending_products
+    // (and thus the "Total PR Sent"/"Videos Uploaded"/"Pending Products" summary cards),
+    // the new "last PR date"/"latest video status" card fields, and which influencers
+    // even show up (must have >=1 PR whose send_date falls in range).
+    const startDate = searchParams.get('start_date')
+    const endDate = searchParams.get('end_date')
+    const hasDateFilter = !!(startDate && endDate)
 
     const { data: rows, error } = await supabase
         .from('influencers')
-        .select(`*, pr_entries:pr_management(id, delivery_status, video_status, payment_status, source, created_at)`)
+        .select(`*, pr_entries:pr_management(id, delivery_status, video_status, payment_status, source, send_date, created_at)`)
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let list = (rows || []).map((r: any) => {
-        const prs = (r.pr_entries || []) as PrEntryRow[]
-        const stats = computeStats(prs)
+        const allPrs = (r.pr_entries || []) as PrEntryRow[]
+        const scopedPrs = hasDateFilter
+            ? allPrs.filter(p => {
+                const d = p.send_date || p.created_at?.slice(0, 10)
+                return !!d && d >= startDate! && d <= endDate!
+            })
+            : allPrs
+        const stats = computeStats(scopedPrs)
         return { ...r, pr_entries: undefined, stats }
     })
+
+    // Lifetime totals (Total/Active/Paid/Unpaid Influencers) are computed from the full,
+    // unfiltered `rows` further down — never from date-scoped `list` — per spec: those
+    // cards represent lifetime totals and must not move when the date filter changes.
+
+    if (hasDateFilter) {
+        list = list.filter(i => i.stats.total_prs > 0)
+    }
 
     if (search) {
         list = list.filter(i => (i.name || '').toLowerCase().includes(search) || (i.phone || '').toLowerCase().includes(search))
     }
-    if (status !== 'all') {
-        list = list.filter(i => (i.status || 'Active') === status)
-    }
-    if (platform !== 'all') {
-        list = list.filter(i => {
-            if (platform === 'facebook') return !!i.page_url
-            if (platform === 'whatsapp') return !!i.phone
-            if (platform === 'instagram') return !!i.instagram_url
-            if (platform === 'tiktok') return !!i.tiktok_url
-            if (platform === 'youtube') return !!i.youtube_url
-            return true
-        })
-    }
     if (payment !== 'all') {
         list = list.filter(i => (i.payment_status || 'Unpaid') === payment)
-    }
-    if (rating !== 'all') {
-        const minRating = parseInt(rating, 10)
-        list = list.filter(i => (i.rating || 0) >= minRating)
     }
 
     list.sort((a, b) => {
