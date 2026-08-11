@@ -209,11 +209,13 @@ export default function InfluencersTab() {
     const summaryCards = summary ? [
         { label: 'Total Influencers', value: summary.total, color: '#3B82F6', icon: <IconUsers size={20} color="#3B82F6" /> },
         { label: 'Active Influencers', value: summary.active, color: '#10B981', icon: <IconCheckCircle size={20} color="#10B981" /> },
+         { label: 'Paid Influencers', value: summary.paidInfluencers, color: '#059669', icon: <IconBanknote size={20} color="#059669" /> },
+        { label: 'Unpaid Influencers', value: summary.unpaidInfluencers, color: '#DC2626', icon: <IconBanknote size={20} color="#DC2626" /> },
         { label: 'Total PR Sent', value: summary.totalPrSent, color: '#8B5CF6', icon: <IconPackage size={20} color="#8B5CF6" /> },
         { label: 'Videos Uploaded', value: summary.totalVideosUploaded, color: '#06B6D4', icon: <IconYouTube size={20} color="#06B6D4" /> },
         { label: 'Pending Products', value: summary.pendingProducts, color: '#F59E0B', icon: <IconClock size={20} color="#F59E0B" /> },
-        { label: 'Paid Influencers', value: summary.paidInfluencers, color: '#059669', icon: <IconBanknote size={20} color="#059669" /> },
-        { label: 'Unpaid Influencers', value: summary.unpaidInfluencers, color: '#DC2626', icon: <IconBanknote size={20} color="#DC2626" /> },
+        // { label: 'Paid Influencers', value: summary.paidInfluencers, color: '#059669', icon: <IconBanknote size={20} color="#059669" /> },
+        // { label: 'Unpaid Influencers', value: summary.unpaidInfluencers, color: '#DC2626', icon: <IconBanknote size={20} color="#DC2626" /> },
         // { label: 'Average Rating', value: `${summary.averageRating}/5`, color: '#F59E0B', icon: <IconStar size={20} color="#F59E0B" /> },
     ] : []
 
@@ -361,7 +363,7 @@ export default function InfluencersTab() {
                                                 <StarRating value={inf.rating || 0} readOnly size={16} />
                                                 <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>{inf.rating ? inf.rating.toFixed(1) : 'Not rated'}</span>
                                             </div>
-                                            <PaymentBadge status={inf.payment_status || 'Unpaid'} />
+                                            {/* <PaymentBadge status={inf.payment_status || 'Unpaid'} /> */}
                                         </div>
 
                                         <div style={{ display: 'flex', gap: '14px', fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
@@ -462,13 +464,13 @@ export default function InfluencersTab() {
                                             <option value="Inactive">Inactive</option>
                                         </select>
                                     </div>
-                                    <div className="form-group"><label className="form-label">Payment Status</label>
+                                    {/* <div className="form-group"><label className="form-label">Payment Status</label>
                                         <select className="form-input" value={form.payment_status} onChange={e => setForm({ ...form, payment_status: e.target.value })}>
                                             <option value="Paid">Paid</option>
                                             <option value="Unpaid">Unpaid</option>
                                             <option value="Free">Free</option>
                                         </select>
-                                    </div>
+                                    </div> */}
                                 </div>
                             </div>
                             <div className="modal-footer">
