@@ -71,6 +71,11 @@ function formatDate(d: string | null) {
     return new Date(d).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+function formatMonthLabel(month: string) {
+    const [y, m] = month.split('-').map(Number)
+    return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+}
+
 export default function SalarySheet() {
     const { success: toastSuccess, error: toastError } = useToast()
     const [month, setMonth] = useState(currentMonth)
@@ -122,7 +127,12 @@ export default function SalarySheet() {
 
     return (
         <div>
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} 
+                style={{ marginBottom: '4px', padding: '40px 0' }}>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.02em' }}>{formatMonthLabel(month)} Employee Salary Sheet</h2>
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.05 }}
                 style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
                 <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Month</label>
                 <input className="input" type="month" value={month} onChange={e => setMonth(e.target.value)}
@@ -308,7 +318,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', padding: '12px', borderRadius: '10px', background: 'var(--color-bg-secondary)' }}>
                         <ReadOnlyField label="Employee ID" value={entry.employee.employee_id || '—'} />
                         <ReadOnlyField label="Department" value={entry.employee.department || '—'} />
-                        <ReadOnlyField label="Attendance" value={`${entry.attendance.present} present, ${entry.attendance.absent} absent, ${entry.attendance.late} late`} />
+                        <ReadOnlyField label="Attendance" value={`${entry.attendance.present} present, ${entry.attendance.absent} absent`} />
                         <ReadOnlyField label="Leave Days" value={String(entry.attendance.leave)} />
                         <ReadOnlyField label="Fine" value={`৳${entry.fine.toLocaleString()}`} />
                     </div>

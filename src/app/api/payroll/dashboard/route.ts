@@ -34,6 +34,11 @@ export async function GET(request: Request) {
             paidAmount: 0,
             unpaidEmployees: 0,
             unpaidAmount: 0,
+            totalBasicSalary: 0,
+            totalAdvance: 0,
+            totalLoan: 0,
+            totalPerformanceBonus: 0,
+            totalFestivalBonus: 0,
         })
     }
 
@@ -45,16 +50,27 @@ export async function GET(request: Request) {
     const rows = entries || []
     const fineTotals = await getFineTotalsForMonth(supabase, rows.map(r => r.employee_id), month)
 
+    // Total Payroll reflects money actually paid out this month, not the projected cost of
+    // unpaid entries — it only grows as employees are marked Paid.
     let totalPayroll = 0
     let paidEmployees = 0
     let paidAmount = 0
     let unpaidEmployees = 0
     let unpaidAmount = 0
+    let totalBasicSalary = 0
+    let totalAdvance = 0
+    let totalLoan = 0
+    let totalPerformanceBonus = 0
+    let totalFestivalBonus = 0
 
     rows.forEach(r => {
         const net = computeNetPayable(r, fineTotals[r.employee_id] || 0)
-        totalPayroll += net
-        if (r.payment_status === 'Paid') { paidEmployees++; paidAmount += net }
+        totalBasicSalary += Number(r.basic_salary) || 0
+        totalAdvance += Number(r.advance) || 0
+        totalLoan += Number(r.loan) || 0
+        totalPerformanceBonus += Number(r.performance_bonus) || 0
+        totalFestivalBonus += Number(r.festival_bonus) || 0
+        if (r.payment_status === 'Paid') { paidEmployees++; paidAmount += net; totalPayroll += net }
         else { unpaidEmployees++; unpaidAmount += net }
     })
 
@@ -66,5 +82,10 @@ export async function GET(request: Request) {
         paidAmount,
         unpaidEmployees,
         unpaidAmount,
+        totalBasicSalary,
+        totalAdvance,
+        totalLoan,
+        totalPerformanceBonus,
+        totalFestivalBonus,
     })
 }

@@ -2,7 +2,10 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { IconUsers, IconWallet, IconCheckCircle, IconClock } from '@/components/icons/Icons'
+import {
+    IconUsers, IconWallet, IconCheckCircle, IconClock,
+    IconBanknote, IconGift, IconTrendingUp, IconAward, IconPartyPopper,
+} from '@/components/icons/Icons'
 
 interface DashboardStats {
     sheetExists: boolean
@@ -12,6 +15,11 @@ interface DashboardStats {
     paidAmount: number
     unpaidEmployees: number
     unpaidAmount: number
+    totalBasicSalary: number
+    totalAdvance: number
+    totalLoan: number
+    totalPerformanceBonus: number
+    totalFestivalBonus: number
 }
 
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.04 } } }
@@ -73,6 +81,34 @@ export default function SalaryDashboard() {
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Unpaid Employees</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>{loading ? '—' : stats?.unpaidEmployees ?? 0}</span>
                     <div style={{ fontSize: '0.6875rem', color: '#DC2626', marginTop: '4px' }}>৳{(stats?.unpaidAmount ?? 0).toLocaleString()}</div>
+                </motion.div>
+            </motion.div>
+
+            <motion.div variants={container} initial="hidden" animate="show"
+                style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginTop: '12px' }}>
+                <motion.div variants={item} className="stat-card">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconBanknote size={14} color="var(--color-text-tertiary)" /> Total Basic Salary</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>{loading ? '—' : `৳${(stats?.totalBasicSalary ?? 0).toLocaleString()}`}</span>
+                </motion.div>
+                <motion.div variants={item} className="stat-card">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconGift size={14} color="var(--color-text-tertiary)" /> Total Bonus</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#7C3AED' }}>{loading ? '—' : `৳${((stats?.totalPerformanceBonus ?? 0) + (stats?.totalFestivalBonus ?? 0)).toLocaleString()}`}</span>
+                </motion.div>
+                <motion.div variants={item} className="stat-card">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconTrendingUp size={14} color="var(--color-text-tertiary)" /> Total Loan</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>{loading ? '—' : `৳${(stats?.totalLoan ?? 0).toLocaleString()}`}</span>
+                </motion.div>
+                <motion.div variants={item} className="stat-card">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconWallet size={14} color="var(--color-text-tertiary)" /> Total Advance</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#D97706' }}>{loading ? '—' : `৳${(stats?.totalAdvance ?? 0).toLocaleString()}`}</span>
+                </motion.div>
+                <motion.div variants={item} className="stat-card">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconAward size={14} color="var(--color-text-tertiary)" /> Total Performance Bonus</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#0D9488' }}>{loading ? '—' : `৳${(stats?.totalPerformanceBonus ?? 0).toLocaleString()}`}</span>
+                </motion.div>
+                <motion.div variants={item} className="stat-card">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconPartyPopper size={14} color="var(--color-text-tertiary)" /> Total Festival Bonus</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DB2777' }}>{loading ? '—' : `৳${(stats?.totalFestivalBonus ?? 0).toLocaleString()}`}</span>
                 </motion.div>
             </motion.div>
         </div>
