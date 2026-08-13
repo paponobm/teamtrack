@@ -15,6 +15,7 @@ import {
 interface PrEntry {
     id: string
     customer_name: string
+    customer_phone: string | null
     send_date: string | null
     address: string | null
     parcel_details: string | null
@@ -22,6 +23,11 @@ interface PrEntry {
     delivery_status: string | null
     video_status: string | null
     payment_status: string | null
+    total_amount: number | null
+    advance_amount: number | null
+    due_amount: number | null
+    payment_method: string | null
+    transaction_id: string | null
     video_link: string | null
     video_links: string[] | null
     view_note: string | null
@@ -232,6 +238,7 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
     const [savingNotes, setSavingNotes] = useState(false)
 
     const [showAddPr, setShowAddPr] = useState(false)
+    const [editingPrId, setEditingPrId] = useState<string | null>(null)
     const [prForm, setPrForm] = useState(emptyPrForm)
     const [savingPr, setSavingPr] = useState(false)
 
@@ -350,8 +357,37 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
 
     const openAddPr = () => {
         if (!data) return
+        setEditingPrId(null)
         setPrForm({ ...emptyPrForm, customer_name: data.name || '', customer_phone: data.phone || '', address: data.address || '' })
         setShowAddPr(true)
+    }
+
+    // Reuses the same modal/form as Add — pre-filled with the entry's own saved values —
+    // so every field (not just the three inline-editable dropdowns) can be corrected at once.
+    const openEditPr = (entry: PrEntry) => {
+        setEditingPrId(entry.id)
+        setPrForm({
+            send_date: entry.send_date || new Date().toISOString().split('T')[0],
+            customer_name: entry.customer_name || '',
+            customer_phone: entry.customer_phone || '',
+            address: entry.address || '',
+            parcel_details: entry.parcel_details || '',
+            source: entry.source || 'FB',
+            delivery_status: entry.delivery_status || 'Product Sent',
+            video_status: entry.video_status || 'Pending',
+            payment_status: entry.payment_status || 'Unpaid',
+            total_amount: entry.total_amount != null ? String(entry.total_amount) : '',
+            advance_amount: entry.advance_amount != null ? String(entry.advance_amount) : '',
+            payment_method: entry.payment_method || '',
+            transaction_id: entry.transaction_id || '',
+            view_note: entry.view_note || '',
+        })
+        setShowAddPr(true)
+    }
+
+    const closePrModal = () => {
+        setShowAddPr(false)
+        setEditingPrId(null)
     }
 
     // Due Amount is always derived, never entered — recomputed live from whatever's
@@ -375,7 +411,9 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
 
     const isPrFormValid = !!(prForm.customer_name.trim() && prForm.customer_phone.trim() && prForm.parcel_details.trim() && !paymentValidationError)
 
-    const handleAddPr = async () => {
+    // Shared by Add and Edit — same derived-payment-fields rules either way, only the
+    // request method/URL and success message differ.
+    const handleSavePr = async () => {
         if (!isPrFormValid) return
         setSavingPr(true)
         try {
@@ -403,22 +441,29 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
                 paymentFields = { total_amount: total, advance_amount: 0, due_amount: total, payment_method: null, transaction_id: null }
             }
 
-            const res = await fetch('/api/pr-management', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...rest, ...paymentFields, influencer_id: influencerId })
-            })
+            const res = editingPrId
+                ? await fetch('/api/pr-management', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: editingPrId, ...rest, ...paymentFields })
+                })
+                : await fetch('/api/pr-management', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...rest, ...paymentFields, influencer_id: influencerId })
+                })
             if (res.ok) {
-                toast.success('PR entry added')
+                toast.success(editingPrId ? 'PR entry updated' : 'PR entry added')
                 setShowAddPr(false)
+                setEditingPrId(null)
                 await fetchDetail()
                 onUpdated()
             } else {
                 const err = await res.json().catch(() => ({}))
-                toast.error(err.error || 'Failed to add PR entry')
+                toast.error(err.error || (editingPrId ? 'Failed to update PR entry' : 'Failed to add PR entry'))
             }
         } catch {
-            toast.error('Failed to add PR entry')
+            toast.error(editingPrId ? 'Failed to update PR entry' : 'Failed to add PR entry')
         } finally {
             setSavingPr(false)
         }
@@ -633,6 +678,11 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
                                                                         <IconCamera size={15} />
                                                                     </button>
                                                                     {isAdmin && (
+                                                                        <button onClick={() => openEditPr(p)} title="Edit PR Entry" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-tertiary)', display: 'flex' }}>
+                                                                            <IconEdit size={14} />
+                                                                        </button>
+                                                                    )}
+                                                                    {isAdmin && (
                                                                         <button onClick={() => handleDeletePr(p.id)} title="Delete" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-tertiary)', display: 'flex' }}>
                                                                             <IconTrash size={14} />
                                                                         </button>
@@ -701,13 +751,13 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
                             </div>
                         </div>
 
-                        {/* Add PR Entry modal */}
+                        {/* Add/Edit PR Entry modal — same form either way, see openAddPr/openEditPr */}
                         {showAddPr && (
-                            <div className="modal-overlay" onClick={() => setShowAddPr(false)} style={{ zIndex: 210 }}>
+                            <div className="modal-overlay" onClick={closePrModal} style={{ zIndex: 210 }}>
                                 <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '560px', width: '100%', maxHeight: '90vh', overflow: 'auto' }}>
                                     <div className="modal-header">
-                                        <h2 className="modal-title">Add PR Entry for {data.name}</h2>
-                                        <button className="btn btn-ghost btn-sm" onClick={() => setShowAddPr(false)}><IconX size={20} /></button>
+                                        <h2 className="modal-title">{editingPrId ? 'Edit PR Entry' : 'Add PR Entry'} for {data.name}</h2>
+                                        <button className="btn btn-ghost btn-sm" onClick={closePrModal}><IconX size={20} /></button>
                                     </div>
                                     <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -802,8 +852,8 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
                                         <div className="form-group"><label className="form-label">Note</label><textarea className="form-input" rows={2} value={prForm.view_note} onChange={e => setPrForm({ ...prForm, view_note: e.target.value })} /></div>
                                     </div>
                                     <div className="modal-footer">
-                                        <button className="btn btn-secondary btn-sm" onClick={() => setShowAddPr(false)}>Cancel</button>
-                                        <button className="btn btn-primary btn-sm" onClick={handleAddPr} disabled={savingPr || !isPrFormValid}>{savingPr ? 'Saving...' : 'Save'}</button>
+                                        <button className="btn btn-secondary btn-sm" onClick={closePrModal}>Cancel</button>
+                                        <button className="btn btn-primary btn-sm" onClick={handleSavePr} disabled={savingPr || !isPrFormValid}>{savingPr ? 'Saving...' : 'Save'}</button>
                                     </div>
                                 </div>
                             </div>

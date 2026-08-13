@@ -425,14 +425,18 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
-                        {EDITABLE_AMOUNT_FIELDS.map(f => (
-                            <div key={f.key}>
-                                <label className="form-label">{f.label}</label>
-                                <input className="form-input" type="number" min={0} value={amounts[f.key]}
-                                    onFocus={e => e.target.select()}
-                                    onChange={e => setAmounts(prev => ({ ...prev, [f.key]: e.target.value }))} />
-                            </div>
-                        ))}
+                        {EDITABLE_AMOUNT_FIELDS.map(f => {
+                            const num = Number(amounts[f.key])
+                            return (
+                                <div key={f.key}>
+                                    <label className="form-label">{f.label}</label>
+                                    <input className="form-input" type="number" min={0} value={amounts[f.key]}
+                                        style={{ color: num < 0 ? '#DC2626' : num > 0 ? '#16A34A' : undefined, fontWeight: num !== 0 ? 600 : undefined }}
+                                        onFocus={e => e.target.select()}
+                                        onChange={e => setAmounts(prev => ({ ...prev, [f.key]: e.target.value }))} />
+                                </div>
+                            )
+                        })}
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
