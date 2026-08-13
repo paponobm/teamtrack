@@ -171,7 +171,7 @@ export default function SalarySheet() {
                                 <th>Extra Duty</th>
                                 <th>Transportation Bill</th>
                                 <th>Snacks Bill</th>
-                                <th>Advance</th>
+                                <th>Product Buy</th>
                                 <th>Loan</th>
                                 <th>Monthly Fine</th>
                                 <th>Performance Bonus</th>
@@ -483,3 +483,7 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
         </div>
     )
 }
+
+
+
+
