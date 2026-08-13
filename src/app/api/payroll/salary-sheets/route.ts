@@ -11,9 +11,9 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
     const { data: entries, error } = await supabase
         .from('salary_entries')
         .select(`
-            id, employee_id, basic_salary, extra_duty, performance_bonus, festival_bonus, advance, loan, other_deduction,
-            payment_status, payment_method, payment_date, updated_at,
-            employee:employees!employee_id(id, name, employee_id, avatar_url, department:departments(id, name))
+            id, employee_id, basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus,
+            advance, loan, other_deduction, payment_status, payment_method, payment_date, updated_at,
+            employee:employees!employee_id(id, name, employee_id, avatar_url, joining_date, department:departments(id, name))
         `)
         .eq('salary_sheet_id', sheetId)
         .order('updated_at', { ascending: true })
@@ -38,10 +38,13 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
                 name: r.employee?.name,
                 employee_id: r.employee?.employee_id,
                 avatar_url: r.employee?.avatar_url,
+                joining_date: r.employee?.joining_date || null,
                 department: r.employee?.department?.name || null,
             },
             basic_salary: Number(r.basic_salary) || 0,
             extra_duty: Number(r.extra_duty) || 0,
+            transportation_bill: Number(r.transportation_bill) || 0,
+            snacks_bill: Number(r.snacks_bill) || 0,
             performance_bonus: Number(r.performance_bonus) || 0,
             festival_bonus: Number(r.festival_bonus) || 0,
             advance: Number(r.advance) || 0,

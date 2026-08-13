@@ -589,3 +589,14 @@ export function IconTarget({ size = defaults.size, color = defaults.color, strok
     )
 }
 
+// ---- Printer ----
+export function IconPrinter({ size = defaults.size, color = defaults.color, strokeWidth = defaults.strokeWidth, ...props }: IconProps) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" {...props}>
+            <path d="M6 9V3h12v6" />
+            <rect x="4" y="9" width="16" height="8" rx="2" />
+            <path d="M6 17h12v5H6z" />
+        </svg>
+    )
+}
+

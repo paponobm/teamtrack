@@ -1872,3 +1872,34 @@ input[type="date"].form-input::-webkit-calendar-picker-indicator {
     font-size: 0.75rem;
   }
 }
+
+/* ===== Print isolation ===== */
+/* Used by the Payroll Pay Slip (and any future printable document): hides the whole app
+   (sidebar, navbar, tables, other modals) and prints only the element marked
+   .payslip-printable, so the browser's print dialog produces just that document. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .payslip-printable,
+  .payslip-printable * {
+    visibility: visible;
+  }
+
+  .payslip-printable {
+    position: absolute;
+    inset: 0;
+    top: 0;
+    left: 0;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    box-shadow: none;
+    border-radius: 0;
+  }
+
+  .payslip-no-print {
+    display: none !important;
+  }
+}

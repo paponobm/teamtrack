@@ -3,14 +3,17 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
-import { IconFileText, IconX } from '@/components/icons/Icons'
+import { IconFileText, IconX, IconPrinter } from '@/components/icons/Icons'
+import PaySlipModal from './PaySlipModal'
 
-interface SalaryEntry {
+export interface SalaryEntry {
     id: string
     employee_id: string
-    employee: { id: string; name: string; employee_id: string | null; avatar_url: string | null; department: string | null }
+    employee: { id: string; name: string; employee_id: string | null; avatar_url: string | null; joining_date: string | null; department: string | null }
     basic_salary: number
     extra_duty: number
+    transportation_bill: number
+    snacks_bill: number
     performance_bonus: number
     festival_bonus: number
     advance: number
@@ -27,6 +30,8 @@ interface SalaryEntry {
 const EDITABLE_AMOUNT_FIELDS = [
     { key: 'basic_salary', label: 'Basic Salary' },
     { key: 'extra_duty', label: 'Extra Duty' },
+    { key: 'transportation_bill', label: 'Transportation Bill' },
+    { key: 'snacks_bill', label: 'Snacks Bill' },
     { key: 'advance', label: 'Advance' },
     { key: 'loan', label: 'Loan' },
     { key: 'performance_bonus', label: 'Performance Bonus' },
@@ -84,6 +89,7 @@ export default function SalarySheet() {
     const [loading, setLoading] = useState(true)
     const [creating, setCreating] = useState(false)
     const [editing, setEditing] = useState<SalaryEntry | null>(null)
+    const [payslipEntry, setPayslipEntry] = useState<SalaryEntry | null>(null)
 
     const load = useCallback(async (m: string) => {
         setLoading(true)
@@ -155,12 +161,14 @@ export default function SalarySheet() {
                     <table className="table payroll-grid-table" style={{ whiteSpace: 'nowrap' }}>
                         <thead>
                             <tr>
-                                <th>SL</th>
-                                <th>Employee</th>
+                                <th className="sticky-col-1">SL</th>
+                                <th className="sticky-col-2">Employee</th>
                                 <th>Department</th>
                                 <th>Basic Salary</th>
                                 <th>Attendance (Day)</th>
                                 <th>Extra Duty</th>
+                                <th>Transportation Bill</th>
+                                <th>Snacks Bill</th>
                                 <th>Advance</th>
                                 <th>Loan</th>
                                 <th>Monthly Fine</th>
@@ -170,13 +178,14 @@ export default function SalarySheet() {
                                 <th>Paid / Non-Paid</th>
                                 <th>Payment Method</th>
                                 <th>Payment Date</th>
+                                <th>Pay Slip</th>
                             </tr>
                         </thead>
                         <tbody>
                             {entries.map((e, i) => (
                                 <tr key={e.id} onClick={() => setEditing(e)} style={{ cursor: 'pointer' }}>
-                                    <td>{i + 1}</td>
-                                    <td>
+                                    <td className="sticky-col-1">{i + 1}</td>
+                                    <td className="sticky-col-2">
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                             <div className="avatar avatar-sm" style={{ background: getAvatarColor(e.employee.name), overflow: 'hidden', flexShrink: 0, width: 28, height: 28, fontSize: '0.75rem' }}>
                                                 {e.employee.avatar_url ? (
@@ -199,6 +208,8 @@ export default function SalarySheet() {
                                         </div>
                                     </td>
                                     <td>৳{e.extra_duty.toLocaleString()}</td>
+                                    <td>৳{e.transportation_bill.toLocaleString()}</td>
+                                    <td>৳{e.snacks_bill.toLocaleString()}</td>
                                     <td>৳{e.advance.toLocaleString()}</td>
                                     <td>৳{e.loan.toLocaleString()}</td>
                                     <td style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
@@ -218,10 +229,15 @@ export default function SalarySheet() {
                                         ) : '—'}
                                     </td>
                                     <td>{formatDate(e.payment_date)}</td>
+                                    <td>
+                                        <button className="btn btn-secondary btn-sm" onClick={(ev) => { ev.stopPropagation(); setPayslipEntry(e) }}>
+                                            <IconPrinter size={14} /> Pay Slip
+                                        </button>
+                                    </td>
                                 </tr>
                             ))}
                             {entries.length === 0 && (
-                                <tr><td colSpan={15} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No active employees found.</td></tr>
+                                <tr><td colSpan={18} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No active employees found.</td></tr>
                             )}
                         </tbody>
                     </table>
@@ -241,8 +257,21 @@ export default function SalarySheet() {
                 )}
             </AnimatePresence>
 
+            <AnimatePresence>
+                {payslipEntry && (
+                    <PaySlipModal
+                        entry={payslipEntry}
+                        month={month}
+                        totalDays={totalDays}
+                        onClose={() => setPayslipEntry(null)}
+                    />
+                )}
+            </AnimatePresence>
+
             {/* Excel/Sheets-style grid borders, scoped to this table only — the shared
-                .table class elsewhere in the app keeps its row-only borders. */}
+                .table class elsewhere in the app keeps its row-only borders. SL and Employee
+                stay pinned to the left edge while the rest of the (wide) table scrolls, so
+                the row's owner is always visible. */}
             <style jsx>{`
                 .payroll-grid-table {
                     border-collapse: collapse;
@@ -250,6 +279,28 @@ export default function SalarySheet() {
                 .payroll-grid-table th,
                 .payroll-grid-table td {
                     border: 1px solid var(--color-border-light);
+                }
+                .payroll-grid-table .sticky-col-1,
+                .payroll-grid-table .sticky-col-2 {
+                    position: sticky;
+                    background: var(--color-surface);
+                    z-index: 1;
+                }
+                .payroll-grid-table .sticky-col-1 {
+                    left: 0;
+                    width: 48px;
+                }
+                .payroll-grid-table .sticky-col-2 {
+                    left: 48px;
+                    box-shadow: 2px 0 4px -2px rgba(0, 0, 0, 0.15);
+                }
+                .payroll-grid-table thead .sticky-col-1,
+                .payroll-grid-table thead .sticky-col-2 {
+                    z-index: 2;
+                }
+                .payroll-grid-table tbody tr:hover .sticky-col-1,
+                .payroll-grid-table tbody tr:hover .sticky-col-2 {
+                    background: var(--color-surface-hover);
                 }
             `}</style>
         </div>
@@ -261,6 +312,8 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
     const [amounts, setAmounts] = useState({
         basic_salary: entry.basic_salary,
         extra_duty: entry.extra_duty,
+        transportation_bill: entry.transportation_bill,
+        snacks_bill: entry.snacks_bill,
         advance: entry.advance,
         loan: entry.loan,
         performance_bonus: entry.performance_bonus,
@@ -272,8 +325,8 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
     const [paymentDate, setPaymentDate] = useState(entry.payment_date || '')
     const [saving, setSaving] = useState(false)
 
-    const netPayable = amounts.basic_salary + amounts.extra_duty + amounts.performance_bonus + amounts.festival_bonus
-        - entry.fine - amounts.advance - amounts.loan - amounts.other_deduction
+    const netPayable = amounts.basic_salary + amounts.extra_duty + amounts.transportation_bill + amounts.snacks_bill
+        + amounts.performance_bonus + amounts.festival_bonus - entry.fine - amounts.advance - amounts.loan - amounts.other_deduction
 
     const handleSave = async () => {
         setSaving(true)
@@ -328,6 +381,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                             <div key={f.key}>
                                 <label className="form-label">{f.label}</label>
                                 <input className="form-input" type="number" min={0} value={amounts[f.key]}
+                                    onFocus={e => e.target.select()}
                                     onChange={e => setAmounts(prev => ({ ...prev, [f.key]: Math.max(0, Number(e.target.value) || 0) }))} />
                             </div>
                         ))}

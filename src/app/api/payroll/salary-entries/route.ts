@@ -1,7 +1,7 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { NextResponse } from 'next/server'
 
-const NUMERIC_FIELDS = ['basic_salary', 'extra_duty', 'performance_bonus', 'festival_bonus', 'advance', 'loan', 'other_deduction'] as const
+const NUMERIC_FIELDS = ['basic_salary', 'extra_duty', 'transportation_bill', 'snacks_bill', 'performance_bonus', 'festival_bonus', 'advance', 'loan', 'other_deduction'] as const
 const PAYMENT_METHODS = ['bKash', 'Rocket', 'Nagad', 'Bank', 'Cash'] as const
 
 // PUT /api/payroll/salary-entries — edit one employee's salary amounts/payment status for

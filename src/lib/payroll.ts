@@ -65,6 +65,8 @@ export async function getFineTotalsForMonth(supabase: SupabaseClient, employeeId
 export interface SalaryAmounts {
     basic_salary: number
     extra_duty: number
+    transportation_bill: number
+    snacks_bill: number
     performance_bonus: number
     festival_bonus: number
     advance: number
@@ -72,12 +74,15 @@ export interface SalaryAmounts {
     other_deduction: number
 }
 
-// Net Payable = Basic Salary + Extra Duty + Performance Bonus + Festival Bonus - Fine - Advance - Loan - Other Deduction.
+// Net Payable = Basic Salary + Extra Duty + Transportation Bill + Snacks Bill + Performance Bonus
+// + Festival Bonus - Fine - Advance - Loan - Other Deduction.
 // The one place this formula lives — every API route imports it, so the dashboard totals
 // and the salary sheet rows can never disagree with each other.
 export function computeNetPayable(entry: SalaryAmounts, fine: number): number {
     return (Number(entry.basic_salary) || 0)
         + (Number(entry.extra_duty) || 0)
+        + (Number(entry.transportation_bill) || 0)
+        + (Number(entry.snacks_bill) || 0)
         + (Number(entry.performance_bonus) || 0)
         + (Number(entry.festival_bonus) || 0)
         - fine

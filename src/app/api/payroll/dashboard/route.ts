@@ -44,7 +44,7 @@ export async function GET(request: Request) {
 
     const { data: entries } = await supabase
         .from('salary_entries')
-        .select('employee_id, basic_salary, extra_duty, performance_bonus, festival_bonus, advance, loan, other_deduction, payment_status')
+        .select('employee_id, basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus, advance, loan, other_deduction, payment_status')
         .eq('salary_sheet_id', sheet.id)
 
     const rows = entries || []
