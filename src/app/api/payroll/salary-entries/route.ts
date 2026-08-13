@@ -1,7 +1,10 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
+import { getMonthRangeFromString } from '@/lib/dateRange'
 import { NextResponse } from 'next/server'
 
-const NUMERIC_FIELDS = ['basic_salary', 'extra_duty', 'transportation_bill', 'snacks_bill', 'performance_bonus', 'festival_bonus', 'advance', 'loan', 'other_deduction'] as const
+// 'advance' is intentionally not editable here — it's computed live from the Advance
+// Management module (see getAdvanceDetailsForMonth in src/lib/payroll.ts), same as 'fine'.
+const NUMERIC_FIELDS = ['basic_salary', 'extra_duty', 'transportation_bill', 'snacks_bill', 'performance_bonus', 'festival_bonus', 'loan', 'other_deduction'] as const
 const PAYMENT_METHODS = ['bKash', 'Rocket', 'Nagad', 'Bank', 'Cash'] as const
 
 // PUT /api/payroll/salary-entries — edit one employee's salary amounts/payment status for
@@ -58,11 +61,28 @@ export async function PUT(request: Request) {
         .from('salary_entries')
         .update(update)
         .eq('id', id)
-        .select('id')
+        .select('id, employee_id, salary_sheet_id')
         .maybeSingle()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     if (!data) return NextResponse.json({ error: 'Salary entry not found' }, { status: 404 })
+
+    // Marking the salary as Paid means that month's advance was recovered through this
+    // payout, so settle any still-Unpaid advance records for that employee/month too — keeps
+    // the Salary Sheet and Advance Management module in sync without a manual second step.
+    if (update.payment_status === 'Paid') {
+        const { data: sheet } = await supabase.from('salary_sheets').select('month').eq('id', data.salary_sheet_id).maybeSingle()
+        if (sheet) {
+            const { start, end } = getMonthRangeFromString(sheet.month)
+            await supabase
+                .from('advances')
+                .update({ payment_status: 'Paid' })
+                .eq('employee_id', data.employee_id)
+                .eq('payment_status', 'Unpaid')
+                .gte('advance_date', start)
+                .lte('advance_date', end)
+        }
+    }
 
     return NextResponse.json({ success: true })
 }

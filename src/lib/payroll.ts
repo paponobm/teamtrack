@@ -62,6 +62,45 @@ export async function getFineTotalsForMonth(supabase: SupabaseClient, employeeId
     return totals
 }
 
+export interface AdvanceRecord {
+    date: string
+    amount: number
+}
+
+export interface EmployeeAdvanceDetail {
+    total: number
+    records: AdvanceRecord[]
+}
+
+// Advance is no longer a manually-entered salary_entries field — it's computed live from the
+// standalone `advances` table (Advance Management module), summed for the selected month.
+// Same "reuse, don't duplicate" pattern as attendance/fines. Returns the per-record breakdown
+// too, since the Salary Sheet shows a hover tooltip listing each advance date/amount.
+export async function getAdvanceDetailsForMonth(supabase: SupabaseClient, employeeIds: string[], month: string): Promise<Record<string, EmployeeAdvanceDetail>> {
+    const { start, end } = getMonthRangeFromString(month)
+    const details: Record<string, EmployeeAdvanceDetail> = {}
+    employeeIds.forEach(id => { details[id] = { total: 0, records: [] } })
+    if (employeeIds.length === 0) return details
+
+    const { data } = await supabase
+        .from('advances')
+        .select('employee_id, amount, advance_date')
+        .in('employee_id', employeeIds)
+        .gte('advance_date', start)
+        .lte('advance_date', end)
+        .order('advance_date', { ascending: true })
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(data || []).forEach((r: any) => {
+        const d = details[r.employee_id]
+        if (!d) return
+        const amount = Number(r.amount) || 0
+        d.total += amount
+        d.records.push({ date: r.advance_date, amount })
+    })
+    return details
+}
+
 export interface SalaryAmounts {
     basic_salary: number
     extra_duty: number
@@ -69,7 +108,6 @@ export interface SalaryAmounts {
     snacks_bill: number
     performance_bonus: number
     festival_bonus: number
-    advance: number
     loan: number
     other_deduction: number
 }
@@ -77,8 +115,9 @@ export interface SalaryAmounts {
 // Net Payable = Basic Salary + Extra Duty + Transportation Bill + Snacks Bill + Performance Bonus
 // + Festival Bonus - Fine - Advance - Loan - Other Deduction.
 // The one place this formula lives — every API route imports it, so the dashboard totals
-// and the salary sheet rows can never disagree with each other.
-export function computeNetPayable(entry: SalaryAmounts, fine: number): number {
+// and the salary sheet rows can never disagree with each other. Fine and Advance are both
+// live-computed (never stored per salary entry), so they're passed in explicitly.
+export function computeNetPayable(entry: SalaryAmounts, fine: number, advance: number): number {
     return (Number(entry.basic_salary) || 0)
         + (Number(entry.extra_duty) || 0)
         + (Number(entry.transportation_bill) || 0)
@@ -86,7 +125,7 @@ export function computeNetPayable(entry: SalaryAmounts, fine: number): number {
         + (Number(entry.performance_bonus) || 0)
         + (Number(entry.festival_bonus) || 0)
         - fine
-        - (Number(entry.advance) || 0)
+        - advance
         - (Number(entry.loan) || 0)
         - (Number(entry.other_deduction) || 0)
 }

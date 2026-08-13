@@ -17,6 +17,7 @@ export interface SalaryEntry {
     performance_bonus: number
     festival_bonus: number
     advance: number
+    advance_records: { date: string; amount: number }[]
     loan: number
     other_deduction: number
     payment_status: 'Paid' | 'Unpaid'
@@ -27,12 +28,13 @@ export interface SalaryEntry {
     net_payable: number
 }
 
+// Advance is intentionally not here — it's read-only, computed live from the Advance
+// Management module (src/app/(dashboard)/advance-management), same as Fine.
 const EDITABLE_AMOUNT_FIELDS = [
     { key: 'basic_salary', label: 'Basic Salary' },
     { key: 'extra_duty', label: 'Extra Duty' },
     { key: 'transportation_bill', label: 'Transportation Bill' },
     { key: 'snacks_bill', label: 'Snacks Bill' },
-    { key: 'advance', label: 'Advance' },
     { key: 'loan', label: 'Loan' },
     { key: 'performance_bonus', label: 'Performance Bonus' },
     { key: 'festival_bonus', label: 'Festival Bonus' },
@@ -204,17 +206,26 @@ export default function SalarySheet() {
                                         <span style={{ fontWeight: 700, color: attendanceColor(e.attendance.present, totalDays) }}>{e.attendance.present}</span>
                                         <span style={{ color: 'var(--color-text-tertiary)' }}> / {totalDays}</span>
                                         <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginTop: '2px' }}>
-                                            Leave: {e.attendance.leave} · Late: {e.attendance.late}
+                                            Leave: {e.attendance.leave} 
                                         </div>
                                     </td>
-                                    <td>৳{e.extra_duty.toLocaleString()}</td>
-                                    <td>৳{e.transportation_bill.toLocaleString()}</td>
-                                    <td>৳{e.snacks_bill.toLocaleString()}</td>
-                                    <td>৳{e.advance.toLocaleString()}</td>
-                                    <td>৳{e.loan.toLocaleString()}</td>
+                                    <td style={{ color: e.extra_duty > 0 ? '#16A34A' : undefined }}>৳{e.extra_duty.toLocaleString()}</td>
+                                    <td style={{ color: e.transportation_bill > 0 ? '#16A34A' : undefined }}>৳{e.transportation_bill.toLocaleString()}</td>
+                                    <td style={{ color: e.snacks_bill > 0 ? '#16A34A' : undefined }}>৳{e.snacks_bill.toLocaleString()}</td>
+                                    <td className="advance-cell" style={{ color: e.advance > 0 ? '#DC2626' : undefined }}>
+                                        ৳{e.advance.toLocaleString()}
+                                        {e.advance_records.length > 0 && (
+                                            <div className="advance-tooltip">
+                                                {e.advance_records.map((r, idx) => (
+                                                    <div key={idx}>{formatDate(r.date)}: ৳{r.amount.toLocaleString()}</div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </td>
+                                    <td style={{ color: e.loan > 0 ? '#DC2626' : undefined }}>৳{e.loan.toLocaleString()}</td>
                                     <td style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
-                                    <td>৳{e.performance_bonus.toLocaleString()}</td>
-                                    <td>৳{e.festival_bonus.toLocaleString()}</td>
+                                    <td style={{ color: e.performance_bonus > 0 ? '#16A34A' : undefined }}>৳{e.performance_bonus.toLocaleString()}</td>
+                                    <td style={{ color: e.festival_bonus > 0 ? '#16A34A' : undefined }}>৳{e.festival_bonus.toLocaleString()}</td>
                                     <td style={{ fontWeight: 700, color: '#16A34A' }}>৳{e.net_payable.toLocaleString()}</td>
                                     <td>
                                         <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: e.payment_status === 'Paid' ? '#16A34A' : '#DC2626', background: e.payment_status === 'Paid' ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)' }}>
@@ -302,6 +313,29 @@ export default function SalarySheet() {
                 .payroll-grid-table tbody tr:hover .sticky-col-2 {
                     background: var(--color-surface-hover);
                 }
+                .payroll-grid-table .advance-cell {
+                    position: relative;
+                }
+                .payroll-grid-table .advance-tooltip {
+                    display: none;
+                    position: absolute;
+                    top: 100%;
+                    left: 0;
+                    z-index: 5;
+                    margin-top: 4px;
+                    padding: 8px 10px;
+                    background: var(--color-surface);
+                    border: 1px solid var(--color-border-light);
+                    border-radius: 8px;
+                    box-shadow: var(--shadow-md);
+                    font-size: 0.75rem;
+                    font-weight: 500;
+                    white-space: nowrap;
+                    color: var(--color-text-secondary);
+                }
+                .payroll-grid-table .advance-cell:hover .advance-tooltip {
+                    display: block;
+                }
             `}</style>
         </div>
     )
@@ -309,24 +343,37 @@ export default function SalarySheet() {
 
 function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClose: () => void; onSaved: (e: SalaryEntry) => void }) {
     const { success: toastSuccess, error: toastError } = useToast()
+    // Held as raw strings while editing (same pattern as the Requisition quantity field) so
+    // deleting the "0" to type a fresh number leaves the field genuinely empty instead of
+    // snapping back to "0" on every keystroke.
     const [amounts, setAmounts] = useState({
-        basic_salary: entry.basic_salary,
-        extra_duty: entry.extra_duty,
-        transportation_bill: entry.transportation_bill,
-        snacks_bill: entry.snacks_bill,
-        advance: entry.advance,
-        loan: entry.loan,
-        performance_bonus: entry.performance_bonus,
-        festival_bonus: entry.festival_bonus,
-        other_deduction: entry.other_deduction,
+        basic_salary: String(entry.basic_salary),
+        extra_duty: String(entry.extra_duty),
+        transportation_bill: String(entry.transportation_bill),
+        snacks_bill: String(entry.snacks_bill),
+        loan: String(entry.loan),
+        performance_bonus: String(entry.performance_bonus),
+        festival_bonus: String(entry.festival_bonus),
+        other_deduction: String(entry.other_deduction),
     })
     const [paymentStatus, setPaymentStatus] = useState(entry.payment_status)
     const [paymentMethod, setPaymentMethod] = useState(entry.payment_method || '')
     const [paymentDate, setPaymentDate] = useState(entry.payment_date || '')
     const [saving, setSaving] = useState(false)
 
-    const netPayable = amounts.basic_salary + amounts.extra_duty + amounts.transportation_bill + amounts.snacks_bill
-        + amounts.performance_bonus + amounts.festival_bonus - entry.fine - amounts.advance - amounts.loan - amounts.other_deduction
+    const numAmounts = {
+        basic_salary: Math.max(0, Number(amounts.basic_salary) || 0),
+        extra_duty: Math.max(0, Number(amounts.extra_duty) || 0),
+        transportation_bill: Math.max(0, Number(amounts.transportation_bill) || 0),
+        snacks_bill: Math.max(0, Number(amounts.snacks_bill) || 0),
+        loan: Math.max(0, Number(amounts.loan) || 0),
+        performance_bonus: Math.max(0, Number(amounts.performance_bonus) || 0),
+        festival_bonus: Math.max(0, Number(amounts.festival_bonus) || 0),
+        other_deduction: Math.max(0, Number(amounts.other_deduction) || 0),
+    }
+
+    const netPayable = numAmounts.basic_salary + numAmounts.extra_duty + numAmounts.transportation_bill + numAmounts.snacks_bill
+        + numAmounts.performance_bonus + numAmounts.festival_bonus - entry.fine - entry.advance - numAmounts.loan - numAmounts.other_deduction
 
     const handleSave = async () => {
         setSaving(true)
@@ -336,7 +383,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     id: entry.id,
-                    ...amounts,
+                    ...numAmounts,
                     payment_status: paymentStatus,
                     payment_method: paymentMethod || null,
                     payment_date: paymentDate || null,
@@ -344,7 +391,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
             })
             if (res.ok) {
                 onSaved({
-                    ...entry, ...amounts, payment_status: paymentStatus,
+                    ...entry, ...numAmounts, payment_status: paymentStatus,
                     payment_method: paymentMethod || null, payment_date: paymentDate || null,
                     net_payable: netPayable,
                 })
@@ -374,6 +421,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                         <ReadOnlyField label="Attendance" value={`${entry.attendance.present} present, ${entry.attendance.absent} absent`} />
                         <ReadOnlyField label="Leave Days" value={String(entry.attendance.leave)} />
                         <ReadOnlyField label="Fine" value={`৳${entry.fine.toLocaleString()}`} />
+                        <ReadOnlyField label="Advance" value={`৳${entry.advance.toLocaleString()}${entry.advance_records.length > 1 ? ` (${entry.advance_records.length} records)` : ''}`} />
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
@@ -382,7 +430,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                                 <label className="form-label">{f.label}</label>
                                 <input className="form-input" type="number" min={0} value={amounts[f.key]}
                                     onFocus={e => e.target.select()}
-                                    onChange={e => setAmounts(prev => ({ ...prev, [f.key]: Math.max(0, Number(e.target.value) || 0) }))} />
+                                    onChange={e => setAmounts(prev => ({ ...prev, [f.key]: e.target.value }))} />
                             </div>
                         ))}
                     </div>

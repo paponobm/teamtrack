@@ -1,5 +1,5 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { getFineTotalsForMonth, computeNetPayable } from '@/lib/payroll'
+import { getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable } from '@/lib/payroll'
 import { NextResponse } from 'next/server'
 
 // GET /api/payroll/dashboard?month=YYYY-MM — monthly payroll summary (Super Admin only).
@@ -44,11 +44,15 @@ export async function GET(request: Request) {
 
     const { data: entries } = await supabase
         .from('salary_entries')
-        .select('employee_id, basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus, advance, loan, other_deduction, payment_status')
+        .select('employee_id, basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus, loan, other_deduction, payment_status')
         .eq('salary_sheet_id', sheet.id)
 
     const rows = entries || []
-    const fineTotals = await getFineTotalsForMonth(supabase, rows.map(r => r.employee_id), month)
+    const employeeIds = rows.map(r => r.employee_id)
+    const [fineTotals, advanceDetails] = await Promise.all([
+        getFineTotalsForMonth(supabase, employeeIds, month),
+        getAdvanceDetailsForMonth(supabase, employeeIds, month),
+    ])
 
     // Total Payroll reflects money actually paid out this month, not the projected cost of
     // unpaid entries — it only grows as employees are marked Paid.
@@ -64,9 +68,10 @@ export async function GET(request: Request) {
     let totalFestivalBonus = 0
 
     rows.forEach(r => {
-        const net = computeNetPayable(r, fineTotals[r.employee_id] || 0)
+        const advance = advanceDetails[r.employee_id]?.total || 0
+        const net = computeNetPayable(r, fineTotals[r.employee_id] || 0, advance)
         totalBasicSalary += Number(r.basic_salary) || 0
-        totalAdvance += Number(r.advance) || 0
+        totalAdvance += advance
         totalLoan += Number(r.loan) || 0
         totalPerformanceBonus += Number(r.performance_bonus) || 0
         totalFestivalBonus += Number(r.festival_bonus) || 0

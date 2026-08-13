@@ -1,5 +1,5 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { getAttendanceStatsForMonth, getFineTotalsForMonth, computeNetPayable } from '@/lib/payroll'
+import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable } from '@/lib/payroll'
 import { NextResponse } from 'next/server'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -12,7 +12,7 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
         .from('salary_entries')
         .select(`
             id, employee_id, basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus,
-            advance, loan, other_deduction, payment_status, payment_method, payment_date, updated_at,
+            loan, other_deduction, payment_status, payment_method, payment_date, updated_at,
             employee:employees!employee_id(id, name, employee_id, avatar_url, joining_date, department:departments(id, name))
         `)
         .eq('salary_sheet_id', sheetId)
@@ -22,14 +22,16 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
 
     const rows = entries || []
     const employeeIds = rows.map((r: { employee_id: string }) => r.employee_id)
-    const [attendance, fines] = await Promise.all([
+    const [attendance, fines, advances] = await Promise.all([
         getAttendanceStatsForMonth(supabase, employeeIds, month),
         getFineTotalsForMonth(supabase, employeeIds, month),
+        getAdvanceDetailsForMonth(supabase, employeeIds, month),
     ])
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return rows.map((r: any) => {
         const fine = fines[r.employee_id] || 0
+        const advanceDetail = advances[r.employee_id] || { total: 0, records: [] }
         return {
             id: r.id,
             employee_id: r.employee_id,
@@ -47,7 +49,8 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
             snacks_bill: Number(r.snacks_bill) || 0,
             performance_bonus: Number(r.performance_bonus) || 0,
             festival_bonus: Number(r.festival_bonus) || 0,
-            advance: Number(r.advance) || 0,
+            advance: advanceDetail.total,
+            advance_records: advanceDetail.records,
             loan: Number(r.loan) || 0,
             other_deduction: Number(r.other_deduction) || 0,
             payment_status: r.payment_status,
@@ -55,7 +58,7 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
             payment_date: r.payment_date,
             attendance: attendance[r.employee_id] || { present: 0, late: 0, absent: 0, leave: 0 },
             fine,
-            net_payable: computeNetPayable(r, fine),
+            net_payable: computeNetPayable(r, fine, advanceDetail.total),
             updated_at: r.updated_at,
         }
     })
