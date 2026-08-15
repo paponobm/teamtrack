@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString, getWeekRange, getMonthRange } from '@/lib/dateRange'
 import {
-    IconWallet, IconUsers, IconPlus, IconX,
+    IconWallet, IconUsers, IconPlus, IconX, IconBanknote,
     IconSearch, IconEdit, IconTrash, IconChevronLeft, IconChevronRight, IconCalendar,
 } from '@/components/icons/Icons'
 
@@ -139,13 +139,14 @@ export default function AdvanceManager() {
         return (row.employee?.name || '').toLowerCase().includes(q) || (row.employee?.employee_id || '').toLowerCase().includes(q)
     })
 
-    // Total Advance stays scoped to Advance-type records only (matches its original meaning);
-    // Total Employees reflects everyone with either an Advance or an EMI in view.
+    // Total Advance/Total EMI each stay scoped to their own record type (principal amount,
+    // matching the Amount column); Total Employees reflects everyone with either in view.
     const summary = filtered.reduce((acc, row) => {
         if (row.record_type === 'Advance') acc.totalAdvance += row.amount
+        else acc.totalEmi += row.amount
         acc.employeeIds.add(row.employee_id)
         return acc
-    }, { totalAdvance: 0, employeeIds: new Set<string>() })
+    }, { totalAdvance: 0, totalEmi: 0, employeeIds: new Set<string>() })
 
     const handleDelete = async (row: CombinedRow) => {
         const label = row.record_type === 'Advance' ? 'advance' : 'EMI'
@@ -167,11 +168,11 @@ export default function AdvanceManager() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
                 <div>
-                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Advance & EMI</h2>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Salary Advance & EMI</h2>
                     <p style={{ fontSize: '0.875rem', color: 'var(--color-text-tertiary)', margin: '4px 0 0' }}>Manage employee advances, EMI loans and payment records</p>
                 </div>
                 <button className="btn btn-primary" onClick={() => { setEditing(null); setAddType('Advance'); setShowModal(true) }}>
-                    <IconPlus size={16} /> Add Record
+                    <IconPlus size={16} /> Add Advance / EMI
                 </button>
             </div>
 
@@ -179,6 +180,10 @@ export default function AdvanceManager() {
                 <div className="stat-card">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconWallet size={14} color="var(--color-text-tertiary)" /> Total Advance</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>৳{summary.totalAdvance.toLocaleString()}</span>
+                </div>
+                <div className="stat-card">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconBanknote size={14} color="var(--color-text-tertiary)" /> Total EMI</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#D97706' }}>৳{summary.totalEmi.toLocaleString()}</span>
                 </div>
                 <div className="stat-card">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconUsers size={14} color="var(--color-text-tertiary)" /> Total Employees</span>
@@ -344,7 +349,7 @@ function AddEditModal({ editing, addType, setAddType, employees, onClose, onSave
             <motion.div initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 10 }}
                 className="modal" style={{ maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
-                    <div className="modal-title">{isEdit ? `Edit ${recordType}` : 'Add Record'}</div>
+                    <div className="modal-title">{isEdit ? `Edit ${recordType}` : 'Add  Advance / EMI'}</div>
                     <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: 'var(--color-text-tertiary)' }}><IconX size={18} /></button>
                 </div>
 

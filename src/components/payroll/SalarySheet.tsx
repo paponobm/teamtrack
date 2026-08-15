@@ -176,9 +176,9 @@ export default function SalarySheet() {
                                 <th>Festival Bonus</th>
                                 <th>Extra Duty</th>
                                 <th>Performance Bonus</th>
-                                <th>Advance</th>
-                                <th>Product Buy</th>
+                                <th>Salary Advance</th>
                                 <th>Loan</th>
+                                <th>Product Buy</th>
                                 <th>Monthly Fine</th>
                                 <th>Net Salary</th>
                                 <th>Paid / Non-Paid</th>
@@ -233,16 +233,6 @@ export default function SalarySheet() {
                                             </div>
                                         )}
                                     </td>
-                                    <td className="product-buy-cell" style={{ color: e.product_buy > 0 ? '#DC2626' : undefined }}>
-                                        ৳{e.product_buy.toLocaleString()}
-                                        {e.product_buy_records.length > 0 && (
-                                            <div className="advance-tooltip">
-                                                {e.product_buy_records.map((r, idx) => (
-                                                    <div key={idx}>{formatDate(r.date)}: ৳{r.amount.toLocaleString()}</div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </td>
                                     <td className="loan-cell" style={{ color: e.loan > 0 ? '#DC2626' : undefined }}>
                                         ৳{e.loan.toLocaleString()}
                                         {e.loan_records.length > 0 && (
@@ -254,6 +244,16 @@ export default function SalarySheet() {
                                             <div className="advance-tooltip">
                                                 {e.loan_records.map(r => (
                                                     <div key={r.id}>EMI {r.month_number}/{r.term_months}: ৳{r.monthly_installment.toLocaleString()}</div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </td>
+                                    <td className="product-buy-cell" style={{ color: e.product_buy > 0 ? '#DC2626' : undefined }}>
+                                        ৳{e.product_buy.toLocaleString()}
+                                        {e.product_buy_records.length > 0 && (
+                                            <div className="advance-tooltip">
+                                                {e.product_buy_records.map((r, idx) => (
+                                                    <div key={idx}>{formatDate(r.date)}: ৳{r.amount.toLocaleString()}</div>
                                                 ))}
                                             </div>
                                         )}
