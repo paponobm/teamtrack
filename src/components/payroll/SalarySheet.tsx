@@ -16,6 +16,7 @@ export interface SalaryEntry {
     snacks_bill: number
     performance_bonus: number
     festival_bonus: number
+    festival_bonus_percentage: number
     advance: number
     advance_records: { date: string; amount: number }[]
     product_buy: number
@@ -169,15 +170,15 @@ export default function SalarySheet() {
                                 <th>Department</th>
                                 <th>Basic Salary</th>
                                 <th>Attendance (Day)</th>
-                                <th>Extra Duty</th>
                                 <th>Transportation Bill</th>
                                 <th>Snacks Bill</th>
+                                <th>Festival Bonus</th>
+                                <th>Extra Duty</th>
+                                <th>Performance Bonus</th>
                                 <th>Advance</th>
                                 <th>Product Buy</th>
                                 <th>Loan</th>
                                 <th>Monthly Fine</th>
-                                <th>Performance Bonus</th>
-                                <th>Festival Bonus</th>
                                 <th>Net Salary</th>
                                 <th>Paid / Non-Paid</th>
                                 <th>Payment Method</th>
@@ -211,9 +212,16 @@ export default function SalarySheet() {
                                             Leave: {e.attendance.leave} 
                                         </div>
                                     </td>
-                                    <td style={{ color: e.extra_duty > 0 ? '#16A34A' : undefined }}>৳{e.extra_duty.toLocaleString()}</td>
                                     <td style={{ color: e.transportation_bill > 0 ? '#16A34A' : undefined }}>৳{e.transportation_bill.toLocaleString()}</td>
                                     <td style={{ color: e.snacks_bill > 0 ? '#16A34A' : undefined }}>৳{e.snacks_bill.toLocaleString()}</td>
+                                    <td style={{ color: e.festival_bonus > 0 ? '#16A34A' : undefined }}>
+                                        ৳{e.festival_bonus.toLocaleString()}
+                                        {e.festival_bonus_percentage > 0 && (
+                                            <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginLeft: '4px' }}>({e.festival_bonus_percentage}%)</span>
+                                        )}
+                                    </td>
+                                    <td style={{ color: e.extra_duty > 0 ? '#16A34A' : undefined }}>৳{e.extra_duty.toLocaleString()}</td>
+                                    <td style={{ color: e.performance_bonus > 0 ? '#16A34A' : undefined }}>৳{e.performance_bonus.toLocaleString()}</td>
                                     <td className="advance-cell" style={{ color: e.advance > 0 ? '#DC2626' : undefined }}>
                                         ৳{e.advance.toLocaleString()}
                                         {e.advance_records.length > 0 && (
@@ -236,8 +244,6 @@ export default function SalarySheet() {
                                     </td>
                                     <td style={{ color: e.loan > 0 ? '#DC2626' : undefined }}>৳{e.loan.toLocaleString()}</td>
                                     <td style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
-                                    <td style={{ color: e.performance_bonus > 0 ? '#16A34A' : undefined }}>৳{e.performance_bonus.toLocaleString()}</td>
-                                    <td style={{ color: e.festival_bonus > 0 ? '#16A34A' : undefined }}>৳{e.festival_bonus.toLocaleString()}</td>
                                     <td style={{ fontWeight: 700, color: '#16A34A' }}>৳{e.net_payable.toLocaleString()}</td>
                                     <td>
                                         <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: e.payment_status === 'Paid' ? '#16A34A' : '#DC2626', background: e.payment_status === 'Paid' ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)' }}>

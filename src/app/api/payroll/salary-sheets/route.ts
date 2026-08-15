@@ -14,7 +14,7 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
         .select(`
             id, employee_id, basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus,
             loan, other_deduction, payment_status, payment_method, payment_date, updated_at,
-            employee:employees!employee_id(id, name, employee_id, avatar_url, joining_date, department:departments(id, name))
+            employee:employees!employee_id(id, name, employee_id, avatar_url, joining_date, festival_bonus_percentage, department:departments(id, name))
         `)
         .eq('salary_sheet_id', sheetId)
         .order('updated_at', { ascending: true })
@@ -52,6 +52,11 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
             snacks_bill: Number(r.snacks_bill) || 0,
             performance_bonus: Number(r.performance_bonus) || 0,
             festival_bonus: Number(r.festival_bonus) || 0,
+            // The employee's *current* configured percentage (Members → Edit Member →
+            // Festival Bonus) — shown next to the amount for reference. The frozen
+            // festival_bonus amount above doesn't change if this is edited later, so on an
+            // older sheet these two can legitimately show a different rate than the amount.
+            festival_bonus_percentage: Number(r.employee?.festival_bonus_percentage) || 0,
             advance: advanceDetail.total,
             advance_records: advanceDetail.records,
             product_buy: productBuyDetail.total,
