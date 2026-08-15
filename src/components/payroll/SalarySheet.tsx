@@ -18,6 +18,8 @@ export interface SalaryEntry {
     festival_bonus: number
     advance: number
     advance_records: { date: string; amount: number }[]
+    product_buy: number
+    product_buy_records: { date: string; amount: number }[]
     loan: number
     other_deduction: number
     payment_status: 'Paid' | 'Unpaid'
@@ -29,7 +31,7 @@ export interface SalaryEntry {
 }
 
 // Advance is intentionally not here — it's read-only, computed live from the Advance
-// Management module (src/app/(dashboard)/advance-management), same as Fine.
+// module (Finance Hub → Advance tab, src/components/finance/AdvanceManager.tsx), same as Fine.
 const EDITABLE_AMOUNT_FIELDS = [
     { key: 'basic_salary', label: 'Basic Salary' },
     { key: 'extra_duty', label: 'Extra Duty' },
@@ -171,6 +173,7 @@ export default function SalarySheet() {
                                 <th>Extra Duty</th>
                                 <th>Transportation Bill</th>
                                 <th>Snacks Bill</th>
+                                <th>Advance</th>
                                 <th>Product Buy</th>
                                 <th>Loan</th>
                                 <th>Monthly Fine</th>
@@ -222,6 +225,16 @@ export default function SalarySheet() {
                                             </div>
                                         )}
                                     </td>
+                                    <td className="product-buy-cell" style={{ color: e.product_buy > 0 ? '#DC2626' : undefined }}>
+                                        ৳{e.product_buy.toLocaleString()}
+                                        {e.product_buy_records.length > 0 && (
+                                            <div className="advance-tooltip">
+                                                {e.product_buy_records.map((r, idx) => (
+                                                    <div key={idx}>{formatDate(r.date)}: ৳{r.amount.toLocaleString()}</div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </td>
                                     <td style={{ color: e.loan > 0 ? '#DC2626' : undefined }}>৳{e.loan.toLocaleString()}</td>
                                     <td style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
                                     <td style={{ color: e.performance_bonus > 0 ? '#16A34A' : undefined }}>৳{e.performance_bonus.toLocaleString()}</td>
@@ -248,7 +261,7 @@ export default function SalarySheet() {
                                 </tr>
                             ))}
                             {entries.length === 0 && (
-                                <tr><td colSpan={18} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No active employees found.</td></tr>
+                                <tr><td colSpan={19} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No active employees found.</td></tr>
                             )}
                         </tbody>
                     </table>
@@ -313,7 +326,8 @@ export default function SalarySheet() {
                 .payroll-grid-table tbody tr:hover .sticky-col-2 {
                     background: var(--color-surface-hover);
                 }
-                .payroll-grid-table .advance-cell {
+                .payroll-grid-table .advance-cell,
+                .payroll-grid-table .product-buy-cell {
                     position: relative;
                 }
                 .payroll-grid-table .advance-tooltip {
@@ -333,7 +347,8 @@ export default function SalarySheet() {
                     white-space: nowrap;
                     color: var(--color-text-secondary);
                 }
-                .payroll-grid-table .advance-cell:hover .advance-tooltip {
+                .payroll-grid-table .advance-cell:hover .advance-tooltip,
+                .payroll-grid-table .product-buy-cell:hover .advance-tooltip {
                     display: block;
                 }
             `}</style>
@@ -373,7 +388,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
     }
 
     const netPayable = numAmounts.basic_salary + numAmounts.extra_duty + numAmounts.transportation_bill + numAmounts.snacks_bill
-        + numAmounts.performance_bonus + numAmounts.festival_bonus - entry.fine - entry.advance - numAmounts.loan - numAmounts.other_deduction
+        + numAmounts.performance_bonus + numAmounts.festival_bonus - entry.fine - entry.advance - entry.product_buy - numAmounts.loan - numAmounts.other_deduction
 
     const handleSave = async () => {
         setSaving(true)
@@ -422,6 +437,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                         <ReadOnlyField label="Leave Days" value={String(entry.attendance.leave)} />
                         <ReadOnlyField label="Fine" value={`৳${entry.fine.toLocaleString()}`} />
                         <ReadOnlyField label="Advance" value={`৳${entry.advance.toLocaleString()}${entry.advance_records.length > 1 ? ` (${entry.advance_records.length} records)` : ''}`} />
+                        <ReadOnlyField label="Product Buy" value={`৳${entry.product_buy.toLocaleString()}${entry.product_buy_records.length > 1 ? ` (${entry.product_buy_records.length} records)` : ''}`} />
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>

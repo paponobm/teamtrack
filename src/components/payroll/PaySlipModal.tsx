@@ -34,7 +34,7 @@ function formatDate(d: string | null) {
 export default function PaySlipModal({ entry, month, totalDays, onClose }: PaySlipModalProps) {
     const totalEarnings = entry.basic_salary + entry.extra_duty + entry.transportation_bill + entry.snacks_bill
         + entry.performance_bonus + entry.festival_bonus
-    const totalDeductions = entry.fine + entry.advance + entry.loan + entry.other_deduction
+    const totalDeductions = entry.fine + entry.advance + entry.product_buy + entry.loan + entry.other_deduction
     const netPay = totalEarnings - totalDeductions
 
     return (
@@ -103,6 +103,7 @@ export default function PaySlipModal({ entry, month, totalDays, onClose }: PaySl
                         <div style={{ border: '1px solid #E5E7EB', borderRadius: '10px', padding: '14px 16px' }}>
                             <div style={{ fontWeight: 700, fontSize: '0.8125rem', color: '#111827', marginBottom: '10px' }}>Deductions</div>
                             <PayslipLine label="Advance" value={entry.advance} negative />
+                            <PayslipLine label="Product Buy" value={entry.product_buy} negative />
                             <PayslipLine label="Loan" value={entry.loan} negative />
                             <PayslipLine label="Monthly Fine" value={entry.fine} negative />
                             <PayslipLine label="Other Deduction" value={entry.other_deduction} negative />

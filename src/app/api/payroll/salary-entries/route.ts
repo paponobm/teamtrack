@@ -1,5 +1,7 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { getMonthRangeFromString } from '@/lib/dateRange'
+import { advanceToExpenseStatus } from '@/lib/advances'
+import { productBuyToExpenseStatus } from '@/lib/productBuys'
 import { NextResponse } from 'next/server'
 
 // 'advance' is intentionally not editable here — it's computed live from the Advance
@@ -74,13 +76,43 @@ export async function PUT(request: Request) {
         const { data: sheet } = await supabase.from('salary_sheets').select('month').eq('id', data.salary_sheet_id).maybeSingle()
         if (sheet) {
             const { start, end } = getMonthRangeFromString(sheet.month)
-            await supabase
+            const { data: settledAdvances } = await supabase
                 .from('advances')
                 .update({ payment_status: 'Paid' })
                 .eq('employee_id', data.employee_id)
                 .eq('payment_status', 'Unpaid')
                 .gte('advance_date', start)
                 .lte('advance_date', end)
+                .select('expense_id')
+
+            // Mirror the settlement into each advance's linked Finance Hub Expense too, so
+            // Total Expenses/Net Balance stay consistent with what Payroll just marked Paid.
+            const expenseIds = (settledAdvances || []).map(a => a.expense_id).filter((x): x is string => !!x)
+            if (expenseIds.length > 0) {
+                await supabase
+                    .from('expenses')
+                    .update({ payment_status: advanceToExpenseStatus('Paid'), approved_by: auth.employee.id })
+                    .in('id', expenseIds)
+            }
+
+            // Same settlement, mirrored for Product Buy — a separate deduction type/table
+            // from Advance, so it's settled and synced independently here.
+            const { data: settledProductBuys } = await supabase
+                .from('product_buys')
+                .update({ payment_status: 'Paid' })
+                .eq('employee_id', data.employee_id)
+                .eq('payment_status', 'Unpaid')
+                .gte('purchase_date', start)
+                .lte('purchase_date', end)
+                .select('expense_id')
+
+            const productBuyExpenseIds = (settledProductBuys || []).map((p: { expense_id: string | null }) => p.expense_id).filter((x: string | null): x is string => !!x)
+            if (productBuyExpenseIds.length > 0) {
+                await supabase
+                    .from('expenses')
+                    .update({ payment_status: productBuyToExpenseStatus('Paid'), approved_by: auth.employee.id })
+                    .in('id', productBuyExpenseIds)
+            }
         }
     }
 

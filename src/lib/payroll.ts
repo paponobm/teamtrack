@@ -113,11 +113,13 @@ export interface SalaryAmounts {
 }
 
 // Net Payable = Basic Salary + Extra Duty + Transportation Bill + Snacks Bill + Performance Bonus
-// + Festival Bonus - Fine - Advance - Loan - Other Deduction.
+// + Festival Bonus - Fine - Advance - Product Buy - Loan - Other Deduction.
 // The one place this formula lives — every API route imports it, so the dashboard totals
-// and the salary sheet rows can never disagree with each other. Fine and Advance are both
-// live-computed (never stored per salary entry), so they're passed in explicitly.
-export function computeNetPayable(entry: SalaryAmounts, fine: number, advance: number): number {
+// and the salary sheet rows can never disagree with each other. Fine, Advance, and Product
+// Buy are all live-computed (never stored per salary entry), so they're passed in explicitly.
+// Advance and Product Buy are independent deduction types, each with their own source table
+// (advances vs product_buys) — never merged into one number.
+export function computeNetPayable(entry: SalaryAmounts, fine: number, advance: number, productBuy: number): number {
     return (Number(entry.basic_salary) || 0)
         + (Number(entry.extra_duty) || 0)
         + (Number(entry.transportation_bill) || 0)
@@ -126,6 +128,7 @@ export function computeNetPayable(entry: SalaryAmounts, fine: number, advance: n
         + (Number(entry.festival_bonus) || 0)
         - fine
         - advance
+        - productBuy
         - (Number(entry.loan) || 0)
         - (Number(entry.other_deduction) || 0)
 }

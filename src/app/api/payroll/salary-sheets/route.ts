@@ -1,5 +1,6 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable } from '@/lib/payroll'
+import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { NextResponse } from 'next/server'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -22,16 +23,18 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
 
     const rows = entries || []
     const employeeIds = rows.map((r: { employee_id: string }) => r.employee_id)
-    const [attendance, fines, advances] = await Promise.all([
+    const [attendance, fines, advances, productBuys] = await Promise.all([
         getAttendanceStatsForMonth(supabase, employeeIds, month),
         getFineTotalsForMonth(supabase, employeeIds, month),
         getAdvanceDetailsForMonth(supabase, employeeIds, month),
+        getProductBuyDetailsForMonth(supabase, employeeIds, month),
     ])
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return rows.map((r: any) => {
         const fine = fines[r.employee_id] || 0
         const advanceDetail = advances[r.employee_id] || { total: 0, records: [] }
+        const productBuyDetail = productBuys[r.employee_id] || { total: 0, records: [] }
         return {
             id: r.id,
             employee_id: r.employee_id,
@@ -51,6 +54,8 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
             festival_bonus: Number(r.festival_bonus) || 0,
             advance: advanceDetail.total,
             advance_records: advanceDetail.records,
+            product_buy: productBuyDetail.total,
+            product_buy_records: productBuyDetail.records,
             loan: Number(r.loan) || 0,
             other_deduction: Number(r.other_deduction) || 0,
             payment_status: r.payment_status,
@@ -58,7 +63,7 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
             payment_date: r.payment_date,
             attendance: attendance[r.employee_id] || { present: 0, late: 0, absent: 0, leave: 0 },
             fine,
-            net_payable: computeNetPayable(r, fine, advanceDetail.total),
+            net_payable: computeNetPayable(r, fine, advanceDetail.total, productBuyDetail.total),
             updated_at: r.updated_at,
         }
     })

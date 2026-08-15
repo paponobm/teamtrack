@@ -12,6 +12,7 @@ import CategoriesManager from '@/components/finance/CategoriesManager'
 import BudgetsManager from '@/components/finance/BudgetsManager'
 import ReportsView from '@/components/finance/ReportsView'
 import FundsManager from '@/components/finance/FundsManager'
+import AdvanceManager from '@/components/finance/AdvanceManager'
 
 interface Expense {
     id: string
@@ -123,7 +124,7 @@ export default function ExpensesPage() {
     const [showIncomeModal, setShowIncomeModal] = useState(false)
     const [incomeForm, setIncomeForm] = useState(emptyIncomeForm)
     const [incomeSaving, setIncomeSaving] = useState(false)
-    const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'categories' | 'budgets' | 'reports' | 'funds'>('overview')
+    const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'categories' | 'budgets' | 'reports' | 'funds' | 'advance'>('overview')
     const [funds, setFunds] = useState<{ id: string; name: string }[]>([])
     // Bulk-approve pending expenses (Super Admin only)
     const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -419,7 +420,8 @@ export default function ExpensesPage() {
                     { id: 'categories', label: 'Categories' },
                     { id: 'budgets', label: 'Budgets' },
                     { id: 'reports', label: 'Reports' },
-                    { id: 'funds', label: 'Funds' }
+                    { id: 'funds', label: 'Funds' },
+                    ...(isAdmin ? [{ id: 'advance', label: 'Advance' }] : []),
                 ].map(tab => (
                     <button
                         key={tab.id}
@@ -442,6 +444,7 @@ export default function ExpensesPage() {
             {activeTab === 'transactions' && <TransactionsList />}
             {activeTab === 'categories' && <CategoriesManager />}
             {activeTab === 'budgets' && <BudgetsManager />}
+            {activeTab === 'advance' && isAdmin && <AdvanceManager />}
             {activeTab === 'reports' && <ReportsView />}
 
             {activeTab === 'overview' && (
