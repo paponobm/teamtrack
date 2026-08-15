@@ -53,7 +53,7 @@ const navItems = [
         items: [
             { labelKey: 'nav.courier', href: '/courier', icon: 'courier', slugs: ['courier'], adminOnly: false },
             { labelKey: 'nav.expenses', href: '/expenses', icon: 'expense', slugs: null, adminOnly: true },
-            { labelKey: 'Advance', href: '/advance-management', icon: 'advance', slugs: null, adminOnly: true },
+            { labelKey: 'Product Buy', href: '/advance-management', icon: 'advance', slugs: null, adminOnly: true },
             { labelKey: 'Payroll Management', href: '/payroll-management', icon: 'payroll', slugs: null, adminOnly: 'super' as const },
             { labelKey: 'nav.requisitions', href: '/requisitions', icon: 'requisition', slugs: ['requisitions'], adminOnly: false },
             { labelKey: 'nav.ideas', href: '/ideas', icon: 'idea', slugs: ['idea-sharing'], adminOnly: false },

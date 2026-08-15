@@ -134,17 +134,17 @@ export default function AdvanceManagementPage() {
         <motion.div variants={container} initial="hidden" animate="show">
             <motion.div className="page-header" variants={item}>
                 <div>
-                    <h1 className="page-title">Advance Management</h1>
-                    <p className="page-subtitle">Manage employee advances and payment records</p>
+                    <h1 className="page-title">Product Buy Management</h1>
+                    <p className="page-subtitle">Manage employee product purchases and payment records</p>
                 </div>
                 <button className="btn btn-primary btn-sm" onClick={() => { setEditing(null); setShowModal(true) }}>
-                    <IconPlus size={16} /> Add Advance
+                    <IconPlus size={16} /> Add Product Buy
                 </button>
             </motion.div>
 
             <motion.div variants={item} className="grid grid-4" style={{ gap: '14px', marginBottom: '20px' }}>
                 <div className="stat-card">
-                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconWallet size={14} color="var(--color-text-tertiary)" /> Total Advance</span>
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconWallet size={14} color="var(--color-text-tertiary)" /> Total Product Buys</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>{summary.count}</span>
                 </div>
                 <div className="stat-card">
