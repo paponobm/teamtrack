@@ -421,7 +421,7 @@ export default function ExpensesPage() {
                     { id: 'budgets', label: 'Budgets' },
                     { id: 'reports', label: 'Reports' },
                     { id: 'funds', label: 'Funds' },
-                    ...(isAdmin ? [{ id: 'advance', label: 'Advance' }] : []),
+                    ...(isAdmin ? [{ id: 'advance', label: 'Advance & EMI' }] : []),
                 ].map(tab => (
                     <button
                         key={tab.id}

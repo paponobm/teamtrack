@@ -22,6 +22,7 @@ export interface SalaryEntry {
     product_buy: number
     product_buy_records: { date: string; amount: number }[]
     loan: number
+    loan_records: { id: string; monthly_installment: number; month_number: number; term_months: number }[]
     other_deduction: number
     payment_status: 'Paid' | 'Unpaid'
     payment_method: string | null
@@ -31,14 +32,14 @@ export interface SalaryEntry {
     net_payable: number
 }
 
-// Advance/Product Buy are intentionally not here — read-only, computed live from their own
-// modules, same as Fine. Basic Salary/Transportation Bill/Snacks Bill/Festival Bonus are also
-// not here as of this month's sheet: they're frozen at sheet-creation time from the
-// employee's saved payroll defaults (Members → Edit Member → Payroll / Festival Bonus tabs,
-// Super Admin only) rather than being typed in per month here.
+// Advance/Product Buy/Loan are intentionally not here — read-only, computed live from their
+// own modules (Loan from EMI records, see src/lib/emis.ts), same as Fine. Basic Salary/
+// Transportation Bill/Snacks Bill/Festival Bonus are also not here as of this month's sheet:
+// they're frozen at sheet-creation time from the employee's saved payroll defaults (Members →
+// Edit Member → Payroll / Festival Bonus tabs, Super Admin only) rather than being typed in
+// per month here.
 const EDITABLE_AMOUNT_FIELDS = [
     { key: 'extra_duty', label: 'Extra Duty' },
-    { key: 'loan', label: 'Loan' },
     { key: 'performance_bonus', label: 'Performance Bonus' },
     { key: 'other_deduction', label: 'Other Deduction' },
 ] as const
@@ -242,7 +243,21 @@ export default function SalarySheet() {
                                             </div>
                                         )}
                                     </td>
-                                    <td style={{ color: e.loan > 0 ? '#DC2626' : undefined }}>৳{e.loan.toLocaleString()}</td>
+                                    <td className="loan-cell" style={{ color: e.loan > 0 ? '#DC2626' : undefined }}>
+                                        ৳{e.loan.toLocaleString()}
+                                        {e.loan_records.length > 0 && (
+                                            <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginLeft: '4px' }}>
+                                                ({e.loan_records.map(r => `${r.month_number}/${r.term_months}`).join(', ')} Installment)
+                                            </span>
+                                        )}
+                                        {e.loan_records.length > 0 && (
+                                            <div className="advance-tooltip">
+                                                {e.loan_records.map(r => (
+                                                    <div key={r.id}>EMI {r.month_number}/{r.term_months}: ৳{r.monthly_installment.toLocaleString()}</div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </td>
                                     <td style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
                                     <td style={{ fontWeight: 700, color: '#16A34A' }}>৳{e.net_payable.toLocaleString()}</td>
                                     <td>
@@ -332,7 +347,8 @@ export default function SalarySheet() {
                     background: var(--color-surface-hover);
                 }
                 .payroll-grid-table .advance-cell,
-                .payroll-grid-table .product-buy-cell {
+                .payroll-grid-table .product-buy-cell,
+                .payroll-grid-table .loan-cell {
                     position: relative;
                 }
                 .payroll-grid-table .advance-tooltip {
@@ -353,7 +369,8 @@ export default function SalarySheet() {
                     color: var(--color-text-secondary);
                 }
                 .payroll-grid-table .advance-cell:hover .advance-tooltip,
-                .payroll-grid-table .product-buy-cell:hover .advance-tooltip {
+                .payroll-grid-table .product-buy-cell:hover .advance-tooltip,
+                .payroll-grid-table .loan-cell:hover .advance-tooltip {
                     display: block;
                 }
             `}</style>
@@ -368,7 +385,6 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
     // snapping back to "0" on every keystroke.
     const [amounts, setAmounts] = useState({
         extra_duty: String(entry.extra_duty),
-        loan: String(entry.loan),
         performance_bonus: String(entry.performance_bonus),
         other_deduction: String(entry.other_deduction),
     })
@@ -379,13 +395,12 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
 
     const numAmounts = {
         extra_duty: Math.max(0, Number(amounts.extra_duty) || 0),
-        loan: Math.max(0, Number(amounts.loan) || 0),
         performance_bonus: Math.max(0, Number(amounts.performance_bonus) || 0),
         other_deduction: Math.max(0, Number(amounts.other_deduction) || 0),
     }
 
     const netPayable = entry.basic_salary + numAmounts.extra_duty + entry.transportation_bill + entry.snacks_bill
-        + numAmounts.performance_bonus + entry.festival_bonus - entry.fine - entry.advance - entry.product_buy - numAmounts.loan - numAmounts.other_deduction
+        + numAmounts.performance_bonus + entry.festival_bonus - entry.fine - entry.advance - entry.product_buy - entry.loan - numAmounts.other_deduction
 
     const handleSave = async () => {
         setSaving(true)
@@ -439,6 +454,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                         <ReadOnlyField label="Fine" value={`৳${entry.fine.toLocaleString()}`} />
                         <ReadOnlyField label="Advance" value={`৳${entry.advance.toLocaleString()}${entry.advance_records.length > 1 ? ` (${entry.advance_records.length} records)` : ''}`} />
                         <ReadOnlyField label="Product Buy" value={`৳${entry.product_buy.toLocaleString()}${entry.product_buy_records.length > 1 ? ` (${entry.product_buy_records.length} records)` : ''}`} />
+                        <ReadOnlyField label="Loan" value={`৳${entry.loan.toLocaleString()}${entry.loan_records.length > 1 ? ` (${entry.loan_records.length} EMIs)` : ''}`} />
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>

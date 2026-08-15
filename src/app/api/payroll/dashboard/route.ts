@@ -1,6 +1,7 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
+import { getEmiLoanDetailsForMonth } from '@/lib/emis'
 import { NextResponse } from 'next/server'
 
 // GET /api/payroll/dashboard?month=YYYY-MM — monthly payroll summary (Super Admin only).
@@ -46,15 +47,16 @@ export async function GET(request: Request) {
 
     const { data: entries } = await supabase
         .from('salary_entries')
-        .select('employee_id, basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus, loan, other_deduction, payment_status')
+        .select('employee_id, basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus, other_deduction, payment_status')
         .eq('salary_sheet_id', sheet.id)
 
     const rows = entries || []
     const employeeIds = rows.map(r => r.employee_id)
-    const [fineTotals, advanceDetails, productBuyDetails] = await Promise.all([
+    const [fineTotals, advanceDetails, productBuyDetails, emiDetails] = await Promise.all([
         getFineTotalsForMonth(supabase, employeeIds, month),
         getAdvanceDetailsForMonth(supabase, employeeIds, month),
         getProductBuyDetailsForMonth(supabase, employeeIds, month),
+        getEmiLoanDetailsForMonth(supabase, employeeIds, month),
     ])
 
     // Total Payroll reflects money actually paid out this month, not the projected cost of
@@ -74,11 +76,12 @@ export async function GET(request: Request) {
     rows.forEach(r => {
         const advance = advanceDetails[r.employee_id]?.total || 0
         const productBuy = productBuyDetails[r.employee_id]?.total || 0
-        const net = computeNetPayable(r, fineTotals[r.employee_id] || 0, advance, productBuy)
+        const loan = emiDetails[r.employee_id]?.total || 0
+        const net = computeNetPayable(r, fineTotals[r.employee_id] || 0, advance, productBuy, loan)
         totalBasicSalary += Number(r.basic_salary) || 0
         totalAdvance += advance
         totalProductBuy += productBuy
-        totalLoan += Number(r.loan) || 0
+        totalLoan += loan
         totalPerformanceBonus += Number(r.performance_bonus) || 0
         totalFestivalBonus += Number(r.festival_bonus) || 0
         if (r.payment_status === 'Paid') { paidEmployees++; paidAmount += net; totalPayroll += net }

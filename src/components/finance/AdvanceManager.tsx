@@ -21,6 +21,19 @@ interface Advance {
     created_by_employee: { id: string; name: string } | null
 }
 
+interface Emi {
+    id: string
+    employee_id: string
+    amount: number
+    term_months: number
+    start_date: string
+    interest_rate: number
+    monthly_installment: number
+    created_at: string
+    employee: { id: string; name: string; employee_id: string | null; avatar_url: string | null } | null
+    created_by_employee: { id: string; name: string } | null
+}
+
 interface EmployeeOption {
     id: string
     name: string
@@ -28,7 +41,22 @@ interface EmployeeOption {
     avatar_url: string | null
 }
 
+// Advance and EMI are two distinct tables/deduction types (see src/lib/emis.ts) merged
+// client-side into one "Advance/EMI" list, matching how the Salary Sheet already keeps them
+// as separate Advance/Loan columns while showing them together here for admin convenience.
+interface CombinedRow {
+    id: string
+    record_type: 'Advance' | 'EMI'
+    employee_id: string
+    employee: EmployeeOption | null
+    date: string
+    amount: number
+    advance?: Advance
+    emi?: Emi
+}
+
 type DateRangeMode = 'all' | 'today' | 'week' | 'month' | 'custom'
+const TERM_OPTIONS = [3, 6] as const
 
 const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } }
 
@@ -41,14 +69,16 @@ function formatDate(d: string) {
     return new Date(d).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-// Advance Management, embedded as a Finance Hub tab. Every advance is mirrored into the
-// `expenses` table (category "Employee Advance", see src/lib/advances.ts) at creation/edit/
-// delete time, so it's automatically included in the Overview tab's Total Expenses/Net
-// Balance — no separate financial total is kept here.
+// Advance & EMI Management, embedded as a Finance Hub tab. Every advance is mirrored into
+// the `expenses` table (category "Employee Advance", see src/lib/advances.ts) at creation/
+// edit/delete time, so it's automatically included in the Overview tab's Total Expenses/Net
+// Balance. EMI records are a separate installment-loan module (src/lib/emis.ts) that feed
+// the Salary Sheet's Loan column directly and are not linked to Expenses.
 export default function AdvanceManager() {
     const { success: toastSuccess, error: toastError } = useToast()
 
     const [advances, setAdvances] = useState<Advance[]>([])
+    const [emis, setEmis] = useState<Emi[]>([])
     const [employees, setEmployees] = useState<EmployeeOption[]>([])
     const [loading, setLoading] = useState(true)
     const [search, setSearch] = useState('')
@@ -58,9 +88,10 @@ export default function AdvanceManager() {
     const [customStart, setCustomStart] = useState('')
     const [customEnd, setCustomEnd] = useState('')
     const [showModal, setShowModal] = useState(false)
-    const [editing, setEditing] = useState<Advance | null>(null)
+    const [addType, setAddType] = useState<'Advance' | 'EMI'>('Advance')
+    const [editing, setEditing] = useState<CombinedRow | null>(null)
 
-    const fetchAdvances = useCallback(async () => {
+    const fetchData = useCallback(async () => {
         setLoading(true)
         try {
             const params = new URLSearchParams()
@@ -73,43 +104,59 @@ export default function AdvanceManager() {
             } else if (dateRangeMode === 'custom' && customStart && customEnd) {
                 params.set('start_date', customStart); params.set('end_date', customEnd)
             }
-            const res = await fetch(`/api/advances?${params}`)
-            if (res.ok) {
-                const json = await res.json()
+            const [advRes, emiRes] = await Promise.all([
+                fetch(`/api/advances?${params}`),
+                fetch(`/api/emis?${params}`),
+            ])
+            if (advRes.ok) {
+                const json = await advRes.json()
                 setAdvances(json.advances || [])
+            }
+            if (emiRes.ok) {
+                const json = await emiRes.json()
+                setEmis(json.emis || [])
             }
         } finally {
             setLoading(false)
         }
     }, [dateRangeMode, refDate, customStart, customEnd])
 
-    useEffect(() => { fetchAdvances() }, [fetchAdvances])
+    useEffect(() => { fetchData() }, [fetchData])
 
     useEffect(() => {
         fetch('/api/members?status=active').then(r => r.json()).then(d => { if (Array.isArray(d)) setEmployees(d) })
     }, [])
 
-    const filtered = advances.filter(a => {
-        if (employeeFilter && a.employee_id !== employeeFilter) return false
+    const combined: CombinedRow[] = [
+        ...advances.map(a => ({ id: a.id, record_type: 'Advance' as const, employee_id: a.employee_id, employee: a.employee, date: a.advance_date, amount: a.amount, advance: a })),
+        ...emis.map(e => ({ id: e.id, record_type: 'EMI' as const, employee_id: e.employee_id, employee: e.employee, date: e.start_date, amount: e.amount, emi: e })),
+    ].sort((a, b) => b.date.localeCompare(a.date))
+
+    const filtered = combined.filter(row => {
+        if (employeeFilter && row.employee_id !== employeeFilter) return false
         if (!search) return true
         const q = search.toLowerCase()
-        return (a.employee?.name || '').toLowerCase().includes(q) || (a.employee?.employee_id || '').toLowerCase().includes(q)
+        return (row.employee?.name || '').toLowerCase().includes(q) || (row.employee?.employee_id || '').toLowerCase().includes(q)
     })
 
-    // Computed from the same filtered set the table shows, so the cards always match
-    // whatever combination of date + employee + status filters is active.
-    const summary = filtered.reduce((acc, a) => {
-        acc.totalAmount += a.amount
-        acc.employeeIds.add(a.employee_id)
+    // Total Advance stays scoped to Advance-type records only (matches its original meaning);
+    // Total Employees reflects everyone with either an Advance or an EMI in view.
+    const summary = filtered.reduce((acc, row) => {
+        if (row.record_type === 'Advance') acc.totalAdvance += row.amount
+        acc.employeeIds.add(row.employee_id)
         return acc
-    }, { totalAmount: 0, employeeIds: new Set<string>() })
+    }, { totalAdvance: 0, employeeIds: new Set<string>() })
 
-    const handleDelete = async (adv: Advance) => {
-        if (!confirm(`Delete this advance record for ${adv.employee?.name || 'this employee'}? This also removes its linked Finance Hub expense entry.`)) return
-        const res = await fetch(`/api/advances/${adv.id}`, { method: 'DELETE' })
+    const handleDelete = async (row: CombinedRow) => {
+        const label = row.record_type === 'Advance' ? 'advance' : 'EMI'
+        const extra = row.record_type === 'Advance' ? ' This also removes its linked Finance Hub expense entry.' : ''
+        if (!confirm(`Delete this ${label} record for ${row.employee?.name || 'this employee'}?${extra}`)) return
+        const url = row.record_type === 'Advance' ? `/api/advances/${row.id}` : `/api/emis/${row.id}`
+        const res = await fetch(url, { method: 'DELETE' })
         if (res.ok) {
-            setAdvances(prev => prev.filter(a => a.id !== adv.id))
-            toastSuccess('Advance record deleted')
+            if (row.record_type === 'Advance') setAdvances(prev => prev.filter(a => a.id !== row.id))
+            else setEmis(prev => prev.filter(e => e.id !== row.id))
+            toastSuccess(`${label === 'advance' ? 'Advance' : 'EMI'} record deleted`)
         } else {
             const err = await res.json()
             toastError(err.error || 'Failed to delete')
@@ -120,18 +167,18 @@ export default function AdvanceManager() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
                 <div>
-                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Advance</h2>
-                    <p style={{ fontSize: '0.875rem', color: 'var(--color-text-tertiary)', margin: '4px 0 0' }}>Manage employee advances and payment records</p>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Advance & EMI</h2>
+                    <p style={{ fontSize: '0.875rem', color: 'var(--color-text-tertiary)', margin: '4px 0 0' }}>Manage employee advances, EMI loans and payment records</p>
                 </div>
-                <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true) }}>
-                    <IconPlus size={16} /> Add Advance
+                <button className="btn btn-primary" onClick={() => { setEditing(null); setAddType('Advance'); setShowModal(true) }}>
+                    <IconPlus size={16} /> Add Record
                 </button>
             </div>
 
             <motion.div variants={item} initial="hidden" animate="show" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '20px' }}>
                 <div className="stat-card">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconWallet size={14} color="var(--color-text-tertiary)" /> Total Advance</span>
-                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>৳{summary.totalAmount.toLocaleString()}</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>৳{summary.totalAdvance.toLocaleString()}</span>
                 </div>
                 <div className="stat-card">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconUsers size={14} color="var(--color-text-tertiary)" /> Total Employees</span>
@@ -196,43 +243,60 @@ export default function AdvanceManager() {
                         <tr>
                             <th>SL</th>
                             <th>Employee</th>
+                            <th>Advance/EMI</th>
                             <th>Date</th>
                             <th>Amount</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {!loading && filtered.map((a, i) => (
-                            <tr key={a.id}>
+                        {!loading && filtered.map((row, i) => (
+                            <tr key={`${row.record_type}-${row.id}`}>
                                 <td>{i + 1}</td>
                                 <td>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        <div className="avatar avatar-sm" style={{ background: getAvatarColor(a.employee?.name || 'U'), overflow: 'hidden', flexShrink: 0, width: 28, height: 28, fontSize: '0.75rem' }}>
-                                            {a.employee?.avatar_url ? (
-                                                <img src={a.employee.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                            ) : (a.employee?.name || 'U')[0].toUpperCase()}
+                                        <div className="avatar avatar-sm" style={{ background: getAvatarColor(row.employee?.name || 'U'), overflow: 'hidden', flexShrink: 0, width: 28, height: 28, fontSize: '0.75rem' }}>
+                                            {row.employee?.avatar_url ? (
+                                                <img src={row.employee.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                            ) : (row.employee?.name || 'U')[0].toUpperCase()}
                                         </div>
                                         <div>
-                                            <div style={{ fontWeight: 600 }}>{a.employee?.name || '—'}</div>
-                                            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{a.employee?.employee_id || '—'}</div>
+                                            <div style={{ fontWeight: 600 }}>{row.employee?.name || '—'}</div>
+                                            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{row.employee?.employee_id || '—'}</div>
                                         </div>
                                     </div>
                                 </td>
-                                <td>{formatDate(a.advance_date)}</td>
-                                <td style={{ fontWeight: 700 }}>৳{a.amount.toLocaleString()}</td>
+                                <td>
+                                    <span
+                                        title={row.record_type === 'EMI' && row.emi ? `${row.emi.term_months} months, ${row.emi.interest_rate}% interest, ৳${row.emi.monthly_installment.toLocaleString()}/mo` : undefined}
+                                        style={{
+                                            display: 'inline-block', padding: '3px 10px', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 600,
+                                            background: row.record_type === 'Advance' ? 'rgba(37,99,235,0.1)' : 'rgba(217,119,6,0.1)',
+                                            color: row.record_type === 'Advance' ? '#2563EB' : '#D97706',
+                                        }}>
+                                        {row.record_type === 'Advance' ? 'Advance' : 'EMI'}
+                                    </span>
+                                </td>
+                                <td>{formatDate(row.date)}</td>
+                                <td style={{ fontWeight: 700 }}>
+                                    ৳{row.amount.toLocaleString()}
+                                    {row.record_type === 'EMI' && row.emi && (
+                                        <div style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-tertiary)' }}>৳{row.emi.monthly_installment.toLocaleString()}/mo × {row.emi.term_months}</div>
+                                    )}
+                                </td>
                                 <td>
                                     <div style={{ display: 'flex', gap: '4px' }}>
-                                        <button className="btn btn-ghost btn-icon" onClick={() => { setEditing(a); setShowModal(true) }} title="Edit"><IconEdit size={15} /></button>
-                                        <button className="btn btn-ghost btn-icon" onClick={() => handleDelete(a)} title="Delete" style={{ color: '#DC2626' }}><IconTrash size={15} /></button>
+                                        <button className="btn btn-ghost btn-icon" onClick={() => { setEditing(row); setAddType(row.record_type); setShowModal(true) }} title="Edit"><IconEdit size={15} /></button>
+                                        <button className="btn btn-ghost btn-icon" onClick={() => handleDelete(row)} title="Delete" style={{ color: '#DC2626' }}><IconTrash size={15} /></button>
                                     </div>
                                 </td>
                             </tr>
                         ))}
                         {!loading && filtered.length === 0 && (
-                            <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No advance records found.</td></tr>
+                            <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No advance or EMI records found.</td></tr>
                         )}
                         {loading && (
-                            <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
+                            <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
                         )}
                     </tbody>
                 </table>
@@ -240,12 +304,18 @@ export default function AdvanceManager() {
 
             <AnimatePresence>
                 {showModal && (
-                    <AdvanceModal
-                        advance={editing}
+                    <AddEditModal
+                        editing={editing}
+                        addType={addType}
+                        setAddType={setAddType}
                         employees={employees}
                         onClose={() => setShowModal(false)}
-                        onSaved={(saved, isNew) => {
+                        onSavedAdvance={(saved, isNew) => {
                             setAdvances(prev => isNew ? [saved, ...prev] : prev.map(a => a.id === saved.id ? saved : a))
+                            setShowModal(false)
+                        }}
+                        onSavedEmi={(saved, isNew) => {
+                            setEmis(prev => isNew ? [saved, ...prev] : prev.map(e => e.id === saved.id ? saved : e))
                             setShowModal(false)
                         }}
                     />
@@ -255,7 +325,51 @@ export default function AdvanceManager() {
     )
 }
 
-function AdvanceModal({ advance, employees, onClose, onSaved }: {
+function AddEditModal({ editing, addType, setAddType, employees, onClose, onSavedAdvance, onSavedEmi }: {
+    editing: CombinedRow | null
+    addType: 'Advance' | 'EMI'
+    setAddType: (t: 'Advance' | 'EMI') => void
+    employees: EmployeeOption[]
+    onClose: () => void
+    onSavedAdvance: (advance: Advance, isNew: boolean) => void
+    onSavedEmi: (emi: Emi, isNew: boolean) => void
+}) {
+    const isEdit = !!editing
+    // Editing locks the type to whatever record is being edited — you can't turn an Advance
+    // into an EMI mid-edit. Adding shows a picker so the same "Add Record" button covers both.
+    const recordType = isEdit ? editing!.record_type : addType
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <motion.div initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 10 }}
+                className="modal" style={{ maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                    <div className="modal-title">{isEdit ? `Edit ${recordType}` : 'Add Record'}</div>
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: 'var(--color-text-tertiary)' }}><IconX size={18} /></button>
+                </div>
+
+                {!isEdit && (
+                    <div style={{ display: 'flex', gap: '2px', margin: '16px 20px 0', background: 'rgba(118,118,128,0.08)', borderRadius: '10px', padding: '2px' }}>
+                        {(['Advance', 'EMI'] as const).map(t => (
+                            <button key={t} onClick={() => setAddType(t)} type="button"
+                                style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: 'none', fontSize: '0.8125rem', fontWeight: 600, cursor: 'pointer', background: addType === t ? 'var(--color-bg-primary)' : 'transparent', color: addType === t ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)', boxShadow: addType === t ? '0 1px 3px rgba(0,0,0,0.08)' : 'none' }}>
+                                {t}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
+                {recordType === 'Advance' ? (
+                    <AdvanceForm advance={editing?.advance || null} employees={employees} onClose={onClose} onSaved={onSavedAdvance} />
+                ) : (
+                    <EmiForm emi={editing?.emi || null} employees={employees} onClose={onClose} onSaved={onSavedEmi} />
+                )}
+            </motion.div>
+        </div>
+    )
+}
+
+function AdvanceForm({ advance, employees, onClose, onSaved }: {
     advance: Advance | null
     employees: EmployeeOption[]
     onClose: () => void
@@ -318,48 +432,159 @@ function AdvanceModal({ advance, employees, onClose, onSaved }: {
     }
 
     return (
-        <div className="modal-overlay" onClick={onClose}>
-            <motion.div initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 10 }}
-                className="modal" style={{ maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
-                <div className="modal-header">
-                    <div className="modal-title">{isEdit ? 'Edit Advance' : 'Add Advance'}</div>
-                    <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: 'var(--color-text-tertiary)' }}><IconX size={18} /></button>
+        <>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div>
+                    <label className="form-label">Employee *</label>
+                    <select className="form-input" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
+                        <option value="">Select employee...</option>
+                        {employees.map(emp => (
+                            <option key={emp.id} value={emp.id}>{emp.name}{emp.employee_id ? ` (${emp.employee_id})` : ''}</option>
+                        ))}
+                    </select>
                 </div>
 
-                <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    <div>
-                        <label className="form-label">Employee *</label>
-                        <select className="form-input" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
-                            <option value="">Select employee...</option>
-                            {employees.map(emp => (
-                                <option key={emp.id} value={emp.id}>{emp.name}{emp.employee_id ? ` (${emp.employee_id})` : ''}</option>
-                            ))}
-                        </select>
-                    </div>
-
-                    <div>
-                        <label className="form-label">Amount (৳) *</label>
-                        <input className="form-input" type="number" min={1} value={amount}
-                            onFocus={e => e.target.select()}
-                            onChange={e => setAmount(Math.max(0, Number(e.target.value) || 0))} />
-                    </div>
-
-                    <div>
-                        <label className="form-label">Date *</label>
-                        <input className="form-input" type="date" value={advanceDate} onChange={e => setAdvanceDate(e.target.value)} />
-                    </div>
-
-                    <div>
-                        <label className="form-label">Note</label>
-                        <textarea className="form-input" rows={3} placeholder="Advance for personal emergency" value={note} onChange={e => setNote(e.target.value)} />
-                    </div>
+                <div>
+                    <label className="form-label">Amount (৳) *</label>
+                    <input className="form-input" type="number" min={1} value={amount}
+                        onFocus={e => e.target.select()}
+                        onChange={e => setAmount(Math.max(0, Number(e.target.value) || 0))} />
                 </div>
 
-                <div className="modal-footer">
-                    <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-                    <button className="btn btn-primary" disabled={saving} onClick={handleSave}>{saving ? 'Saving...' : 'Save'}</button>
+                <div>
+                    <label className="form-label">Date *</label>
+                    <input className="form-input" type="date" value={advanceDate} onChange={e => setAdvanceDate(e.target.value)} />
                 </div>
-            </motion.div>
-        </div>
+
+                <div>
+                    <label className="form-label">Note</label>
+                    <textarea className="form-input" rows={3} placeholder="Advance for personal emergency" value={note} onChange={e => setNote(e.target.value)} />
+                </div>
+            </div>
+
+            <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                <button className="btn btn-primary" disabled={saving} onClick={handleSave}>{saving ? 'Saving...' : 'Save'}</button>
+            </div>
+        </>
+    )
+}
+
+function EmiForm({ emi, employees, onClose, onSaved }: {
+    emi: Emi | null
+    employees: EmployeeOption[]
+    onClose: () => void
+    onSaved: (emi: Emi, isNew: boolean) => void
+}) {
+    const { success: toastSuccess, error: toastError } = useToast()
+    const [employeeId, setEmployeeId] = useState(emi?.employee_id || '')
+    const [termMonths, setTermMonths] = useState<number>(emi?.term_months || 3)
+    const [amount, setAmount] = useState(emi?.amount ?? 0)
+    const [startDate, setStartDate] = useState(emi?.start_date || getLocalDateString())
+    const [interestRate, setInterestRate] = useState(emi?.interest_rate ?? 0)
+    const [saving, setSaving] = useState(false)
+
+    const isEdit = !!emi
+
+    // Flat interest, split evenly: Total = Amount × (1 + rate/100), Monthly = Total ÷ term.
+    // Mirrors src/lib/emis.ts computeMonthlyInstallment exactly — shown live so the admin
+    // sees what will land in the Salary Sheet's Loan column before saving.
+    const previewInstallment = amount > 0 && termMonths > 0 ? (amount * (1 + (interestRate || 0) / 100)) / termMonths : 0
+
+    const handleSave = async () => {
+        if (!employeeId) { toastError('Please select an employee'); return }
+        if (!Number.isFinite(amount) || amount <= 0) { toastError('Amount must be greater than 0'); return }
+        if (!Number.isFinite(interestRate) || interestRate < 0) { toastError('Interest rate must be 0 or greater'); return }
+
+        setSaving(true)
+        try {
+            if (isEdit) {
+                const res = await fetch(`/api/emis/${emi.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ employee_id: employeeId, amount, term_months: termMonths, start_date: startDate, interest_rate: interestRate }),
+                })
+                if (res.ok) {
+                    const selectedEmployee = employees.find(e => e.id === employeeId)
+                    onSaved({
+                        ...emi, employee_id: employeeId, amount, term_months: termMonths, start_date: startDate, interest_rate: interestRate, monthly_installment: previewInstallment,
+                        employee: selectedEmployee ? { id: selectedEmployee.id, name: selectedEmployee.name, employee_id: selectedEmployee.employee_id, avatar_url: selectedEmployee.avatar_url } : emi.employee,
+                    }, false)
+                    toastSuccess('EMI updated')
+                } else {
+                    const err = await res.json()
+                    toastError(err.error || 'Failed to update')
+                }
+            } else {
+                const res = await fetch('/api/emis', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ employee_id: employeeId, amount, term_months: termMonths, start_date: startDate, interest_rate: interestRate }),
+                })
+                if (res.ok) {
+                    const json = await res.json()
+                    onSaved(json.emi, true)
+                    toastSuccess('EMI added')
+                } else {
+                    const err = await res.json()
+                    toastError(err.error || 'Failed to add EMI')
+                }
+            }
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    return (
+        <>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div>
+                    <label className="form-label">Employee Name *</label>
+                    <select className="form-input" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
+                        <option value="">Select employee...</option>
+                        {employees.map(emp => (
+                            <option key={emp.id} value={emp.id}>{emp.name}{emp.employee_id ? ` (${emp.employee_id})` : ''}</option>
+                        ))}
+                    </select>
+                </div>
+
+                <div>
+                    <label className="form-label">Type *</label>
+                    <select className="form-input" value={termMonths} onChange={e => setTermMonths(Number(e.target.value))}>
+                        {TERM_OPTIONS.map(t => <option key={t} value={t}>{t} Month</option>)}
+                    </select>
+                </div>
+
+                <div>
+                    <label className="form-label">Amount (৳) *</label>
+                    <input className="form-input" type="number" min={1} value={amount}
+                        onFocus={e => e.target.select()}
+                        onChange={e => setAmount(Math.max(0, Number(e.target.value) || 0))} />
+                </div>
+
+                <div>
+                    <label className="form-label">Start Date *</label>
+                    <input className="form-input" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+                </div>
+
+                <div>
+                    <label className="form-label">Interest Rate (%) *</label>
+                    <input className="form-input" type="number" min={0} step={0.01} value={interestRate}
+                        onFocus={e => e.target.select()}
+                        onChange={e => setInterestRate(Math.max(0, Number(e.target.value) || 0))} />
+                </div>
+
+                {amount > 0 && (
+                    <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', background: 'rgba(217,119,6,0.08)', borderRadius: '8px', padding: '8px 10px' }}>
+                        Monthly installment: <strong style={{ color: '#D97706' }}>৳{previewInstallment.toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong> × {termMonths} months
+                    </div>
+                )}
+            </div>
+
+            <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                <button className="btn btn-primary" disabled={saving} onClick={handleSave}>{saving ? 'Saving...' : 'Save'}</button>
+            </div>
+        </>
     )
 }
