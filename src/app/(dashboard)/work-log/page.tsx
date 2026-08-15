@@ -507,7 +507,7 @@ export default function WorkLogPage() {
                 </motion.div>
 
                 {/* Stats Cards */}
-                <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '24px', alignItems: 'start' }}>
+                <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '24px', alignItems: 'stretch' }}>
                     <div className="stat-card">
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClipboard size={14} color="var(--color-text-tertiary)" /> Total Orders</span>
                         <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>{stats.totalOrders}</span>

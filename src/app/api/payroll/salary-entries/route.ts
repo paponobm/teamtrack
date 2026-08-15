@@ -4,9 +4,12 @@ import { advanceToExpenseStatus } from '@/lib/advances'
 import { productBuyToExpenseStatus } from '@/lib/productBuys'
 import { NextResponse } from 'next/server'
 
-// 'advance' is intentionally not editable here — it's computed live from the Advance
-// Management module (see getAdvanceDetailsForMonth in src/lib/payroll.ts), same as 'fine'.
-const NUMERIC_FIELDS = ['basic_salary', 'extra_duty', 'transportation_bill', 'snacks_bill', 'performance_bonus', 'festival_bonus', 'loan', 'other_deduction'] as const
+// 'advance'/'product_buy' are intentionally not editable here — computed live from their
+// own modules, same as 'fine'. 'basic_salary'/'transportation_bill'/'snacks_bill'/
+// 'festival_bonus' are also excluded — frozen at salary-sheet-creation time from the
+// employee's saved payroll defaults (Super Admin, via Members → Edit Member), not editable
+// per month here.
+const NUMERIC_FIELDS = ['extra_duty', 'performance_bonus', 'loan', 'other_deduction'] as const
 const PAYMENT_METHODS = ['bKash', 'Rocket', 'Nagad', 'Bank', 'Cash'] as const
 
 // PUT /api/payroll/salary-entries — edit one employee's salary amounts/payment status for

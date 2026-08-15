@@ -26,6 +26,11 @@ interface MemberModalProps {
         duty_start_time?: string | null
         duty_end_time?: string | null
         avatar_url?: string | null
+        payroll_basic_salary?: number | null
+        payroll_transportation_bill?: number | null
+        payroll_snacks_bill?: number | null
+        festival_bonus_percentage?: number | null
+        festival_bonus_months?: number[] | null
     } | null
     departments: { id: string; name: string }[]
     roles: { id: string; name: string }[]
@@ -33,8 +38,14 @@ interface MemberModalProps {
     onSave: () => void
     isAdmin?: boolean
     isSuperAdmin?: boolean
-    initialTab?: 'profile' | 'access' | 'logs' | 'performance' | 'points'
+    initialTab?: 'profile' | 'access' | 'logs' | 'performance' | 'points' | 'payroll' | 'festivalBonus'
 }
+
+const MONTHS = [
+    { value: 1, label: 'Jan' }, { value: 2, label: 'Feb' }, { value: 3, label: 'Mar' }, { value: 4, label: 'Apr' },
+    { value: 5, label: 'May' }, { value: 6, label: 'Jun' }, { value: 7, label: 'Jul' }, { value: 8, label: 'Aug' },
+    { value: 9, label: 'Sep' }, { value: 10, label: 'Oct' }, { value: 11, label: 'Nov' }, { value: 12, label: 'Dec' },
+]
 
 // Page definitions - configurable pages for member access control.
 // Admin-only pages (Members, Attendance, Reports, Expenses, Settings) are NEVER shown here.
@@ -78,7 +89,7 @@ interface Feature {
 
 export default function MemberModal({ member, departments, roles, onClose, onSave, isAdmin = false, isSuperAdmin = false, initialTab }: MemberModalProps) {
     const isEdit = !!member
-    const [activeTab, setActiveTab] = useState<'profile' | 'access' | 'logs' | 'performance' | 'points'>(initialTab || 'profile')
+    const [activeTab, setActiveTab] = useState<'profile' | 'access' | 'logs' | 'performance' | 'points' | 'payroll' | 'festivalBonus'>(initialTab || 'profile')
 
     const [form, setForm] = useState({
         employee_id: member?.employee_id || '',
@@ -161,6 +172,23 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
     const [manualPointForm, setManualPointForm] = useState({ points: 5, category: 'discipline', description: '' })
     const [showManualForm, setShowManualForm] = useState(false)
     const [awardingPoints, setAwardingPoints] = useState(false)
+
+    // Payroll tab state — seeded straight from `member` (already returned by GET
+    // /api/members, no separate fetch needed). Held as strings so an emptied "0" field
+    // doesn't immediately snap back (same pattern as the Salary Sheet's amount inputs).
+    const [payrollForm, setPayrollForm] = useState({
+        basic_salary: String(member?.payroll_basic_salary ?? 0),
+        transportation_bill: String(member?.payroll_transportation_bill ?? 0),
+        snacks_bill: String(member?.payroll_snacks_bill ?? 0),
+    })
+    const [savingPayroll, setSavingPayroll] = useState(false)
+
+    // Festival Bonus tab state
+    const [festivalBonusForm, setFestivalBonusForm] = useState({
+        percentage: String(member?.festival_bonus_percentage ?? 0),
+        months: member?.festival_bonus_months || [] as number[],
+    })
+    const [savingFestivalBonus, setSavingFestivalBonus] = useState(false)
 
     // Load features and permissions when switching to access tab
     useEffect(() => {
@@ -372,13 +400,19 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
 
                 {/* Tabs */}
                 {isEdit && (
-                    <div style={{ display: 'flex', gap: '2px', padding: '0 24px', flexShrink: 0, borderBottom: '1px solid var(--color-border-light)', background: 'var(--color-bg-secondary)' }}>
+                    <div className="member-modal-tabs" style={{ display: 'flex', gap: '2px', padding: '0 24px', flexShrink: 0, borderBottom: '1px solid var(--color-border-light)', background: 'var(--color-bg-secondary)', overflowX: 'auto', overflowY: 'hidden', scrollbarWidth: 'thin' }}>
                         {[
                             { key: 'profile' as const, label: 'Profile', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg> },
                             { key: 'access' as const, label: 'Access', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" /></svg> },
                             { key: 'logs' as const, label: 'Logs', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8v4l3 3" /><circle cx="12" cy="12" r="10" /></svg> },
                             { key: 'performance' as const, label: 'Performance', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 20V10" /><path d="M12 20V4" /><path d="M6 20v-6" /></svg> },
                             { key: 'points' as const, label: 'Points', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg> },
+                            // Payroll/Festival Bonus are Super-Admin-only, both to show and to
+                            // edit (server-side enforced too, see src/app/api/members/[id]/route.ts).
+                            ...(isSuperAdmin ? [
+                                { key: 'payroll' as const, label: 'Payroll', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M2 10h20" /></svg> },
+                                { key: 'festivalBonus' as const, label: 'Festival Bonus', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 12v9H4v-9" /><path d="M2 7h20v5H2z" /><path d="M12 22V7" /><path d="M12 7c-2 0-3.5-1.5-3.5-3S10 1 12 3c0-2 1.5-3 3.5-1.5S14 7 12 7z" /></svg> },
+                            ] : []),
                         ].map(tab => (
                             <button
                                 key={tab.key}
@@ -396,6 +430,8 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                     alignItems: 'center',
                                     gap: '6px',
                                     transition: 'all 0.15s',
+                                    flexShrink: 0,
+                                    whiteSpace: 'nowrap',
                                 }}
                             >
                                 <span style={{ fontSize: '0.875rem' }}>{tab.icon}</span>
@@ -420,6 +456,19 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                         ))}
                     </div>
                 )}
+
+                <style jsx>{`
+                    .member-modal-tabs::-webkit-scrollbar {
+                        height: 4px;
+                    }
+                    .member-modal-tabs::-webkit-scrollbar-thumb {
+                        background: var(--color-border-light);
+                        border-radius: 4px;
+                    }
+                    .member-modal-tabs::-webkit-scrollbar-track {
+                        background: transparent;
+                    }
+                `}</style>
 
                 {/* Scrollable content */}
                 <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px' }}>
@@ -1148,6 +1197,112 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                         })}
                                     </div>
                                 )}
+                            </motion.div>
+                        ) : activeTab === 'payroll' ? (
+                            <motion.div key="payroll" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={{ duration: 0.15 }}>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginBottom: '16px', lineHeight: 1.5 }}>
+                                    Default Basic Salary, Transportation Bill, and Snacks Bill used whenever a new month&apos;s Salary Sheet is created for this employee. Changing these does not affect salary sheets already created.
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                                    <div className="input-group">
+                                        <label className="input-label">Basic Salary (৳)</label>
+                                        <input className="input" type="number" min="0" value={payrollForm.basic_salary}
+                                            onFocus={e => e.target.select()}
+                                            onChange={e => setPayrollForm(p => ({ ...p, basic_salary: e.target.value }))} />
+                                    </div>
+                                    <div className="input-group">
+                                        <label className="input-label">Transportation Bill (৳)</label>
+                                        <input className="input" type="number" min="0" value={payrollForm.transportation_bill}
+                                            onFocus={e => e.target.select()}
+                                            onChange={e => setPayrollForm(p => ({ ...p, transportation_bill: e.target.value }))} />
+                                    </div>
+                                    <div className="input-group">
+                                        <label className="input-label">Snacks Bill (৳)</label>
+                                        <input className="input" type="number" min="0" value={payrollForm.snacks_bill}
+                                            onFocus={e => e.target.select()}
+                                            onChange={e => setPayrollForm(p => ({ ...p, snacks_bill: e.target.value }))} />
+                                    </div>
+                                    <button
+                                        className="btn btn-primary btn-sm"
+                                        disabled={savingPayroll}
+                                        style={{ alignSelf: 'flex-start', fontSize: '0.75rem' }}
+                                        onClick={async () => {
+                                            if (!member) return
+                                            setSavingPayroll(true)
+                                            try {
+                                                const res = await fetch(`/api/members/${member.id}`, {
+                                                    method: 'PATCH',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({
+                                                        payroll_basic_salary: Math.max(0, Number(payrollForm.basic_salary) || 0),
+                                                        payroll_transportation_bill: Math.max(0, Number(payrollForm.transportation_bill) || 0),
+                                                        payroll_snacks_bill: Math.max(0, Number(payrollForm.snacks_bill) || 0),
+                                                    }),
+                                                })
+                                                if (res.ok) onSave()
+                                            } finally {
+                                                setSavingPayroll(false)
+                                            }
+                                        }}
+                                    >
+                                        {savingPayroll ? 'Saving...' : 'Save Payroll Settings'}
+                                    </button>
+                                </div>
+                            </motion.div>
+                        ) : activeTab === 'festivalBonus' ? (
+                            <motion.div key="festivalBonus" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={{ duration: 0.15 }}>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginBottom: '16px', lineHeight: 1.5 }}>
+                                    Festival Bonus = this percentage × Basic Salary, automatically included in the Salary Sheet only for the calendar months selected below (every year).
+                                </div>
+                                <div className="input-group" style={{ marginBottom: '16px' }}>
+                                    <label className="input-label">Bonus Percentage (%)</label>
+                                    <input className="input" type="number" min="0" max="100" value={festivalBonusForm.percentage}
+                                        onFocus={e => e.target.select()}
+                                        onChange={e => setFestivalBonusForm(p => ({ ...p, percentage: e.target.value }))} />
+                                </div>
+                                <div className="input-group">
+                                    <label className="input-label">Applies In</label>
+                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+                                        {MONTHS.map(m => {
+                                            const checked = festivalBonusForm.months.includes(m.value)
+                                            return (
+                                                <label key={m.value} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '8px', border: `1px solid ${checked ? 'var(--color-primary, #2563EB)' : 'var(--color-border-light)'}`, background: checked ? 'rgba(37,99,235,0.08)' : 'transparent', cursor: 'pointer', fontSize: '0.8125rem' }}>
+                                                    <input type="checkbox" checked={checked} onChange={e => {
+                                                        const next = e.target.checked
+                                                            ? [...festivalBonusForm.months, m.value]
+                                                            : festivalBonusForm.months.filter(v => v !== m.value)
+                                                        setFestivalBonusForm(p => ({ ...p, months: next }))
+                                                    }} />
+                                                    {m.label}
+                                                </label>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                                <button
+                                    className="btn btn-primary btn-sm"
+                                    disabled={savingFestivalBonus}
+                                    style={{ marginTop: '16px', fontSize: '0.75rem' }}
+                                    onClick={async () => {
+                                        if (!member) return
+                                        setSavingFestivalBonus(true)
+                                        try {
+                                            const res = await fetch(`/api/members/${member.id}`, {
+                                                method: 'PATCH',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({
+                                                    festival_bonus_percentage: Math.max(0, Number(festivalBonusForm.percentage) || 0),
+                                                    festival_bonus_months: festivalBonusForm.months,
+                                                }),
+                                            })
+                                            if (res.ok) onSave()
+                                        } finally {
+                                            setSavingFestivalBonus(false)
+                                        }
+                                    }}
+                                >
+                                    {savingFestivalBonus ? 'Saving...' : 'Save Festival Bonus Settings'}
+                                </button>
                             </motion.div>
                         ) : null}
                     </AnimatePresence>

@@ -30,16 +30,15 @@ export interface SalaryEntry {
     net_payable: number
 }
 
-// Advance is intentionally not here — it's read-only, computed live from the Advance
-// module (Finance Hub → Advance tab, src/components/finance/AdvanceManager.tsx), same as Fine.
+// Advance/Product Buy are intentionally not here — read-only, computed live from their own
+// modules, same as Fine. Basic Salary/Transportation Bill/Snacks Bill/Festival Bonus are also
+// not here as of this month's sheet: they're frozen at sheet-creation time from the
+// employee's saved payroll defaults (Members → Edit Member → Payroll / Festival Bonus tabs,
+// Super Admin only) rather than being typed in per month here.
 const EDITABLE_AMOUNT_FIELDS = [
-    { key: 'basic_salary', label: 'Basic Salary' },
     { key: 'extra_duty', label: 'Extra Duty' },
-    { key: 'transportation_bill', label: 'Transportation Bill' },
-    { key: 'snacks_bill', label: 'Snacks Bill' },
     { key: 'loan', label: 'Loan' },
     { key: 'performance_bonus', label: 'Performance Bonus' },
-    { key: 'festival_bonus', label: 'Festival Bonus' },
     { key: 'other_deduction', label: 'Other Deduction' },
 ] as const
 
@@ -204,7 +203,7 @@ export default function SalarySheet() {
                                         </div>
                                     </td>
                                     <td>{e.employee.department || '—'}</td>
-                                    <td>৳{e.basic_salary.toLocaleString()}</td>
+                                    <td style={{ color: e.basic_salary > 0 ? '#16A34A' : undefined }}>৳{e.basic_salary.toLocaleString()}</td>
                                     <td>
                                         <span style={{ fontWeight: 700, color: attendanceColor(e.attendance.present, totalDays) }}>{e.attendance.present}</span>
                                         <span style={{ color: 'var(--color-text-tertiary)' }}> / {totalDays}</span>
@@ -362,13 +361,9 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
     // deleting the "0" to type a fresh number leaves the field genuinely empty instead of
     // snapping back to "0" on every keystroke.
     const [amounts, setAmounts] = useState({
-        basic_salary: String(entry.basic_salary),
         extra_duty: String(entry.extra_duty),
-        transportation_bill: String(entry.transportation_bill),
-        snacks_bill: String(entry.snacks_bill),
         loan: String(entry.loan),
         performance_bonus: String(entry.performance_bonus),
-        festival_bonus: String(entry.festival_bonus),
         other_deduction: String(entry.other_deduction),
     })
     const [paymentStatus, setPaymentStatus] = useState(entry.payment_status)
@@ -377,18 +372,14 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
     const [saving, setSaving] = useState(false)
 
     const numAmounts = {
-        basic_salary: Math.max(0, Number(amounts.basic_salary) || 0),
         extra_duty: Math.max(0, Number(amounts.extra_duty) || 0),
-        transportation_bill: Math.max(0, Number(amounts.transportation_bill) || 0),
-        snacks_bill: Math.max(0, Number(amounts.snacks_bill) || 0),
         loan: Math.max(0, Number(amounts.loan) || 0),
         performance_bonus: Math.max(0, Number(amounts.performance_bonus) || 0),
-        festival_bonus: Math.max(0, Number(amounts.festival_bonus) || 0),
         other_deduction: Math.max(0, Number(amounts.other_deduction) || 0),
     }
 
-    const netPayable = numAmounts.basic_salary + numAmounts.extra_duty + numAmounts.transportation_bill + numAmounts.snacks_bill
-        + numAmounts.performance_bonus + numAmounts.festival_bonus - entry.fine - entry.advance - entry.product_buy - numAmounts.loan - numAmounts.other_deduction
+    const netPayable = entry.basic_salary + numAmounts.extra_duty + entry.transportation_bill + entry.snacks_bill
+        + numAmounts.performance_bonus + entry.festival_bonus - entry.fine - entry.advance - entry.product_buy - numAmounts.loan - numAmounts.other_deduction
 
     const handleSave = async () => {
         setSaving(true)
@@ -435,6 +426,10 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                         <ReadOnlyField label="Department" value={entry.employee.department || '—'} />
                         <ReadOnlyField label="Attendance" value={`${entry.attendance.present} present, ${entry.attendance.absent} absent`} />
                         <ReadOnlyField label="Leave Days" value={String(entry.attendance.leave)} />
+                        <ReadOnlyField label="Basic Salary" value={`৳${entry.basic_salary.toLocaleString()}`} />
+                        <ReadOnlyField label="Transportation Bill" value={`৳${entry.transportation_bill.toLocaleString()}`} />
+                        <ReadOnlyField label="Snacks Bill" value={`৳${entry.snacks_bill.toLocaleString()}`} />
+                        <ReadOnlyField label="Festival Bonus" value={`৳${entry.festival_bonus.toLocaleString()}`} />
                         <ReadOnlyField label="Fine" value={`৳${entry.fine.toLocaleString()}`} />
                         <ReadOnlyField label="Advance" value={`৳${entry.advance.toLocaleString()}${entry.advance_records.length > 1 ? ` (${entry.advance_records.length} records)` : ''}`} />
                         <ReadOnlyField label="Product Buy" value={`৳${entry.product_buy.toLocaleString()}${entry.product_buy_records.length > 1 ? ` (${entry.product_buy_records.length} records)` : ''}`} />

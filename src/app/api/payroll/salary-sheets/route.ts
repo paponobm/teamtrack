@@ -130,17 +130,39 @@ export async function POST(request: Request) {
 
     const { data: activeEmployees, error: empError } = await supabase
         .from('employees')
-        .select('id')
+        .select('id, payroll_basic_salary, payroll_transportation_bill, payroll_snacks_bill, festival_bonus_percentage, festival_bonus_months')
         .eq('is_active', true)
 
     if (empError) return NextResponse.json({ error: empError.message }, { status: 500 })
 
     if ((activeEmployees || []).length > 0) {
-        // All manually-entered amounts start at 0 — attendance/leave/fine are never stored
-        // here, they're computed live on every read.
-        const { error: insertError } = await supabase
-            .from('salary_entries')
-            .insert(activeEmployees.map((e: { id: string }) => ({ salary_sheet_id: sheet.id, employee_id: e.id })))
+        // Basic Salary/Transportation Bill/Snacks Bill are seeded from each employee's saved
+        // payroll defaults (Members → Edit Member → Payroll tab) rather than starting at 0 —
+        // and frozen into this row at creation time, so a later change to an employee's
+        // default never rewrites an already-created month's sheet. Festival Bonus is
+        // similarly seeded: percentage × Basic Salary, but only when this sheet's calendar
+        // month is one of the employee's configured Festival Bonus months (Members → Edit
+        // Member → Festival Bonus tab) — otherwise 0. Attendance/leave/fine/advance/product
+        // buy are never stored here, they're computed live on every read.
+        const monthNumber = Number(month.split('-')[1])
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rows = activeEmployees.map((e: any) => {
+            const basicSalary = Number(e.payroll_basic_salary) || 0
+            const bonusMonths: number[] = e.festival_bonus_months || []
+            const festivalBonus = bonusMonths.includes(monthNumber)
+                ? basicSalary * ((Number(e.festival_bonus_percentage) || 0) / 100)
+                : 0
+            return {
+                salary_sheet_id: sheet.id,
+                employee_id: e.id,
+                basic_salary: basicSalary,
+                transportation_bill: Number(e.payroll_transportation_bill) || 0,
+                snacks_bill: Number(e.payroll_snacks_bill) || 0,
+                festival_bonus: festivalBonus,
+            }
+        })
+
+        const { error: insertError } = await supabase.from('salary_entries').insert(rows)
 
         if (insertError) return NextResponse.json({ error: insertError.message }, { status: 500 })
     }
