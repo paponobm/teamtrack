@@ -104,7 +104,7 @@ export async function PATCH(
     // Salary/bonus defaults (Members → Edit Member → Payroll / Festival Bonus tabs) are
     // Super-Admin-only, even though a plain Admin can reach this route for other fields —
     // the tab is hidden from Admins client-side, but that alone doesn't stop a raw API call.
-    const SUPER_ADMIN_ONLY_FIELDS = ['payroll_basic_salary', 'payroll_transportation_bill', 'payroll_snacks_bill', 'festival_bonus_percentage', 'festival_bonus_months']
+    const SUPER_ADMIN_ONLY_FIELDS = ['payroll_basic_salary', 'payroll_transportation_bill', 'payroll_snacks_bill', 'basic_salary_effective_month', 'festival_bonus_percentage', 'festival_bonus_months', 'salary_increment_amount', 'salary_increment_effective_month']
     const safeUpdate: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(body)) {
         if (PROTECTED_FIELDS.includes(key)) continue

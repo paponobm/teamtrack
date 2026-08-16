@@ -169,8 +169,8 @@ export default function SalarySheet() {
                                 <th className="sticky-col-1">SL</th>
                                 <th className="sticky-col-2">Employee</th>
                                 <th>Department</th>
-                                <th>Basic Salary</th>
                                 <th>Attendance (Day)</th>
+                                <th>Basic Salary</th>
                                 <th>Transportation Bill</th>
                                 <th>Snacks Bill</th>
                                 <th>Festival Bonus</th>
@@ -205,14 +205,14 @@ export default function SalarySheet() {
                                         </div>
                                     </td>
                                     <td>{e.employee.department || '—'}</td>
-                                    <td style={{ color: e.basic_salary > 0 ? '#16A34A' : undefined }}>৳{e.basic_salary.toLocaleString()}</td>
                                     <td>
                                         <span style={{ fontWeight: 700, color: attendanceColor(e.attendance.present, totalDays) }}>{e.attendance.present}</span>
                                         <span style={{ color: 'var(--color-text-tertiary)' }}> / {totalDays}</span>
                                         <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginTop: '2px' }}>
-                                            Leave: {e.attendance.leave} 
+                                            Leave: {e.attendance.leave}
                                         </div>
                                     </td>
+                                    <td style={{ color: e.basic_salary > 0 ? '#16A34A' : undefined }}>৳{e.basic_salary.toLocaleString()}</td>
                                     <td style={{ color: e.transportation_bill > 0 ? '#16A34A' : undefined }}>৳{e.transportation_bill.toLocaleString()}</td>
                                     <td style={{ color: e.snacks_bill > 0 ? '#16A34A' : undefined }}>৳{e.snacks_bill.toLocaleString()}</td>
                                     <td style={{ color: e.festival_bonus > 0 ? '#16A34A' : undefined }}>

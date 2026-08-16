@@ -29,6 +29,9 @@ interface MemberModalProps {
         payroll_basic_salary?: number | null
         payroll_transportation_bill?: number | null
         payroll_snacks_bill?: number | null
+        basic_salary_effective_month?: string | null
+        salary_increment_amount?: number | null
+        salary_increment_effective_month?: string | null
         festival_bonus_percentage?: number | null
         festival_bonus_months?: number[] | null
     } | null
@@ -178,10 +181,14 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
     // doesn't immediately snap back (same pattern as the Salary Sheet's amount inputs).
     const [payrollForm, setPayrollForm] = useState({
         basic_salary: String(member?.payroll_basic_salary ?? 0),
+        basic_salary_effective_month: member?.basic_salary_effective_month || '',
         transportation_bill: String(member?.payroll_transportation_bill ?? 0),
         snacks_bill: String(member?.payroll_snacks_bill ?? 0),
+        increment_amount: String(member?.salary_increment_amount ?? 0),
+        increment_effective_month: member?.salary_increment_effective_month || '',
     })
     const [savingPayroll, setSavingPayroll] = useState(false)
+    const [payrollError, setPayrollError] = useState('')
 
     // Festival Bonus tab state
     const [festivalBonusForm, setFestivalBonusForm] = useState({
@@ -382,7 +389,7 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
         >
             <motion.div
                 className="modal"
-                style={{ maxWidth: '640px', maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+                style={{ maxWidth: '1120px', maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
                 initial={{ opacity: 0, y: 20, scale: 0.97 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 20, scale: 0.97 }}
@@ -1211,6 +1218,30 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                             onChange={e => setPayrollForm(p => ({ ...p, basic_salary: e.target.value }))} />
                                     </div>
                                     <div className="input-group">
+                                        <label className="input-label">Basic Salary Starting Month *</label>
+                                        <input className="input" type="month" required value={payrollForm.basic_salary_effective_month}
+                                            onChange={e => { setPayrollForm(p => ({ ...p, basic_salary_effective_month: e.target.value })); setPayrollError('') }} />
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginTop: '6px', lineHeight: 1.5 }}>
+                                            Basic Salary only appears in Salary Sheets for this month onward. Sheets for earlier months show ৳0 Basic Salary for this employee.
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '14px', borderRadius: '10px', background: 'var(--color-bg-secondary)' }}>
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', lineHeight: 1.5 }}>
+                                            Optional raise added on top of Basic Salary starting from the selected month (and every month after) — leave the month empty to keep no increment active.
+                                        </div>
+                                        <div className="input-group">
+                                            <label className="input-label">Increase Salary (৳)</label>
+                                            <input className="input" type="number" min="0" value={payrollForm.increment_amount}
+                                                onFocus={e => e.target.select()}
+                                                onChange={e => setPayrollForm(p => ({ ...p, increment_amount: e.target.value }))} />
+                                        </div>
+                                        <div className="input-group">
+                                            <label className="input-label">Increase Salary Starting Month</label>
+                                            <input className="input" type="month" value={payrollForm.increment_effective_month}
+                                                onChange={e => setPayrollForm(p => ({ ...p, increment_effective_month: e.target.value }))} />
+                                        </div>
+                                    </div>
+                                    <div className="input-group">
                                         <label className="input-label">Transportation Bill (৳)</label>
                                         <input className="input" type="number" min="0" value={payrollForm.transportation_bill}
                                             onFocus={e => e.target.select()}
@@ -1222,12 +1253,25 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                             onFocus={e => e.target.select()}
                                             onChange={e => setPayrollForm(p => ({ ...p, snacks_bill: e.target.value }))} />
                                     </div>
+                                    {payrollError && (
+                                        <div style={{
+                                            padding: '10px 14px', borderRadius: '10px', fontSize: '0.8125rem',
+                                            background: '#FEE2E2', color: '#991B1B',
+                                        }}>
+                                            {payrollError}
+                                        </div>
+                                    )}
                                     <button
                                         className="btn btn-primary btn-sm"
                                         disabled={savingPayroll}
                                         style={{ alignSelf: 'flex-start', fontSize: '0.75rem' }}
                                         onClick={async () => {
                                             if (!member) return
+                                            if (!payrollForm.basic_salary_effective_month) {
+                                                setPayrollError('Basic Salary Starting Month is required')
+                                                return
+                                            }
+                                            setPayrollError('')
                                             setSavingPayroll(true)
                                             try {
                                                 const res = await fetch(`/api/members/${member.id}`, {
@@ -1235,11 +1279,18 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                                     headers: { 'Content-Type': 'application/json' },
                                                     body: JSON.stringify({
                                                         payroll_basic_salary: Math.max(0, Number(payrollForm.basic_salary) || 0),
+                                                        basic_salary_effective_month: payrollForm.basic_salary_effective_month,
                                                         payroll_transportation_bill: Math.max(0, Number(payrollForm.transportation_bill) || 0),
                                                         payroll_snacks_bill: Math.max(0, Number(payrollForm.snacks_bill) || 0),
+                                                        salary_increment_amount: Math.max(0, Number(payrollForm.increment_amount) || 0),
+                                                        salary_increment_effective_month: payrollForm.increment_effective_month || null,
                                                     }),
                                                 })
                                                 if (res.ok) onSave()
+                                                else {
+                                                    const data = await res.json()
+                                                    setPayrollError(data.error || 'Failed to save payroll settings')
+                                                }
                                             } finally {
                                                 setSavingPayroll(false)
                                             }
