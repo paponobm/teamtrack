@@ -170,16 +170,16 @@ export default function SalarySheet() {
                                 <th className="sticky-col-2">Employee</th>
                                 <th>Department</th>
                                 <th>Attendance (Day)</th>
-                                <th>Basic Salary</th>
-                                <th>Transportation Bill</th>
-                                <th>Snacks Bill</th>
-                                <th>Festival Bonus</th>
-                                <th>Extra Duty</th>
-                                <th>Performance Bonus</th>
-                                <th>Salary Advance</th>
-                                <th>Loan</th>
-                                <th>Product Buy</th>
-                                <th>Monthly Fine</th>
+                                <th className="earn-col">Basic Salary</th>
+                                <th className="earn-col">Transportation Bill</th>
+                                <th className="earn-col">Snacks Bill</th>
+                                <th className="earn-col">Festival Bonus</th>
+                                <th className="earn-col">Extra Duty</th>
+                                <th className="earn-col earn-col-last">Performance Bonus</th>
+                                <th className="deduct-col deduct-col-first">Salary Advance</th>
+                                <th className="deduct-col">Loan</th>
+                                <th className="deduct-col">Product Buy</th>
+                                <th className="deduct-col">Monthly Fine</th>
                                 <th>Net Salary</th>
                                 <th>Paid / Non-Paid</th>
                                 <th>Payment Method</th>
@@ -212,18 +212,18 @@ export default function SalarySheet() {
                                             Leave: {e.attendance.leave}
                                         </div>
                                     </td>
-                                    <td style={{ color: e.basic_salary > 0 ? '#16A34A' : undefined }}>৳{e.basic_salary.toLocaleString()}</td>
-                                    <td style={{ color: e.transportation_bill > 0 ? '#16A34A' : undefined }}>৳{e.transportation_bill.toLocaleString()}</td>
-                                    <td style={{ color: e.snacks_bill > 0 ? '#16A34A' : undefined }}>৳{e.snacks_bill.toLocaleString()}</td>
-                                    <td style={{ color: e.festival_bonus > 0 ? '#16A34A' : undefined }}>
+                                    <td className="earn-col" style={{ color: e.basic_salary > 0 ? '#16A34A' : undefined }}>৳{e.basic_salary.toLocaleString()}</td>
+                                    <td className="earn-col" style={{ color: e.transportation_bill > 0 ? '#16A34A' : undefined }}>৳{e.transportation_bill.toLocaleString()}</td>
+                                    <td className="earn-col" style={{ color: e.snacks_bill > 0 ? '#16A34A' : undefined }}>৳{e.snacks_bill.toLocaleString()}</td>
+                                    <td className="earn-col" style={{ color: e.festival_bonus > 0 ? '#16A34A' : undefined }}>
                                         ৳{e.festival_bonus.toLocaleString()}
                                         {e.festival_bonus_percentage > 0 && (
                                             <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginLeft: '4px' }}>({e.festival_bonus_percentage}%)</span>
                                         )}
                                     </td>
-                                    <td style={{ color: e.extra_duty > 0 ? '#16A34A' : undefined }}>৳{e.extra_duty.toLocaleString()}</td>
-                                    <td style={{ color: e.performance_bonus > 0 ? '#16A34A' : undefined }}>৳{e.performance_bonus.toLocaleString()}</td>
-                                    <td className="advance-cell" style={{ color: e.advance > 0 ? '#DC2626' : undefined }}>
+                                    <td className="earn-col" style={{ color: e.extra_duty > 0 ? '#16A34A' : undefined }}>৳{e.extra_duty.toLocaleString()}</td>
+                                    <td className="earn-col earn-col-last" style={{ color: e.performance_bonus > 0 ? '#16A34A' : undefined }}>৳{e.performance_bonus.toLocaleString()}</td>
+                                    <td className="advance-cell deduct-col deduct-col-first" style={{ color: e.advance > 0 ? '#DC2626' : undefined }}>
                                         ৳{e.advance.toLocaleString()}
                                         {e.advance_records.length > 0 && (
                                             <div className="advance-tooltip">
@@ -233,7 +233,7 @@ export default function SalarySheet() {
                                             </div>
                                         )}
                                     </td>
-                                    <td className="loan-cell" style={{ color: e.loan > 0 ? '#DC2626' : undefined }}>
+                                    <td className="loan-cell deduct-col" style={{ color: e.loan > 0 ? '#DC2626' : undefined }}>
                                         ৳{e.loan.toLocaleString()}
                                         {e.loan_records.length > 0 && (
                                             <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginLeft: '4px' }}>
@@ -248,7 +248,7 @@ export default function SalarySheet() {
                                             </div>
                                         )}
                                     </td>
-                                    <td className="product-buy-cell" style={{ color: e.product_buy > 0 ? '#DC2626' : undefined }}>
+                                    <td className="product-buy-cell deduct-col" style={{ color: e.product_buy > 0 ? '#DC2626' : undefined }}>
                                         ৳{e.product_buy.toLocaleString()}
                                         {e.product_buy_records.length > 0 && (
                                             <div className="advance-tooltip">
@@ -258,7 +258,7 @@ export default function SalarySheet() {
                                             </div>
                                         )}
                                     </td>
-                                    <td style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
+                                    <td className="deduct-col" style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
                                     <td style={{ fontWeight: 700, color: '#16A34A' }}>৳{e.net_payable.toLocaleString()}</td>
                                     <td>
                                         <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: e.payment_status === 'Paid' ? '#16A34A' : '#DC2626', background: e.payment_status === 'Paid' ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)' }}>
@@ -372,6 +372,25 @@ export default function SalarySheet() {
                 .payroll-grid-table .product-buy-cell:hover .advance-tooltip,
                 .payroll-grid-table .loan-cell:hover .advance-tooltip {
                     display: block;
+                }
+                /* Groups the earning columns (Basic Salary → Performance Bonus) and deduction
+                   columns (Salary Advance → Monthly Fine) into two visually distinct sections
+                   — same border color on every edge within a section so collapsed borders
+                   merge cleanly with no doubling, plus a single stronger divider where the
+                   two sections meet. Applies to header and body cells alike. */
+                .payroll-grid-table .earn-col {
+                    border: 1px solid rgba(22, 163, 74, 0.35);
+                    background: rgba(22, 163, 74, 0.05);
+                }
+                .payroll-grid-table .deduct-col {
+                    border: 1px solid rgba(220, 38, 38, 0.35);
+                    background: rgba(220, 38, 38, 0.05);
+                }
+                .payroll-grid-table .earn-col-last {
+                    border-right: 2px solid var(--color-border);
+                }
+                .payroll-grid-table .deduct-col-first {
+                    border-left: 2px solid var(--color-border);
                 }
             `}</style>
         </div>
