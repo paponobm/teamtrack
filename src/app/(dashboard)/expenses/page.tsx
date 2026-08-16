@@ -13,6 +13,7 @@ import BudgetsManager from '@/components/finance/BudgetsManager'
 import ReportsView from '@/components/finance/ReportsView'
 import FundsManager from '@/components/finance/FundsManager'
 import AdvanceManager from '@/components/finance/AdvanceManager'
+import ProvidentFundManager from '@/components/finance/ProvidentFundManager'
 
 interface Expense {
     id: string
@@ -124,7 +125,7 @@ export default function ExpensesPage() {
     const [showIncomeModal, setShowIncomeModal] = useState(false)
     const [incomeForm, setIncomeForm] = useState(emptyIncomeForm)
     const [incomeSaving, setIncomeSaving] = useState(false)
-    const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'categories' | 'budgets' | 'reports' | 'funds' | 'advance'>('overview')
+    const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'categories' | 'budgets' | 'reports' | 'funds' | 'advance' | 'providentFund'>('overview')
     const [funds, setFunds] = useState<{ id: string; name: string }[]>([])
     // Bulk-approve pending expenses (Super Admin only)
     const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -422,6 +423,7 @@ export default function ExpensesPage() {
                     { id: 'reports', label: 'Reports' },
                     { id: 'funds', label: 'Funds' },
                     ...(isAdmin ? [{ id: 'advance', label: 'Salary Advance & EMI' }] : []),
+                    ...(isAdmin ? [{ id: 'providentFund', label: 'Provident Fund' }] : []),
                 ].map(tab => (
                     <button
                         key={tab.id}
@@ -445,6 +447,7 @@ export default function ExpensesPage() {
             {activeTab === 'categories' && <CategoriesManager />}
             {activeTab === 'budgets' && <BudgetsManager />}
             {activeTab === 'advance' && isAdmin && <AdvanceManager />}
+            {activeTab === 'providentFund' && isAdmin && <ProvidentFundManager />}
             {activeTab === 'reports' && <ReportsView />}
 
             {activeTab === 'overview' && (

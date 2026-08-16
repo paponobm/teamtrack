@@ -2,6 +2,7 @@ import { requireAuth, isAuthed } from '@/lib/auth'
 import { getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
+import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
 import { NextResponse } from 'next/server'
 
 // GET /api/payroll/dashboard?month=YYYY-MM — monthly payroll summary (Super Admin only).
@@ -40,6 +41,7 @@ export async function GET(request: Request) {
             totalAdvance: 0,
             totalProductBuy: 0,
             totalLoan: 0,
+            totalProvidentFund: 0,
             totalPerformanceBonus: 0,
             totalFestivalBonus: 0,
         })
@@ -52,11 +54,12 @@ export async function GET(request: Request) {
 
     const rows = entries || []
     const employeeIds = rows.map(r => r.employee_id)
-    const [fineTotals, advanceDetails, productBuyDetails, emiDetails] = await Promise.all([
+    const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails] = await Promise.all([
         getFineTotalsForMonth(supabase, employeeIds, month),
         getAdvanceDetailsForMonth(supabase, employeeIds, month),
         getProductBuyDetailsForMonth(supabase, employeeIds, month),
         getEmiLoanDetailsForMonth(supabase, employeeIds, month),
+        getProvidentFundDetailsForMonth(supabase, employeeIds, month),
     ])
 
     // Total Payroll reflects money actually paid out this month, not the projected cost of
@@ -70,6 +73,7 @@ export async function GET(request: Request) {
     let totalAdvance = 0
     let totalProductBuy = 0
     let totalLoan = 0
+    let totalProvidentFund = 0
     let totalPerformanceBonus = 0
     let totalFestivalBonus = 0
 
@@ -77,11 +81,13 @@ export async function GET(request: Request) {
         const advance = advanceDetails[r.employee_id]?.total || 0
         const productBuy = productBuyDetails[r.employee_id]?.total || 0
         const loan = emiDetails[r.employee_id]?.total || 0
-        const net = computeNetPayable(r, fineTotals[r.employee_id] || 0, advance, productBuy, loan)
+        const providentFund = providentFundDetails[r.employee_id]?.total || 0
+        const net = computeNetPayable(r, fineTotals[r.employee_id] || 0, advance, productBuy, loan, providentFund)
         totalBasicSalary += Number(r.basic_salary) || 0
         totalAdvance += advance
         totalProductBuy += productBuy
         totalLoan += loan
+        totalProvidentFund += providentFund
         totalPerformanceBonus += Number(r.performance_bonus) || 0
         totalFestivalBonus += Number(r.festival_bonus) || 0
         if (r.payment_status === 'Paid') { paidEmployees++; paidAmount += net; totalPayroll += net }
@@ -100,6 +106,7 @@ export async function GET(request: Request) {
         totalAdvance,
         totalProductBuy,
         totalLoan,
+        totalProvidentFund,
         totalPerformanceBonus,
         totalFestivalBonus,
     })

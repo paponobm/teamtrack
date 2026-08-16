@@ -24,6 +24,8 @@ export interface SalaryEntry {
     product_buy_records: { date: string; amount: number }[]
     loan: number
     loan_records: { id: string; monthly_installment: number; month_number: number; term_months: number }[]
+    provident_fund: number
+    provident_fund_records: { id: string; monthly_installment: number; month_number: number; duration_months: number }[]
     other_deduction: number
     payment_status: 'Paid' | 'Unpaid'
     payment_method: string | null
@@ -178,6 +180,7 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                 <th className="earn-col earn-col-last">Performance Bonus</th>
                                 <th className="deduct-col deduct-col-first">Salary Advance</th>
                                 <th className="deduct-col">Loan</th>
+                                <th className="deduct-col">Provident Fund</th>
                                 <th className="deduct-col">Product Buy</th>
                                 <th className="deduct-col">Monthly Fine</th>
                                 <th>Net Salary</th>
@@ -244,6 +247,21 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                             <div className="advance-tooltip">
                                                 {e.loan_records.map(r => (
                                                     <div key={r.id}>EMI {r.month_number}/{r.term_months}: ৳{r.monthly_installment.toLocaleString()}</div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </td>
+                                    <td className="provident-fund-cell deduct-col" style={{ color: e.provident_fund > 0 ? '#DC2626' : undefined }}>
+                                        ৳{e.provident_fund.toLocaleString()}
+                                        {e.provident_fund_records.length > 0 && (
+                                            <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginLeft: '4px' }}>
+                                                ({e.provident_fund_records.map(r => `${r.month_number}/${r.duration_months}`).join(', ')} Installment)
+                                            </span>
+                                        )}
+                                        {e.provident_fund_records.length > 0 && (
+                                            <div className="advance-tooltip">
+                                                {e.provident_fund_records.map(r => (
+                                                    <div key={r.id}>PF {r.month_number}/{r.duration_months}: ৳{r.monthly_installment.toLocaleString()}</div>
                                                 ))}
                                             </div>
                                         )}
@@ -370,7 +388,8 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                 }
                 .payroll-grid-table .advance-cell,
                 .payroll-grid-table .product-buy-cell,
-                .payroll-grid-table .loan-cell {
+                .payroll-grid-table .loan-cell,
+                .payroll-grid-table .provident-fund-cell {
                     position: relative;
                 }
                 .payroll-grid-table .advance-tooltip {
@@ -392,7 +411,8 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                 }
                 .payroll-grid-table .advance-cell:hover .advance-tooltip,
                 .payroll-grid-table .product-buy-cell:hover .advance-tooltip,
-                .payroll-grid-table .loan-cell:hover .advance-tooltip {
+                .payroll-grid-table .loan-cell:hover .advance-tooltip,
+                .payroll-grid-table .provident-fund-cell:hover .advance-tooltip {
                     display: block;
                 }
                 /* Groups the earning columns (Basic Salary → Performance Bonus) and deduction
@@ -442,7 +462,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
     }
 
     const netPayable = entry.basic_salary + numAmounts.extra_duty + entry.transportation_bill + entry.snacks_bill
-        + numAmounts.performance_bonus + entry.festival_bonus - entry.fine - entry.advance - entry.product_buy - entry.loan - numAmounts.other_deduction
+        + numAmounts.performance_bonus + entry.festival_bonus - entry.fine - entry.advance - entry.product_buy - entry.loan - entry.provident_fund - numAmounts.other_deduction
 
     const handleSave = async () => {
         setSaving(true)
@@ -497,6 +517,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                         <ReadOnlyField label="Advance" value={`৳${entry.advance.toLocaleString()}${entry.advance_records.length > 1 ? ` (${entry.advance_records.length} records)` : ''}`} />
                         <ReadOnlyField label="Product Buy" value={`৳${entry.product_buy.toLocaleString()}${entry.product_buy_records.length > 1 ? ` (${entry.product_buy_records.length} records)` : ''}`} />
                         <ReadOnlyField label="Loan" value={`৳${entry.loan.toLocaleString()}${entry.loan_records.length > 1 ? ` (${entry.loan_records.length} EMIs)` : ''}`} />
+                        <ReadOnlyField label="Provident Fund" value={`৳${entry.provident_fund.toLocaleString()}${entry.provident_fund_records.length > 1 ? ` (${entry.provident_fund_records.length} records)` : ''}`} />
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>

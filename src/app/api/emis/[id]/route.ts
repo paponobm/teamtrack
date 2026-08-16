@@ -1,8 +1,8 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { computeMonthlyInstallment } from '@/lib/emis'
+import { computeMonthlyInstallment, syncLinkedExpense, deleteLinkedExpense } from '@/lib/emis'
 import { NextResponse } from 'next/server'
 
-const TERM_OPTIONS = [3, 6] as const
+const TERM_OPTIONS = [3, 6, 12, 24] as const
 
 // PUT /api/emis/:id — edit an EMI record, including which employee it belongs to (Admin+).
 // Recomputes monthly_installment whenever amount/rate/term changes.
@@ -16,7 +16,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const { data: existing, error: fetchError } = await supabase
         .from('emis')
-        .select('employee_id, amount, term_months, start_date, interest_rate')
+        .select('employee_id, amount, term_months, start_date, interest_rate, expense_id')
         .eq('id', id)
         .maybeSingle()
 
@@ -40,8 +40,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     if (body.term_months !== undefined) {
         const numTerm = Number(body.term_months)
-        if (!TERM_OPTIONS.includes(numTerm as 3 | 6)) {
-            return NextResponse.json({ error: 'term_months must be 3 or 6' }, { status: 400 })
+        if (!TERM_OPTIONS.includes(numTerm as 3 | 6 | 12 | 24)) {
+            return NextResponse.json({ error: 'term_months must be 3, 6, 12, or 24' }, { status: 400 })
         }
         update.term_months = numTerm
     }
@@ -76,10 +76,19 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const { error } = await supabase.from('emis').update(update).eq('id', id)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+    if (existing.expense_id) {
+        await syncLinkedExpense(supabase, existing.expense_id, {
+            employeeId: (update.employee_id as string) ?? existing.employee_id,
+            amount: (update.amount as number) ?? existing.amount,
+            date: (update.start_date as string) ?? existing.start_date,
+        })
+    }
+
     return NextResponse.json({ success: true })
 }
 
-// DELETE /api/emis/:id (Admin+).
+// DELETE /api/emis/:id (Admin+) — also removes the linked Expense row so no orphaned Finance
+// Hub entry is left behind.
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
@@ -87,8 +96,14 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     const { id } = await params
     const supabase = auth.supabase
 
+    const { data: existing } = await supabase.from('emis').select('expense_id').eq('id', id).maybeSingle()
+
     const { error } = await supabase.from('emis').delete().eq('id', id)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+    if (existing?.expense_id) {
+        await deleteLinkedExpense(supabase, existing.expense_id)
+    }
 
     return NextResponse.json({ success: true })
 }

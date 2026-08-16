@@ -2,6 +2,7 @@ import { requireAuth, isAuthed } from '@/lib/auth'
 import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
+import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
 import { NextResponse } from 'next/server'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -59,6 +60,60 @@ async function syncNewEmployeesIntoSheet(supabase: SupabaseClient, sheetId: stri
     if (insertError) throw insertError
 }
 
+// Refreshes Basic Salary/Transportation Bill/Snacks Bill/Festival Bonus on any still-Unpaid
+// entry from the employee's *current* payroll settings (Members → Edit Member → Payroll /
+// Festival Bonus tabs) — so editing Basic Salary, Salary Increment, or Festival Bonus shows up
+// on an already-created month's sheet right away, instead of staying stuck at whatever value
+// was seeded when the sheet was first created. Reuses buildSeedRow so the recomputed value is
+// always identical to what a brand-new row would get. Once an entry is marked Paid it's a
+// historical record of what was actually paid and is never touched here again.
+async function syncUnpaidEntriesWithEmployeeDefaults(supabase: SupabaseClient, sheetId: string, month: string) {
+    const { data: unpaidEntries } = await supabase
+        .from('salary_entries')
+        .select('id, employee_id, basic_salary, transportation_bill, snacks_bill, festival_bonus')
+        .eq('salary_sheet_id', sheetId)
+        .eq('payment_status', 'Unpaid')
+
+    const rows = unpaidEntries || []
+    if (rows.length === 0) return
+
+    const employeeIds = rows.map((r: { employee_id: string }) => r.employee_id)
+    const { data: employees, error: empError } = await supabase
+        .from('employees')
+        .select(EMPLOYEE_PAYROLL_FIELDS)
+        .in('id', employeeIds)
+
+    if (empError) throw empError
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const employeeById: Record<string, any> = {}
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(employees || []).forEach((e: any) => { employeeById[e.id] = e })
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const r of rows as any[]) {
+        const e = employeeById[r.employee_id]
+        if (!e) continue
+        const seeded = buildSeedRow(sheetId, month, e)
+        const changed = Number(r.basic_salary) !== seeded.basic_salary
+            || Number(r.transportation_bill) !== seeded.transportation_bill
+            || Number(r.snacks_bill) !== seeded.snacks_bill
+            || Number(r.festival_bonus) !== seeded.festival_bonus
+        if (!changed) continue
+
+        const { error: updateError } = await supabase
+            .from('salary_entries')
+            .update({
+                basic_salary: seeded.basic_salary,
+                transportation_bill: seeded.transportation_bill,
+                snacks_bill: seeded.snacks_bill,
+                festival_bonus: seeded.festival_bonus,
+            })
+            .eq('id', r.id)
+        if (updateError) throw updateError
+    }
+}
+
 // Shared by GET and POST — fetches a sheet's entries joined with employee info, plus the
 // live-computed attendance/fine numbers and derived net_payable for each row.
 async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, month: string) {
@@ -84,12 +139,13 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
         return !startMonth || month >= startMonth
     })
     const employeeIds = rows.map((r: { employee_id: string }) => r.employee_id)
-    const [attendance, fines, advances, productBuys, emis] = await Promise.all([
+    const [attendance, fines, advances, productBuys, emis, providentFunds] = await Promise.all([
         getAttendanceStatsForMonth(supabase, employeeIds, month),
         getFineTotalsForMonth(supabase, employeeIds, month),
         getAdvanceDetailsForMonth(supabase, employeeIds, month),
         getProductBuyDetailsForMonth(supabase, employeeIds, month),
         getEmiLoanDetailsForMonth(supabase, employeeIds, month),
+        getProvidentFundDetailsForMonth(supabase, employeeIds, month),
     ])
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -98,6 +154,7 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
         const advanceDetail = advances[r.employee_id] || { total: 0, records: [] }
         const productBuyDetail = productBuys[r.employee_id] || { total: 0, records: [] }
         const emiDetail = emis[r.employee_id] || { total: 0, records: [] }
+        const providentFundDetail = providentFunds[r.employee_id] || { total: 0, records: [] }
         return {
             id: r.id,
             employee_id: r.employee_id,
@@ -126,13 +183,15 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
             product_buy_records: productBuyDetail.records,
             loan: emiDetail.total,
             loan_records: emiDetail.records,
+            provident_fund: providentFundDetail.total,
+            provident_fund_records: providentFundDetail.records,
             other_deduction: Number(r.other_deduction) || 0,
             payment_status: r.payment_status,
             payment_method: r.payment_method,
             payment_date: r.payment_date,
             attendance: attendance[r.employee_id] || { present: 0, late: 0, absent: 0, leave: 0 },
             fine,
-            net_payable: computeNetPayable(r, fine, advanceDetail.total, productBuyDetail.total, emiDetail.total),
+            net_payable: computeNetPayable(r, fine, advanceDetail.total, productBuyDetail.total, emiDetail.total, providentFundDetail.total),
             updated_at: r.updated_at,
         }
     })
@@ -161,6 +220,8 @@ export async function GET(request: Request) {
         // newly-added member with a Basic Salary Starting Month shows up as soon as this
         // month's sheet is next viewed, without needing to recreate the sheet.
         await syncNewEmployeesIntoSheet(supabase, sheet.id, month)
+        // Refreshes still-Unpaid rows from each employee's current payroll settings.
+        await syncUnpaidEntriesWithEmployeeDefaults(supabase, sheet.id, month)
         const entries = await buildSheetResponse(supabase, sheet.id, month)
         return NextResponse.json({ sheet, entries })
     } catch (e) {
@@ -190,6 +251,8 @@ export async function POST(request: Request) {
             // clicking "Create Salary Sheet" again for an existing month is how a Super Admin
             // would naturally retry after adding a new member, so this must catch them up too.
             await syncNewEmployeesIntoSheet(supabase, existing.id, month)
+            // Refreshes still-Unpaid rows from each employee's current payroll settings.
+            await syncUnpaidEntriesWithEmployeeDefaults(supabase, existing.id, month)
             const entries = await buildSheetResponse(supabase, existing.id, month)
             return NextResponse.json({ sheet: existing, entries })
         } catch (e) {

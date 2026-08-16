@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString, getWeekRange, getMonthRange } from '@/lib/dateRange'
 import {
-    IconWallet, IconUsers, IconPlus, IconX, IconBanknote,
+    IconWallet, IconUsers, IconPlus, IconX, IconBanknote, IconCheckCircle, IconClock,
     IconSearch, IconEdit, IconTrash, IconChevronLeft, IconChevronRight, IconCalendar,
 } from '@/components/icons/Icons'
 
@@ -32,6 +32,12 @@ interface Emi {
     created_at: string
     employee: { id: string; name: string; employee_id: string | null; avatar_url: string | null } | null
     created_by_employee: { id: string; name: string } | null
+    total_payable: number
+    paid: number
+    due: number
+    paid_installments: number
+    total_installments: number
+    remaining_installments: number
 }
 
 interface EmployeeOption {
@@ -51,12 +57,17 @@ interface CombinedRow {
     employee: EmployeeOption | null
     date: string
     amount: number
+    // Advance has no installments — Paid/Due here is simply the full amount, gated by its own
+    // payment_status. EMI is installment-based (see getEmiPaidSummaries in src/lib/emis.ts),
+    // same Paid/Due semantics as Provident Fund.
+    paid: number
+    due: number
     advance?: Advance
     emi?: Emi
 }
 
 type DateRangeMode = 'all' | 'today' | 'week' | 'month' | 'custom'
-const TERM_OPTIONS = [3, 6] as const
+const TERM_OPTIONS = [3, 6, 12, 24] as const
 
 const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } }
 
@@ -72,8 +83,11 @@ function formatDate(d: string) {
 // Advance & EMI Management, embedded as a Finance Hub tab. Every advance is mirrored into
 // the `expenses` table (category "Employee Advance", see src/lib/advances.ts) at creation/
 // edit/delete time, so it's automatically included in the Overview tab's Total Expenses/Net
-// Balance. EMI records are a separate installment-loan module (src/lib/emis.ts) that feed
-// the Salary Sheet's Loan column directly and are not linked to Expenses.
+// Balance. EMI is a separate installment-loan module (src/lib/emis.ts) that also feeds the
+// Salary Sheet's Loan column directly, and is mirrored into `expenses` the same way (category
+// "Employee Loan", principal amount only — the linked expense's status stays 'pending' since
+// EMI has no payment_status of its own; repayment happens via the Salary Sheet's live
+// deduction, not a status flip on the expense).
 export default function AdvanceManager() {
     const { success: toastSuccess, error: toastError } = useToast()
 
@@ -128,8 +142,16 @@ export default function AdvanceManager() {
     }, [])
 
     const combined: CombinedRow[] = [
-        ...advances.map(a => ({ id: a.id, record_type: 'Advance' as const, employee_id: a.employee_id, employee: a.employee, date: a.advance_date, amount: a.amount, advance: a })),
-        ...emis.map(e => ({ id: e.id, record_type: 'EMI' as const, employee_id: e.employee_id, employee: e.employee, date: e.start_date, amount: e.amount, emi: e })),
+        ...advances.map(a => ({
+            id: a.id, record_type: 'Advance' as const, employee_id: a.employee_id, employee: a.employee, date: a.advance_date, amount: a.amount,
+            paid: a.payment_status === 'Paid' ? a.amount : 0, due: a.payment_status === 'Paid' ? 0 : a.amount,
+            advance: a,
+        })),
+        ...emis.map(e => ({
+            id: e.id, record_type: 'EMI' as const, employee_id: e.employee_id, employee: e.employee, date: e.start_date, amount: e.amount,
+            paid: e.paid, due: e.due,
+            emi: e,
+        })),
     ].sort((a, b) => b.date.localeCompare(a.date))
 
     const filtered = combined.filter(row => {
@@ -140,17 +162,21 @@ export default function AdvanceManager() {
     })
 
     // Total Advance/Total EMI each stay scoped to their own record type (principal amount,
-    // matching the Amount column); Total Employees reflects everyone with either in view.
+    // matching the Amount column); Total Paid/Total Due sum across both types (Advance's own
+    // payment_status and EMI's installment-based Paid/Due, see CombinedRow above); Total
+    // Employees reflects everyone with either in view.
     const summary = filtered.reduce((acc, row) => {
         if (row.record_type === 'Advance') acc.totalAdvance += row.amount
         else acc.totalEmi += row.amount
+        acc.totalPaid += row.paid
+        acc.totalDue += row.due
         acc.employeeIds.add(row.employee_id)
         return acc
-    }, { totalAdvance: 0, totalEmi: 0, employeeIds: new Set<string>() })
+    }, { totalAdvance: 0, totalEmi: 0, totalPaid: 0, totalDue: 0, employeeIds: new Set<string>() })
 
     const handleDelete = async (row: CombinedRow) => {
         const label = row.record_type === 'Advance' ? 'advance' : 'EMI'
-        const extra = row.record_type === 'Advance' ? ' This also removes its linked Finance Hub expense entry.' : ''
+        const extra = ' This also removes its linked Finance Hub expense entry.'
         if (!confirm(`Delete this ${label} record for ${row.employee?.name || 'this employee'}?${extra}`)) return
         const url = row.record_type === 'Advance' ? `/api/advances/${row.id}` : `/api/emis/${row.id}`
         const res = await fetch(url, { method: 'DELETE' })
@@ -188,6 +214,14 @@ export default function AdvanceManager() {
                 <div className="stat-card">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconUsers size={14} color="var(--color-text-tertiary)" /> Total Employees</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>{summary.employeeIds.size}</span>
+                </div>
+                <div className="stat-card">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconCheckCircle size={14} color="var(--color-text-tertiary)" /> Total Paid</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A' }}>৳{summary.totalPaid.toLocaleString()}</span>
+                </div>
+                <div className="stat-card">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Total Due</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{summary.totalDue.toLocaleString()}</span>
                 </div>
             </motion.div>
 
@@ -251,6 +285,9 @@ export default function AdvanceManager() {
                             <th>Advance/EMI</th>
                             <th>Date</th>
                             <th>Amount</th>
+                            <th>Paid</th>
+                            <th>Due</th>
+                            <th>Total Amount</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -289,6 +326,24 @@ export default function AdvanceManager() {
                                         <div style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-tertiary)' }}>৳{row.emi.monthly_installment.toLocaleString()}/mo × {row.emi.term_months}</div>
                                     )}
                                 </td>
+                                <td style={{ color: '#16A34A' }}>
+                                    ৳{row.paid.toLocaleString()}
+                                    {row.record_type === 'EMI' && row.emi && row.emi.paid_installments > 0 && (
+                                        <div style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-tertiary)' }}>৳{row.emi.monthly_installment.toLocaleString()} × {row.emi.paid_installments}</div>
+                                    )}
+                                </td>
+                                <td style={{ color: row.due > 0 ? '#DC2626' : undefined }}>
+                                    ৳{row.due.toLocaleString()}
+                                    {row.record_type === 'EMI' && row.emi && row.emi.remaining_installments > 0 && (
+                                        <div style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-tertiary)' }}>৳{row.emi.monthly_installment.toLocaleString()} × {row.emi.remaining_installments}</div>
+                                    )}
+                                </td>
+                                <td style={{ fontWeight: 700 }}>
+                                    ৳{(row.record_type === 'EMI' && row.emi ? row.emi.total_payable : row.amount).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                    {row.record_type === 'EMI' && row.emi && row.emi.interest_rate > 0 && (
+                                        <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-tertiary)', marginLeft: '4px' }}>({row.emi.interest_rate}%)</span>
+                                    )}
+                                </td>
                                 <td>
                                     <div style={{ display: 'flex', gap: '4px' }}>
                                         <button className="btn btn-ghost btn-icon" onClick={() => { setEditing(row); setAddType(row.record_type); setShowModal(true) }} title="Edit"><IconEdit size={15} /></button>
@@ -298,10 +353,10 @@ export default function AdvanceManager() {
                             </tr>
                         ))}
                         {!loading && filtered.length === 0 && (
-                            <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No advance or EMI records found.</td></tr>
+                            <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No advance or EMI records found.</td></tr>
                         )}
                         {loading && (
-                            <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
+                            <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
                         )}
                     </tbody>
                 </table>
@@ -494,7 +549,8 @@ function EmiForm({ emi, employees, onClose, onSaved }: {
     // Flat interest, split evenly: Total = Amount × (1 + rate/100), Monthly = Total ÷ term.
     // Mirrors src/lib/emis.ts computeMonthlyInstallment exactly — shown live so the admin
     // sees what will land in the Salary Sheet's Loan column before saving.
-    const previewInstallment = amount > 0 && termMonths > 0 ? (amount * (1 + (interestRate || 0) / 100)) / termMonths : 0
+    const previewTotalPayable = amount * (1 + (interestRate || 0) / 100)
+    const previewInstallment = amount > 0 && termMonths > 0 ? previewTotalPayable / termMonths : 0
 
     const handleSave = async () => {
         if (!employeeId) { toastError('Please select an employee'); return }
@@ -513,6 +569,7 @@ function EmiForm({ emi, employees, onClose, onSaved }: {
                     const selectedEmployee = employees.find(e => e.id === employeeId)
                     onSaved({
                         ...emi, employee_id: employeeId, amount, term_months: termMonths, start_date: startDate, interest_rate: interestRate, monthly_installment: previewInstallment,
+                        total_payable: previewTotalPayable, due: Math.max(0, previewTotalPayable - emi.paid),
                         employee: selectedEmployee ? { id: selectedEmployee.id, name: selectedEmployee.name, employee_id: selectedEmployee.employee_id, avatar_url: selectedEmployee.avatar_url } : emi.employee,
                     }, false)
                     toastSuccess('EMI updated')

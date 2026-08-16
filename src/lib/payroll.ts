@@ -112,13 +112,14 @@ export interface SalaryAmounts {
 }
 
 // Net Payable = Basic Salary + Extra Duty + Transportation Bill + Snacks Bill + Performance Bonus
-// + Festival Bonus - Fine - Advance - Product Buy - Loan - Other Deduction.
+// + Festival Bonus - Fine - Advance - Product Buy - Loan - Provident Fund - Other Deduction.
 // The one place this formula lives — every API route imports it, so the dashboard totals
 // and the salary sheet rows can never disagree with each other. Fine, Advance, Product Buy,
-// and Loan are all live-computed (never stored per salary entry), so they're passed in
-// explicitly. Loan comes from active EMIs for that employee/month (see
-// getEmiLoanDetailsForMonth in src/lib/emis.ts) — never manually typed once an EMI exists.
-export function computeNetPayable(entry: SalaryAmounts, fine: number, advance: number, productBuy: number, loan: number): number {
+// Loan, and Provident Fund are all live-computed (never stored per salary entry), so they're
+// passed in explicitly. Loan comes from active EMIs (src/lib/emis.ts), Provident Fund from
+// active Provident Fund records (src/lib/providentFunds.ts) — neither is ever manually typed
+// once the corresponding record exists for that employee/month.
+export function computeNetPayable(entry: SalaryAmounts, fine: number, advance: number, productBuy: number, loan: number, providentFund: number): number {
     return (Number(entry.basic_salary) || 0)
         + (Number(entry.extra_duty) || 0)
         + (Number(entry.transportation_bill) || 0)
@@ -129,5 +130,6 @@ export function computeNetPayable(entry: SalaryAmounts, fine: number, advance: n
         - advance
         - productBuy
         - loan
+        - providentFund
         - (Number(entry.other_deduction) || 0)
 }

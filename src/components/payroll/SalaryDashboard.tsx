@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
     IconUsers, IconWallet, IconCheckCircle, IconClock,
-    IconBanknote, IconGift, IconTrendingUp, IconAward, IconPartyPopper,
+    IconBanknote, IconGift, IconTrendingUp, IconAward, IconPartyPopper, IconLayers,
 } from '@/components/icons/Icons'
 
 interface DashboardStats {
@@ -18,6 +18,7 @@ interface DashboardStats {
     totalBasicSalary: number
     totalAdvance: number
     totalLoan: number
+    totalProvidentFund: number
     totalPerformanceBonus: number
     totalFestivalBonus: number
 }
@@ -108,6 +109,8 @@ export default function SalaryDashboard({ month = currentMonth() }: { month?: st
                                 label="Total Bonus" value={loading ? '—' : `৳${((stats?.totalPerformanceBonus ?? 0) + (stats?.totalFestivalBonus ?? 0)).toLocaleString()}`} />
                             <StatTile icon={<IconTrendingUp size={20} color="#DC2626" />} color="#DC2626"
                                 label="Total Loan" value={loading ? '—' : `৳${(stats?.totalLoan ?? 0).toLocaleString()}`} />
+                            <StatTile icon={<IconLayers size={20} color="#DC2626" />} color="#DC2626"
+                                label="Total Provident Fund" value={loading ? '—' : `৳${(stats?.totalProvidentFund ?? 0).toLocaleString()}`} />
                             <StatTile icon={<IconWallet size={20} color="#D97706" />} color="#D97706"
                                 label="Total Advance" value={loading ? '—' : `৳${(stats?.totalAdvance ?? 0).toLocaleString()}`} />
                             <StatTile icon={<IconAward size={20} color="#0D9488" />} color="#0D9488"
