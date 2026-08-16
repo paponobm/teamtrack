@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
-import { IconFileText, IconX, IconPrinter } from '@/components/icons/Icons'
+import { getLocalDateString } from '@/lib/dateRange'
+import { IconFileText, IconX, IconPrinter, IconCheckCircle } from '@/components/icons/Icons'
 import PaySlipModal from './PaySlipModal'
 
 export interface SalaryEntry {
@@ -95,6 +96,7 @@ export default function SalarySheet() {
     const [creating, setCreating] = useState(false)
     const [editing, setEditing] = useState<SalaryEntry | null>(null)
     const [payslipEntry, setPayslipEntry] = useState<SalaryEntry | null>(null)
+    const [markPaidEntry, setMarkPaidEntry] = useState<SalaryEntry | null>(null)
 
     const load = useCallback(async (m: string) => {
         setLoading(true)
@@ -261,9 +263,18 @@ export default function SalarySheet() {
                                     <td className="deduct-col" style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
                                     <td style={{ fontWeight: 700, color: '#16A34A' }}>৳{e.net_payable.toLocaleString()}</td>
                                     <td>
-                                        <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: e.payment_status === 'Paid' ? '#16A34A' : '#DC2626', background: e.payment_status === 'Paid' ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)' }}>
-                                            {e.payment_status === 'Paid' ? 'Paid' : 'Non-Paid'}
-                                        </span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                            <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: e.payment_status === 'Paid' ? '#16A34A' : '#B45309', background: e.payment_status === 'Paid' ? 'rgba(22,163,74,0.1)' : 'rgba(217,119,6,0.12)' }}>
+                                                {e.payment_status === 'Paid' ? 'Paid' : 'Non-Paid'}
+                                            </span>
+                                            {e.payment_status !== 'Paid' && (
+                                                <button className="btn btn-secondary btn-sm" title="Mark as Paid"
+                                                    style={{ padding: '2px 8px', fontSize: '0.6875rem', color: '#16A34A' }}
+                                                    onClick={(ev) => { ev.stopPropagation(); setMarkPaidEntry(e) }}>
+                                                    <IconCheckCircle size={13} /> 
+                                                </button>
+                                            )}
+                                        </div>
                                     </td>
                                     <td>
                                         {e.payment_method ? (
@@ -308,6 +319,19 @@ export default function SalarySheet() {
                         month={month}
                         totalDays={totalDays}
                         onClose={() => setPayslipEntry(null)}
+                    />
+                )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+                {markPaidEntry && (
+                    <MarkPaidModal
+                        entry={markPaidEntry}
+                        onClose={() => setMarkPaidEntry(null)}
+                        onSaved={(updated) => {
+                            setEntries(prev => prev.map(e => e.id === updated.id ? updated : e))
+                            setMarkPaidEntry(null)
+                        }}
                     />
                 )}
             </AnimatePresence>
@@ -387,10 +411,11 @@ export default function SalarySheet() {
                     background: rgba(220, 38, 38, 0.05);
                 }
                 .payroll-grid-table .earn-col-last {
-                    border-right: 2px solid var(--color-border);
+                    border-right: 3px solid var(--color-primary, #2563EB);
+                    box-shadow: 2px 0 4px -2px rgba(37, 99, 235, 0.4);
                 }
                 .payroll-grid-table .deduct-col-first {
-                    border-left: 2px solid var(--color-border);
+                    border-left: 3px solid var(--color-primary, #2563EB);
                 }
             `}</style>
         </div>
@@ -521,6 +546,69 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                 <div className="modal-footer">
                     <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
                     <button className="btn btn-primary" disabled={saving} onClick={handleSave}>{saving ? 'Saving...' : 'Save'}</button>
+                </div>
+            </motion.div>
+        </div>
+    )
+}
+
+// Quick "mark as Paid" flow triggered by the Yes button beside the Non-Paid badge — a
+// lighter-weight alternative to opening the full EditEntryModal just to settle payment.
+// Reuses the same PUT /api/payroll/salary-entries endpoint, only sending payment_status/
+// payment_method/payment_date so the amount fields on the entry are left untouched.
+function MarkPaidModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClose: () => void; onSaved: (e: SalaryEntry) => void }) {
+    const { success: toastSuccess, error: toastError } = useToast()
+    const [paymentMethod, setPaymentMethod] = useState('')
+    const [paymentDate, setPaymentDate] = useState(getLocalDateString())
+    const [saving, setSaving] = useState(false)
+
+    const handleSubmit = async () => {
+        if (!paymentMethod) { toastError('Please select a payment method'); return }
+        setSaving(true)
+        try {
+            const res = await fetch('/api/payroll/salary-entries', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: entry.id, payment_status: 'Paid', payment_method: paymentMethod, payment_date: paymentDate }),
+            })
+            if (res.ok) {
+                onSaved({ ...entry, payment_status: 'Paid', payment_method: paymentMethod, payment_date: paymentDate })
+                toastSuccess('Marked as Paid')
+            } else {
+                const err = await res.json()
+                toastError(err.error || 'Failed to update')
+            }
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <motion.div initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 10 }}
+                className="modal" style={{ maxWidth: '420px' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                    <div className="modal-title">Mark {entry.employee.name} as Paid</div>
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: 'var(--color-text-tertiary)' }}><IconX size={18} /></button>
+                </div>
+
+                <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <div>
+                        <label className="form-label">Payment Method *</label>
+                        <select className="form-input" value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
+                            <option value="">Select method...</option>
+                            {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="form-label">Payment Date *</label>
+                        <input className="form-input" type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
+                    </div>
+                </div>
+
+                <div className="modal-footer">
+                    <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                    <button className="btn btn-primary" disabled={saving} onClick={handleSubmit}>{saving ? 'Saving...' : 'Mark as Paid'}</button>
                 </div>
             </motion.div>
         </div>
