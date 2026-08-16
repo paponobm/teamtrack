@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString, getWeekRange, getMonthRange } from '@/lib/dateRange'
 import {
-    IconUsers, IconPlus, IconX, IconBanknote, IconCheckCircle, IconClock,
+    IconUsers, IconPlus, IconX, IconBanknote, IconCheckCircle, IconClock, IconTrendingUp,
     IconSearch, IconEdit, IconTrash, IconChevronLeft, IconChevronRight, IconCalendar,
 } from '@/components/icons/Icons'
 
@@ -121,6 +121,15 @@ export default function ProvidentFundManager() {
         return acc
     }, { totalProvidentFund: 0, totalPaid: 0, totalDue: 0, employeeIds: new Set<string>() })
 
+    // How many records use each interest rate — e.g. "10% — 2, 8% — 1" — so a mix of rates
+    // across employees is visible at a glance instead of collapsing to a single misleading number.
+    const interestRateBreakdown = Object.entries(
+        filtered.reduce((acc, f) => {
+            acc[f.interest_rate] = (acc[f.interest_rate] || 0) + 1
+            return acc
+        }, {} as Record<number, number>)
+    ).sort((a, b) => Number(b[0]) - Number(a[0]))
+
     const handleDelete = async (f: ProvidentFund) => {
         if (!confirm(`Delete this Provident Fund record for ${f.employee?.name || 'this employee'}? This also removes its remaining Salary Sheet deductions.`)) return
         const res = await fetch(`/api/provident-funds/${f.id}`, { method: 'DELETE' })
@@ -161,6 +170,23 @@ export default function ProvidentFundManager() {
                 <div className="stat-card">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Total Due</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{summary.totalDue.toLocaleString()}</span>
+                </div>
+                <div className="stat-card">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconTrendingUp size={14} color="var(--color-text-tertiary)" /> Interest Rate</span>
+                    {interestRateBreakdown.length === 0 ? (
+                        <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>—</span>
+                    ) : interestRateBreakdown.length === 1 ? (
+                        <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>{interestRateBreakdown[0][0]}%</span>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            {interestRateBreakdown.map(([rate, count]) => (
+                                <div key={rate} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '8px' }}>
+                                    <span style={{ fontSize: '1.0625rem', fontWeight: 700, color: '#2563EB' }}>{rate}%</span>
+                                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-tertiary)' }}>{count}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </motion.div>
 

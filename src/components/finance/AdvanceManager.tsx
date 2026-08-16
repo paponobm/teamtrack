@@ -162,17 +162,23 @@ export default function AdvanceManager() {
     })
 
     // Total Advance/Total EMI each stay scoped to their own record type (principal amount,
-    // matching the Amount column); Total Paid/Total Due sum across both types (Advance's own
-    // payment_status and EMI's installment-based Paid/Due, see CombinedRow above); Total
+    // matching the Amount column); Paid/Due are kept separate per record type too (Advance's
+    // own payment_status vs. EMI's installment-based Paid/Due, see CombinedRow above), rather
+    // than summed together, so each card reads as a single, unambiguous figure. Total
     // Employees reflects everyone with either in view.
     const summary = filtered.reduce((acc, row) => {
-        if (row.record_type === 'Advance') acc.totalAdvance += row.amount
-        else acc.totalEmi += row.amount
-        acc.totalPaid += row.paid
-        acc.totalDue += row.due
+        if (row.record_type === 'Advance') {
+            acc.totalAdvance += row.amount
+            acc.totalAdvancePaid += row.paid
+            acc.totalAdvanceDue += row.due
+        } else {
+            acc.totalEmi += row.amount
+            acc.totalEmiPaid += row.paid
+            acc.totalEmiDue += row.due
+        }
         acc.employeeIds.add(row.employee_id)
         return acc
-    }, { totalAdvance: 0, totalEmi: 0, totalPaid: 0, totalDue: 0, employeeIds: new Set<string>() })
+    }, { totalAdvance: 0, totalEmi: 0, totalAdvancePaid: 0, totalAdvanceDue: 0, totalEmiPaid: 0, totalEmiDue: 0, employeeIds: new Set<string>() })
 
     const handleDelete = async (row: CombinedRow) => {
         const label = row.record_type === 'Advance' ? 'advance' : 'EMI'
@@ -216,12 +222,20 @@ export default function AdvanceManager() {
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>{summary.employeeIds.size}</span>
                 </div>
                 <div className="stat-card">
-                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconCheckCircle size={14} color="var(--color-text-tertiary)" /> Total Paid</span>
-                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A' }}>৳{summary.totalPaid.toLocaleString()}</span>
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconCheckCircle size={14} color="var(--color-text-tertiary)" /> Total Advance Paid</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A' }}>৳{summary.totalAdvancePaid.toLocaleString()}</span>
                 </div>
                 <div className="stat-card">
-                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Total Due</span>
-                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{summary.totalDue.toLocaleString()}</span>
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Total Advance Due</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{summary.totalAdvanceDue.toLocaleString()}</span>
+                </div>
+                <div className="stat-card">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconCheckCircle size={14} color="var(--color-text-tertiary)" /> Total EMI Paid</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A' }}>৳{summary.totalEmiPaid.toLocaleString()}</span>
+                </div>
+                <div className="stat-card">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Total EMI Due</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{summary.totalEmiDue.toLocaleString()}</span>
                 </div>
             </motion.div>
 
