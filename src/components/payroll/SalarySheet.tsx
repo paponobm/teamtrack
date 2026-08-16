@@ -87,9 +87,10 @@ function formatMonthLabel(month: string) {
     return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 }
 
-export default function SalarySheet() {
+// month/search are controlled by the parent Payroll Management page — a single shared filter
+// bar above this table drives both this sheet and the Salary Dashboard cards above it.
+export default function SalarySheet({ month = currentMonth(), search = '' }: { month?: string; search?: string }) {
     const { success: toastSuccess, error: toastError } = useToast()
-    const [month, setMonth] = useState(currentMonth)
     const [sheetExists, setSheetExists] = useState<boolean | null>(null)
     const [entries, setEntries] = useState<SalaryEntry[]>([])
     const [loading, setLoading] = useState(true)
@@ -137,19 +138,16 @@ export default function SalarySheet() {
     }
 
     const totalDays = daysInMonth(month)
+    const q = search.trim().toLowerCase()
+    const filteredEntries = q
+        ? entries.filter(e => e.employee.name.toLowerCase().includes(q) || (e.employee.employee_id || '').toLowerCase().includes(q))
+        : entries
 
     return (
         <div>
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} 
-                style={{ marginBottom: '4px', padding: '40px 0' }}>
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
+                style={{ marginBottom: '16px' }}>
                 <h2 style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.02em' }}>{formatMonthLabel(month)} Employee Salary Sheet</h2>
-            </motion.div>
-
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.05 }}
-                style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Month</label>
-                <input className="input" type="month" value={month} onChange={e => setMonth(e.target.value)}
-                    style={{ padding: '8px 12px', fontSize: '0.8125rem', width: 'auto' }} />
             </motion.div>
 
             {!loading && sheetExists === false && (
@@ -190,7 +188,7 @@ export default function SalarySheet() {
                             </tr>
                         </thead>
                         <tbody>
-                            {entries.map((e, i) => (
+                            {filteredEntries.map((e, i) => (
                                 <tr key={e.id} onClick={() => setEditing(e)} style={{ cursor: 'pointer' }}>
                                     <td className="sticky-col-1">{i + 1}</td>
                                     <td className="sticky-col-2">
@@ -291,8 +289,8 @@ export default function SalarySheet() {
                                     </td>
                                 </tr>
                             ))}
-                            {entries.length === 0 && (
-                                <tr><td colSpan={19} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No active employees found.</td></tr>
+                            {filteredEntries.length === 0 && (
+                                <tr><td colSpan={19} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>{q ? 'No employees match your search.' : 'No active employees found.'}</td></tr>
                             )}
                         </tbody>
                     </table>

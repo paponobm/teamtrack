@@ -3,13 +3,25 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { usePermissions } from '@/lib/PermissionsContext'
-import { IconWallet, IconFileText, IconShieldAlert } from '@/components/icons/Icons'
+import { IconShieldAlert, IconSearch } from '@/components/icons/Icons'
 import SalaryDashboard from '@/components/payroll/SalaryDashboard'
 import SalarySheet from '@/components/payroll/SalarySheet'
 
+function currentMonth() {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }
+const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } }
+
+// Single page combining the Salary Dashboard's summary cards and the Salary Sheet table —
+// previously two tabs behind a segmented switcher, now one shared Month + Search filter bar
+// drives both, so switching months or searching an employee updates everything at once.
 export default function PayrollManagementPage() {
     const { data, isLoading } = usePermissions()
-    const [mainTab, setMainTab] = useState<'dashboard' | 'sheet'>('dashboard')
+    const [month, setMonth] = useState(currentMonth)
+    const [search, setSearch] = useState('')
 
     if (isLoading) return null
 
@@ -23,26 +35,34 @@ export default function PayrollManagementPage() {
     }
 
     return (
-        <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
-                style={{ display: 'flex', position: 'relative', background: 'rgba(118,118,128,0.08)', borderRadius: '12px', padding: '3px', marginBottom: '16px', width: 'fit-content' }}>
-                {[
-                    { key: 'dashboard' as const, label: 'Salary Dashboard', icon: <IconWallet size={15} /> },
-                    { key: 'sheet' as const, label: 'Salary Sheet', icon: <IconFileText size={15} /> },
-                ].map(tab => (
-                    <button key={tab.key} onClick={() => setMainTab(tab.key)}
-                        style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 18px', borderRadius: '9px', border: 'none', fontSize: '0.875rem', fontWeight: 600, background: 'transparent', color: mainTab === tab.key ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)', cursor: 'pointer', zIndex: 1 }}>
-                        {mainTab === tab.key && (
-                            <motion.div layoutId="payrollMainTab" style={{ position: 'absolute', inset: 0, background: 'var(--color-bg-primary)', borderRadius: '9px', boxShadow: '0 1px 4px rgba(0,0,0,0.1)' }} transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
-                        )}
-                        <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: '6px' }}>{tab.icon}{tab.label}</span>
-                    </button>
-                ))}
+        <motion.div variants={container} initial="hidden" animate="show">
+            <motion.div className="page-header" variants={item}>
+                <div>
+                    <h1 className="page-title">Payroll Management</h1>
+                    <p className="page-subtitle">Monthly salary sheets, payroll totals, and payment tracking.</p>
+                </div>
             </motion.div>
 
-            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                {mainTab === 'dashboard' ? <SalaryDashboard /> : <SalarySheet />}
-            </div>
-        </div>
+            <motion.div variants={item} style={{ marginBottom: '24px' }}>
+                <SalaryDashboard month={month} />
+            </motion.div>
+
+            <motion.div variants={item} style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Month</label>
+                    <input className="input" type="month" value={month} onChange={e => setMonth(e.target.value)}
+                        style={{ padding: '8px 12px', fontSize: '0.8125rem', width: 'auto' }} />
+                </div>
+                <div style={{ position: 'relative', width: '260px' }}>
+                    <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', display: 'flex' }}><IconSearch size={15} color="var(--color-text-tertiary)" /></span>
+                    <input className="form-input" type="text" placeholder="Search by employee ID or name..." value={search} onChange={e => setSearch(e.target.value)}
+                        style={{ paddingLeft: '34px', height: '38px', fontSize: '0.8125rem', width: '100%' }} />
+                </div>
+            </motion.div>
+
+            <motion.div variants={item}>
+                <SalarySheet month={month} search={search} />
+            </motion.div>
+        </motion.div>
     )
 }
