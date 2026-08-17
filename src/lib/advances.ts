@@ -2,7 +2,7 @@ import { createAdminClient } from './supabase/admin'
 
 type SupabaseClient = ReturnType<typeof createAdminClient>
 
-export const ADVANCE_EXPENSE_CATEGORY = 'Employee Advance'
+export const ADVANCE_EXPENSE_CATEGORY = 'Salary Advance'
 
 // advances.payment_status ('Paid'/'Unpaid') <-> expenses.payment_status ('paid'/'pending').
 // 'rejected' is never used here — an advance is either outstanding or settled, never denied.
@@ -14,7 +14,7 @@ function buildDescription(employeeName: string) {
     return `Advance to ${employeeName}`
 }
 
-// Creates the Expense row an advance is mirrored into (category "Employee Advance") so it
+// Creates the Expense row an advance is mirrored into (category "Salary Advance") so it
 // counts toward Finance Hub's Total Expenses/Net Balance without a second parallel total.
 // Returns the new expense id, or null if the employee/expense insert fails (advance creation
 // still proceeds — a missing linked expense is recoverable, a blocked advance is not).

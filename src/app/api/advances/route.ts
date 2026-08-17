@@ -74,7 +74,7 @@ export async function POST(request: Request) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    // Mirror this advance into Finance Hub as a real Expense (category "Employee Advance")
+    // Mirror this advance into Finance Hub as a real Expense (category "Salary Advance")
     // so Total Expenses/Net Balance reflect it — best-effort: a failed link doesn't block the
     // advance itself, since the advance is the record of truth for Payroll.
     const expenseId = await createLinkedExpense(supabase, {

@@ -81,7 +81,7 @@ function formatDate(d: string) {
 }
 
 // Advance & EMI Management, embedded as a Finance Hub tab. Every advance is mirrored into
-// the `expenses` table (category "Employee Advance", see src/lib/advances.ts) at creation/
+// the `expenses` table (category "Salary Advance", see src/lib/advances.ts) at creation/
 // edit/delete time, so it's automatically included in the Overview tab's Total Expenses/Net
 // Balance. EMI is a separate installment-loan module (src/lib/emis.ts) that also feeds the
 // Salary Sheet's Loan column directly, and is mirrored into `expenses` the same way (category
@@ -302,6 +302,7 @@ export default function AdvanceManager() {
                             <th>Paid</th>
                             <th>Due</th>
                             <th>Total Amount</th>
+                            <th>Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -359,6 +360,11 @@ export default function AdvanceManager() {
                                     )}
                                 </td>
                                 <td>
+                                    <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: row.due <= 0 ? '#16A34A' : '#DC2626', background: row.due <= 0 ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)' }}>
+                                        {row.due <= 0 ? 'Paid' : 'Due'}
+                                    </span>
+                                </td>
+                                <td>
                                     <div style={{ display: 'flex', gap: '4px' }}>
                                         <button className="btn btn-ghost btn-icon" onClick={() => { setEditing(row); setAddType(row.record_type); setShowModal(true) }} title="Edit"><IconEdit size={15} /></button>
                                         <button className="btn btn-ghost btn-icon" onClick={() => handleDelete(row)} title="Delete" style={{ color: '#DC2626' }}><IconTrash size={15} /></button>
@@ -367,10 +373,10 @@ export default function AdvanceManager() {
                             </tr>
                         ))}
                         {!loading && filtered.length === 0 && (
-                            <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No advance or EMI records found.</td></tr>
+                            <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No advance or EMI records found.</td></tr>
                         )}
                         {loading && (
-                            <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
+                            <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
                         )}
                     </tbody>
                 </table>

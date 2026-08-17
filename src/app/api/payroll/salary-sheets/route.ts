@@ -10,13 +10,16 @@ type SupabaseClient = any
 
 // Builds one salary_entries insert row from an employee's saved payroll defaults for a given
 // sheet month. Shared by initial sheet creation and the backfill sync below so both paths
-// apply Basic Salary Starting Month / Salary Increment / Festival Bonus identically.
+// apply Basic Salary Starting Month / Salary Increment / Festival Bonus identically. An
+// employee whose Basic Salary Starting Month hasn't been configured yet (still empty) is
+// treated as not-yet-active — basic_salary computes to ৳0 here, and buildSheetResponse below
+// hides the row entirely until a starting month is set and reached.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildSeedRow(sheetId: string, month: string, e: any) {
     const monthNumber = Number(month.split('-')[1])
     const baseBasicSalary = Number(e.payroll_basic_salary) || 0
     const basicSalaryStartMonth: string | null = e.basic_salary_effective_month || null
-    const basicSalaryActive = !basicSalaryStartMonth || month >= basicSalaryStartMonth
+    const basicSalaryActive = !!basicSalaryStartMonth && month >= basicSalaryStartMonth
     const incrementAmount = Number(e.salary_increment_amount) || 0
     const incrementEffectiveMonth: string | null = e.salary_increment_effective_month || null
     const incrementActive = basicSalaryActive && !!incrementEffectiveMonth && month >= incrementEffectiveMonth
@@ -129,14 +132,15 @@ async function buildSheetResponse(supabase: SupabaseClient, sheetId: string, mon
 
     if (error) throw error
 
-    // An employee whose Basic Salary Starting Month is still in the future relative to this
-    // sheet doesn't just show ৳0 — they're left off the sheet entirely, since their salary
-    // hasn't started yet. Filtered here (not at insert time) so it also self-corrects rows
-    // that were already created before this setting was configured, without a data migration.
+    // An employee is only shown on a sheet once their Basic Salary Starting Month is actually
+    // configured (Members → Edit Member → Payroll tab) and this sheet's month has reached it —
+    // an employee whose payroll hasn't been set up yet (still empty) or whose start month is
+    // still in the future is left off the sheet entirely, not shown with ৳0. Filtered here (not
+    // at insert time) so it also self-corrects rows already created before this was configured.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rows = (entries || []).filter((r: any) => {
         const startMonth: string | null = r.employee?.basic_salary_effective_month || null
-        return !startMonth || month >= startMonth
+        return !!startMonth && month >= startMonth
     })
     const employeeIds = rows.map((r: { employee_id: string }) => r.employee_id)
     const [attendance, fines, advances, productBuys, emis, providentFunds] = await Promise.all([
