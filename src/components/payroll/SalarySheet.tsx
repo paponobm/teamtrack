@@ -184,7 +184,7 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
     return (
         <div>
             <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
-                style={{ marginBottom: '16px' }}>
+                style={{ marginBottom: '36px', textAlign: 'center' }}>
                 <h2 style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.02em' }}>{formatMonthLabel(month)} Employee Salary Sheet</h2>
             </motion.div>
 
@@ -337,7 +337,7 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                     </td>
                                     <td>{formatDate(e.payment_date)}</td>
                                     <td>
-                                        <button className="btn btn-secondary btn-sm" onClick={(ev) => { ev.stopPropagation(); setPayslipEntry(e) }}>
+                                        <button className="btn btn-secondary btn-sm" style={{ color: '#2563EB' }} onClick={(ev) => { ev.stopPropagation(); setPayslipEntry(e) }}>
                                             <IconPrinter size={14} /> Pay Slip
                                         </button>
                                     </td>
@@ -675,7 +675,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
 // payment_method/payment_date so the amount fields on the entry are left untouched.
 function MarkPaidModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClose: () => void; onSaved: (e: SalaryEntry) => void }) {
     const { success: toastSuccess, error: toastError } = useToast()
-    const [paymentMethod, setPaymentMethod] = useState('')
+    const [paymentMethod, setPaymentMethod] = useState('Cash')
     const [paymentDate, setPaymentDate] = useState(getLocalDateString())
     const [saving, setSaving] = useState(false)
 
