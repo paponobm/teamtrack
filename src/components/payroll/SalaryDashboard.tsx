@@ -4,23 +4,43 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
     IconUsers, IconWallet, IconCheckCircle, IconClock,
-    IconBanknote, IconGift, IconTrendingUp, IconAward, IconPartyPopper, IconLayers,
+    IconBanknote, IconTrendingUp, IconAward, IconPartyPopper, IconLayers,
+    IconTruck, IconPackage, IconBolt, IconAlertCircle,
 } from '@/components/icons/Icons'
 
 interface DashboardStats {
     sheetExists: boolean
     totalEmployees: number
+    totalMonthExpense: number
     totalPayroll: number
     paidEmployees: number
     paidAmount: number
     unpaidEmployees: number
     unpaidAmount: number
     totalBasicSalary: number
+    totalTransportationBill: number
+    totalTransportationBillEmployees: number
+    totalSnacksBill: number
+    totalSnacksBillEmployees: number
+    totalExtraDuty: number
+    totalExtraDutyEmployees: number
+    totalPerformanceBonus: number
+    totalPerformanceBonusEmployees: number
+    totalFestivalBonus: number
+    totalFestivalBonusEmployees: number
     totalAdvance: number
     totalLoan: number
     totalProvidentFund: number
-    totalPerformanceBonus: number
-    totalFestivalBonus: number
+    totalProductBuy: number
+    totalFine: number
+}
+
+// All-time running total, fetched once (see the load-once effect below) — independent of the
+// selected Month filter, so switching months never re-triggers this expensive full-history scan.
+interface SalaryExpenseStats {
+    totalSalaryExpense: number
+    salaryExpenseStartMonth: string | null
+    salaryExpenseEndMonth: string | null
 }
 
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.04 } } }
@@ -31,9 +51,25 @@ function currentMonth() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
+// Short "Aug", "Sep", ... label used to prefix the per-field cards below, so it's clear at a
+// glance which month's figures they reflect as the shared Month filter changes.
+function monthAbbrev(month: string) {
+    const [y, m] = month.split('-').map(Number)
+    return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short' })
+}
+
+// "Aug - Sep" style range label for Total Salary Expense's all-time span — a single month
+// collapses to just that one label instead of repeating it.
+function monthRangeLabel(start: string | null, end: string | null) {
+    if (!start || !end) return null
+    return start === end ? monthAbbrev(start) : `${monthAbbrev(start)} - ${monthAbbrev(end)}`
+}
+
 // Icon-left "white section" stat tile — an icon badge on the left, label/value stacked on
 // the right, reusing the shared .card surface so it matches the app's existing card styling.
-function StatTile({ icon, label, value, sub, color }: { icon: React.ReactNode; label: string; value: string; sub?: string; color: string }) {
+// sub renders as plain text by default; subBadge switches it to a small colored pill (used for
+// the employee-count sub on the per-field cards below).
+function StatTile({ icon, label, value, sub, subColor, subBadge, color }: { icon: React.ReactNode; label: string; value: string; sub?: string; subColor?: string; subBadge?: boolean; color: string }) {
     return (
         <motion.div variants={item} className="card" style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: `${color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -42,7 +78,13 @@ function StatTile({ icon, label, value, sub, color }: { icon: React.ReactNode; l
             <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{label}</div>
                 <div style={{ fontSize: '1.25rem', fontWeight: 700, color, lineHeight: 1.3 }}>{value}</div>
-                {sub && <div style={{ fontSize: '0.6875rem', color, marginTop: '2px' }}>{sub}</div>}
+                {sub && (subBadge ? (
+                    <span style={{ display: 'inline-block', marginTop: '4px', padding: '2px 8px', borderRadius: '999px', fontSize: '0.6875rem', fontWeight: 600, background: `${color}33`, color }}>
+                        {sub}
+                    </span>
+                ) : (
+                    <div style={{ fontSize: '0.6875rem', color: subColor ?? color, marginTop: '2px' }}>{sub}</div>
+                ))}
             </div>
         </motion.div>
     )
@@ -54,6 +96,8 @@ export default function SalaryDashboard({ month = currentMonth() }: { month?: st
     const [stats, setStats] = useState<DashboardStats | null>(null)
     const [loading, setLoading] = useState(true)
     const [expanded, setExpanded] = useState(true)
+    const [expenseStats, setExpenseStats] = useState<SalaryExpenseStats | null>(null)
+    const [expenseLoading, setExpenseLoading] = useState(true)
 
     const load = useCallback(async (m: string) => {
         setLoading(true)
@@ -66,6 +110,26 @@ export default function SalaryDashboard({ month = currentMonth() }: { month?: st
     }, [])
 
     useEffect(() => { load(month) }, [month, load])
+
+    // Total Salary Expense is month-independent, so it's fetched once on mount from its own
+    // endpoint rather than on every month switch — keeps it genuinely "fixed" instead of
+    // re-running its expensive full-history scan (and blocking on it) each time the month changes.
+    useEffect(() => {
+        (async () => {
+            setExpenseLoading(true)
+            try {
+                const res = await fetch('/api/payroll/dashboard/salary-expense')
+                if (res.ok) setExpenseStats(await res.json())
+            } finally {
+                setExpenseLoading(false)
+            }
+        })()
+    }, [])
+
+    const mLabel = monthAbbrev(month)
+    const v = (n: number | undefined) => loading ? '—' : `৳${(n ?? 0).toLocaleString()}`
+    // These counts are Paid-only now (see /api/payroll/dashboard), so the badge says so.
+    const employeeCount = (n: number | undefined) => `paid: ${n ?? 0}`
 
     return (
         <div>
@@ -87,12 +151,19 @@ export default function SalaryDashboard({ month = currentMonth() }: { month?: st
             <AnimatePresence initial={false}>
                 {expanded && (
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} style={{ overflow: 'hidden' }}>
+                        {/* Total Salary Expense (all-time, every Paid entry ever recorded — does
+                            not change with the Month filter) / Total Employees / Paid Employees /
+                            Unpaid Employees. */}
                         <motion.div variants={container} initial="hidden" animate="show"
                             style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                            <StatTile icon={<IconWallet size={20} color="#2563EB" />} color="#2563EB"
+                                label="Total Salary Expense" value={expenseLoading ? '—' : `৳${(expenseStats?.totalSalaryExpense ?? 0).toLocaleString()}`}
+                                sub={monthRangeLabel(expenseStats?.salaryExpenseStartMonth ?? null, expenseStats?.salaryExpenseEndMonth ?? null) ?? undefined} subColor="var(--color-text-tertiary)" />
                             <StatTile icon={<IconUsers size={20} color="#2563EB" />} color="#2563EB"
                                 label="Total Employees" value={loading ? '—' : String(stats?.totalEmployees ?? 0)} />
-                            <StatTile icon={<IconWallet size={20} color="#2563EB" />} color="#2563EB"
-                                label="Total Payroll" value={loading ? '—' : `৳${(stats?.totalPayroll ?? 0).toLocaleString()}`} />
+                            <StatTile icon={<IconBanknote size={20} color="#7C3AED" />} color="#7C3AED"
+                                label={`${mLabel} Salary Expense`} value={v(stats?.totalMonthExpense)}
+                                 subColor="var(--color-text-tertiary)" />
                             <StatTile icon={<IconCheckCircle size={20} color="#16A34A" />} color="#16A34A"
                                 label="Paid Employees" value={loading ? '—' : String(stats?.paidEmployees ?? 0)}
                                 sub={`৳${(stats?.paidAmount ?? 0).toLocaleString()}`} />
@@ -101,22 +172,42 @@ export default function SalaryDashboard({ month = currentMonth() }: { month?: st
                                 sub={`৳${(stats?.unpaidAmount ?? 0).toLocaleString()}`} />
                         </motion.div>
 
+                        {/* Per-field earnings this month, each showing how many employees it
+                            applies to (except Basic Salary, which every active employee has). */}
                         <motion.div variants={container} initial="hidden" animate="show"
                             style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginTop: '12px' }}>
                             <StatTile icon={<IconBanknote size={20} color="#2563EB" />} color="#2563EB"
-                                label="Total Basic Salary" value={loading ? '—' : `৳${(stats?.totalBasicSalary ?? 0).toLocaleString()}`} />
-                            <StatTile icon={<IconGift size={20} color="#7C3AED" />} color="#7C3AED"
-                                label="Total Bonus" value={loading ? '—' : `৳${((stats?.totalPerformanceBonus ?? 0) + (stats?.totalFestivalBonus ?? 0)).toLocaleString()}`} />
-                            <StatTile icon={<IconTrendingUp size={20} color="#DC2626" />} color="#DC2626"
-                                label="Total Loan" value={loading ? '—' : `৳${(stats?.totalLoan ?? 0).toLocaleString()}`} />
-                            <StatTile icon={<IconLayers size={20} color="#DC2626" />} color="#DC2626"
-                                label="Total Provident Fund" value={loading ? '—' : `৳${(stats?.totalProvidentFund ?? 0).toLocaleString()}`} />
-                            <StatTile icon={<IconWallet size={20} color="#D97706" />} color="#D97706"
-                                label="Total Advance" value={loading ? '—' : `৳${(stats?.totalAdvance ?? 0).toLocaleString()}`} />
-                            <StatTile icon={<IconAward size={20} color="#0D9488" />} color="#0D9488"
-                                label="Total Performance Bonus" value={loading ? '—' : `৳${(stats?.totalPerformanceBonus ?? 0).toLocaleString()}`} />
+                                label={`${mLabel} Basic Salary`} value={v(stats?.totalBasicSalary)} />
+                            <StatTile icon={<IconTruck size={20} color="#2563EB" />} color="#2563EB"
+                                label={`${mLabel} Transportation Bill`} value={v(stats?.totalTransportationBill)}
+                                sub={employeeCount(stats?.totalTransportationBillEmployees)} subBadge />
+                            <StatTile icon={<IconPackage size={20} color="#2563EB" />} color="#2563EB"
+                                label={`${mLabel} Snacks Bill`} value={v(stats?.totalSnacksBill)}
+                                sub={employeeCount(stats?.totalSnacksBillEmployees)} subBadge />
                             <StatTile icon={<IconPartyPopper size={20} color="#DB2777" />} color="#DB2777"
-                                label="Total Festival Bonus" value={loading ? '—' : `৳${(stats?.totalFestivalBonus ?? 0).toLocaleString()}`} />
+                                label={`${mLabel} Festival Bonus`} value={v(stats?.totalFestivalBonus)}
+                                sub={employeeCount(stats?.totalFestivalBonusEmployees)} subBadge />
+                            <StatTile icon={<IconBolt size={20} color="#D97706" />} color="#D97706"
+                                label={`${mLabel} Extra Duty`} value={v(stats?.totalExtraDuty)}
+                                sub={employeeCount(stats?.totalExtraDutyEmployees)} subBadge />
+                            <StatTile icon={<IconAward size={20} color="#0D9488" />} color="#0D9488"
+                                label={`${mLabel} Performance Bonus`} value={v(stats?.totalPerformanceBonus)}
+                                sub={employeeCount(stats?.totalPerformanceBonusEmployees)} subBadge />
+                        </motion.div>
+
+                        {/* Per-field deductions this month. */}
+                        <motion.div variants={container} initial="hidden" animate="show"
+                            style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginTop: '12px' }}>
+                            <StatTile icon={<IconWallet size={20} color="#DC2626" />} color="#DC2626"
+                                label={`${mLabel} Salary Advance`} value={v(stats?.totalAdvance)} />
+                            <StatTile icon={<IconTrendingUp size={20} color="#DC2626" />} color="#DC2626"
+                                label={`${mLabel} Loan`} value={v(stats?.totalLoan)} />
+                            <StatTile icon={<IconLayers size={20} color="#DC2626" />} color="#DC2626"
+                                label={`${mLabel} Provident Fund`} value={v(stats?.totalProvidentFund)} />
+                            <StatTile icon={<IconPackage size={20} color="#DC2626" />} color="#DC2626"
+                                label={`${mLabel} Product Buy`} value={v(stats?.totalProductBuy)} />
+                            <StatTile icon={<IconAlertCircle size={20} color="#DC2626" />} color="#DC2626"
+                                label={`${mLabel} Monthly Fine`} value={v(stats?.totalFine)} />
                         </motion.div>
                     </motion.div>
                 )}
