@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString } from '@/lib/dateRange'
@@ -100,6 +100,30 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
     const [payslipEntry, setPayslipEntry] = useState<SalaryEntry | null>(null)
     const [markPaidEntry, setMarkPaidEntry] = useState<SalaryEntry | null>(null)
 
+    // Table is wider than the viewport, so its horizontal scrollbar normally sits below every
+    // row — reaching it means scrolling all the way down first. This tracks the real table's
+    // scroll range so a second, sticky-to-viewport-bottom scrollbar (rendered below) can mirror
+    // it and stay reachable no matter which row is currently in view.
+    const tableScrollRef = useRef<HTMLDivElement>(null)
+    const fixedScrollRef = useRef<HTMLDivElement>(null)
+    const syncingRef = useRef<'table' | 'fixed' | null>(null)
+    const [scrollMeta, setScrollMeta] = useState({ scrollWidth: 0, clientWidth: 0 })
+
+    const handleTableScroll = () => {
+        if (syncingRef.current === 'fixed') { syncingRef.current = null; return }
+        if (fixedScrollRef.current && tableScrollRef.current) {
+            syncingRef.current = 'table'
+            fixedScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft
+        }
+    }
+    const handleFixedScroll = () => {
+        if (syncingRef.current === 'table') { syncingRef.current = null; return }
+        if (tableScrollRef.current && fixedScrollRef.current) {
+            syncingRef.current = 'fixed'
+            tableScrollRef.current.scrollLeft = fixedScrollRef.current.scrollLeft
+        }
+    }
+
     const load = useCallback(async (m: string) => {
         setLoading(true)
         try {
@@ -115,6 +139,19 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
     }, [])
 
     useEffect(() => { load(month) }, [month, load])
+
+    // Keeps the fixed scrollbar's own scroll range in sync with the real table's — recomputed
+    // whenever the table's size changes (new rows loaded, window resized, sidebar collapsed/
+    // expanded all change the available width without necessarily firing a load()).
+    useEffect(() => {
+        const el = tableScrollRef.current
+        if (!el) return
+        const update = () => setScrollMeta({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth })
+        update()
+        const ro = new ResizeObserver(update)
+        ro.observe(el)
+        return () => ro.disconnect()
+    }, [entries, sheetExists])
 
     const handleCreate = async () => {
         setCreating(true)
@@ -163,7 +200,7 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
             )}
 
             {!loading && sheetExists && (
-                <div className="card" style={{ overflowX: 'auto', padding: 0 }}>
+                <div ref={tableScrollRef} className="card payroll-table-scroll" style={{ overflowX: 'auto', padding: 0 }} onScroll={handleTableScroll}>
                     <table className="table payroll-grid-table" style={{ whiteSpace: 'nowrap' }}>
                         <thead>
                             <tr>
@@ -314,6 +351,12 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                 </div>
             )}
 
+            {!loading && sheetExists && scrollMeta.scrollWidth > scrollMeta.clientWidth && (
+                <div ref={fixedScrollRef} className="payroll-fixed-scrollbar" onScroll={handleFixedScroll}>
+                    <div style={{ width: scrollMeta.scrollWidth, height: 1 }} />
+                </div>
+            )}
+
             <AnimatePresence>
                 {editing && (
                     <EditEntryModal
@@ -448,6 +491,47 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                 }
                 .payroll-grid-table .deduct-col-first {
                     border-left: 3px solid var(--color-primary, #2563EB);
+                }
+                /* The shared .table tr:hover td rule (globals.css) paints every cell in a
+                   hovered row with the same neutral hover background, which washes out the
+                   green/red section colors above. These rules are conditioned on tr:hover and
+                   target .earn-col/.deduct-col specifically, so they win out over that shared
+                   rule for just those cells — a bit stronger than the resting rgba(...,0.05) so
+                   the hover is still felt, while every other column keeps the normal hover. */
+                .payroll-grid-table tbody tr:hover .earn-col {
+                    background: rgba(22, 163, 74, 0.16);
+                }
+                .payroll-grid-table tbody tr:hover .deduct-col {
+                    background: rgba(220, 38, 38, 0.16);
+                }
+                /* Second, sticky-to-viewport-bottom horizontal scrollbar mirroring the real
+                   table's scroll range (kept in sync via the ref/onScroll wiring above) — stays
+                   reachable while scrolling through rows instead of requiring a trip to the
+                   bottom of the table to grab the native one. Sits in normal document flow (a
+                   sibling of the table card, same width as the content column), so it naturally
+                   stays clear of the sidebar and follows it collapsing/expanding. */
+                /* The real table container is still scrollable (drag, trackpad, keyboard) —
+                   only its own native scrollbar is hidden, so the sticky bar below is the one
+                   visible horizontal scrollbar instead of the two stacking on top of each other. */
+                .payroll-table-scroll {
+                    scrollbar-width: none;
+                    -ms-overflow-style: none;
+                }
+                .payroll-table-scroll::-webkit-scrollbar {
+                    display: none;
+                }
+                .payroll-fixed-scrollbar {
+                    position: sticky;
+                    bottom: 0;
+                    overflow-x: auto;
+                    overflow-y: hidden;
+                    height: 14px;
+                    margin-top: -1px;
+                    background: var(--color-surface);
+                    border: 1px solid var(--color-border-light);
+                    border-top: none;
+                    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+                    z-index: 3;
                 }
             `}</style>
         </div>
