@@ -44,7 +44,6 @@ export interface SalaryEntry {
 const EDITABLE_AMOUNT_FIELDS = [
     { key: 'extra_duty', label: 'Extra Duty' },
     { key: 'performance_bonus', label: 'Performance Bonus' },
-    { key: 'other_deduction', label: 'Other Deduction' },
 ] as const
 
 // Same set/colors used for PR Management's payment gateway breakdown — reused here so a
@@ -448,7 +447,6 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
     const [amounts, setAmounts] = useState({
         extra_duty: String(entry.extra_duty),
         performance_bonus: String(entry.performance_bonus),
-        other_deduction: String(entry.other_deduction),
     })
     const [paymentStatus, setPaymentStatus] = useState(entry.payment_status)
     const [paymentMethod, setPaymentMethod] = useState(entry.payment_method || '')
@@ -458,11 +456,10 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
     const numAmounts = {
         extra_duty: Math.max(0, Number(amounts.extra_duty) || 0),
         performance_bonus: Math.max(0, Number(amounts.performance_bonus) || 0),
-        other_deduction: Math.max(0, Number(amounts.other_deduction) || 0),
     }
 
     const netPayable = entry.basic_salary + numAmounts.extra_duty + entry.transportation_bill + entry.snacks_bill
-        + numAmounts.performance_bonus + entry.festival_bonus - entry.fine - entry.advance - entry.product_buy - entry.loan - entry.provident_fund - numAmounts.other_deduction
+        + numAmounts.performance_bonus + entry.festival_bonus - entry.fine - entry.advance - entry.product_buy - entry.loan - entry.provident_fund - entry.other_deduction
 
     const handleSave = async () => {
         setSaving(true)
@@ -538,7 +535,9 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
                         <div>
                             <label className="form-label">Payment Status</label>
-                            <select className="form-input" value={paymentStatus} onChange={e => setPaymentStatus(e.target.value as 'Paid' | 'Unpaid')}>
+                            <select className="form-input" value={paymentStatus} disabled={entry.payment_status === 'Paid'}
+                                title={entry.payment_status === 'Paid' ? 'A Paid entry cannot be changed back to Unpaid' : undefined}
+                                onChange={e => setPaymentStatus(e.target.value as 'Paid' | 'Unpaid')}>
                                 <option value="Unpaid">Unpaid</option>
                                 <option value="Paid">Paid</option>
                             </select>

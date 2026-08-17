@@ -24,6 +24,17 @@ export async function PUT(request: Request) {
     const { id } = body
     if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
 
+    // Once an entry is marked Paid it's a settled payout — attempting to flip it back to
+    // Unpaid (e.g. via a stale form still open after another update) is rejected here too,
+    // not just hidden in the UI, since Paid triggers side effects (advance/product buy
+    // settlement below) that don't have a matching "undo" on reversal.
+    if (body.payment_status === 'Unpaid') {
+        const { data: existing } = await supabase.from('salary_entries').select('payment_status').eq('id', id).maybeSingle()
+        if (existing?.payment_status === 'Paid') {
+            return NextResponse.json({ error: 'A Paid entry cannot be changed back to Unpaid' }, { status: 400 })
+        }
+    }
+
     const update: Record<string, number | string | null> = {}
 
     for (const field of NUMERIC_FIELDS) {
