@@ -375,7 +375,22 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                 }
                 .payroll-grid-table .sticky-col-2 {
                     left: 48px;
-                    box-shadow: 2px 0 4px -2px rgba(0, 0, 0, 0.15);
+                }
+                /* A real border-right (or a box-shadow) painted directly on a position:sticky
+                   table cell doesn't reliably repaint during horizontal scroll in every browser
+                   — it can lag behind instead of tracking the cell. An ::after pseudo-element is
+                   a child of that sticky cell, so it's carried along with it pixel-for-pixel,
+                   scrolling/sticking exactly like the SL and Employee columns themselves do. */
+                .payroll-grid-table .sticky-col-2::after {
+                    content: '';
+                    position: absolute;
+                    top: 0;
+                    right: -3px;
+                    width: 3px;
+                    height: 100%;
+                    background: #7C3AED;
+                    box-shadow: 2px 0 6px -1px rgba(124, 58, 237, 0.4);
+                    pointer-events: none;
                 }
                 .payroll-grid-table thead .sticky-col-1,
                 .payroll-grid-table thead .sticky-col-2 {
