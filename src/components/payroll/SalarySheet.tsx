@@ -209,7 +209,7 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                 <th>Department</th>
                                 <th>Attendance (Day)</th>
                                 <th className="earn-col">Basic Salary</th>
-                                <th className="earn-col">Transportation Bill</th>
+                                <th className="earn-col">Transport Bill</th>
                                 <th className="earn-col">Snacks Bill</th>
                                 <th className="earn-col">Festival Bonus</th>
                                 <th className="earn-col">Extra Duty</th>
@@ -417,6 +417,15 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                 .payroll-grid-table th,
                 .payroll-grid-table td {
                     border: 1px solid var(--color-border-light);
+                }
+                /* Header labels wrap onto two lines (e.g. "Basic Salary" → "Basic" / "Salary")
+                   instead of forcing the whole column wide enough for one line — the table's
+                   own whiteSpace:nowrap (kept for the data cells, so amounts stay unbroken)
+                   is overridden here just for th, so columns shrink to fit their (short)
+                   amount values instead of their longer header text. */
+                .payroll-grid-table th {
+                    white-space: normal;
+                    line-height: 1.3;
                 }
                 .payroll-grid-table .sticky-col-1,
                 .payroll-grid-table .sticky-col-2 {
