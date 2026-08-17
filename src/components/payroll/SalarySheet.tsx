@@ -321,7 +321,11 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                     <td style={{ color: '#DC2626', fontWeight: 600 }}>
                                         ৳{(e.fine + e.advance + e.product_buy + e.loan + e.provident_fund + e.other_deduction).toLocaleString()}
                                     </td>
-                                    <td style={{ fontWeight: 800, fontSize: '0.9375rem', color: '#16A34A' }}>৳{e.net_payable.toLocaleString()}</td>
+                                    <td>
+                                        <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: '6px', border: '2px solid rgba(22, 163, 74, 0.5)', fontWeight: 800, fontSize: '0.9375rem', color: '#16A34A' }}>
+                                            ৳{e.net_payable.toLocaleString()}
+                                        </span>
+                                    </td>
                                     <td>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                             <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: e.payment_status === 'Paid' ? '#16A34A' : '#B45309', background: e.payment_status === 'Paid' ? 'rgba(22,163,74,0.1)' : 'rgba(217,119,6,0.12)' }}>
