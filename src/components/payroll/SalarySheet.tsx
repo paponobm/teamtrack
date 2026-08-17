@@ -219,7 +219,9 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                 <th className="deduct-col">Provident Fund</th>
                                 <th className="deduct-col">Product Buy</th>
                                 <th className="deduct-col">Monthly Fine</th>
-                                <th>Net Salary</th>
+                                <th>Total Earning</th>
+                                <th>Total Deductions</th>
+                                <th>Payable Salary</th>
                                 <th>Paid / Non-Paid</th>
                                 <th>Payment Method</th>
                                 <th>Payment Date</th>
@@ -313,7 +315,13 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                         )}
                                     </td>
                                     <td className="deduct-col" style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
-                                    <td style={{ fontWeight: 700, color: '#16A34A' }}>৳{e.net_payable.toLocaleString()}</td>
+                                    <td style={{ color: '#16A34A', fontWeight: 600 }}>
+                                        ৳{(e.basic_salary + e.extra_duty + e.transportation_bill + e.snacks_bill + e.performance_bonus + e.festival_bonus).toLocaleString()}
+                                    </td>
+                                    <td style={{ color: '#DC2626', fontWeight: 600 }}>
+                                        ৳{(e.fine + e.advance + e.product_buy + e.loan + e.provident_fund + e.other_deduction).toLocaleString()}
+                                    </td>
+                                    <td style={{ fontWeight: 800, fontSize: '0.9375rem', color: '#16A34A' }}>৳{e.net_payable.toLocaleString()}</td>
                                     <td>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                             <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: e.payment_status === 'Paid' ? '#16A34A' : '#B45309', background: e.payment_status === 'Paid' ? 'rgba(22,163,74,0.1)' : 'rgba(217,119,6,0.12)' }}>
@@ -344,7 +352,7 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                 </tr>
                             ))}
                             {filteredEntries.length === 0 && (
-                                <tr><td colSpan={19} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>{q ? 'No employees match your search.' : 'No active employees found.'}</td></tr>
+                                <tr><td colSpan={21} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>{q ? 'No employees match your search.' : 'No active employees found.'}</td></tr>
                             )}
                         </tbody>
                     </table>
