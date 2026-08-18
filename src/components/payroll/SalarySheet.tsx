@@ -219,9 +219,9 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                 <th className="deduct-col">Provident Fund</th>
                                 <th className="deduct-col">Product Buy</th>
                                 <th className="deduct-col">Monthly Fine</th>
-                                <th>Total Earning</th>
-                                <th>Total Deductions</th>
-                                <th>Payable Salary</th>
+                                <th className="summary-col summary-col-first">Total Earning</th>
+                                <th className="summary-col">Total Deductions</th>
+                                <th className="summary-col summary-col-last payable-highlight">Payable Salary</th>
                                 <th>Paid / Non-Paid</th>
                                 <th>Payment Method</th>
                                 <th>Payment Date</th>
@@ -315,14 +315,14 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                         )}
                                     </td>
                                     <td className="deduct-col" style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
-                                    <td style={{ color: '#16A34A', fontWeight: 600 }}>
+                                    <td className="summary-col summary-col-first" style={{ color: '#16A34A', fontWeight: 600 }}>
                                         ৳{(e.basic_salary + e.extra_duty + e.transportation_bill + e.snacks_bill + e.performance_bonus + e.festival_bonus).toLocaleString()}
                                     </td>
-                                    <td style={{ color: '#DC2626', fontWeight: 600 }}>
+                                    <td className="summary-col" style={{ color: '#DC2626', fontWeight: 600 }}>
                                         ৳{(e.fine + e.advance + e.product_buy + e.loan + e.provident_fund + e.other_deduction).toLocaleString()}
                                     </td>
-                                    <td>
-                                        <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: '6px', border: '2px solid rgba(22, 163, 74, 0.5)', fontWeight: 800, fontSize: '0.9375rem', color: '#16A34A' }}>
+                                    <td className="summary-col summary-col-last payable-highlight">
+                                        <span style={{ display: 'inline-block', padding: '4px 12px', borderRadius: '6px', border: '2px solid #16A34A', background: 'rgba(22, 163, 74, 0.12)', boxShadow: '0 1px 3px rgba(22, 163, 74, 0.3)', fontWeight: 800, fontSize: '0.9375rem', color: '#16A34A' }}>
                                             ৳{e.net_payable.toLocaleString()}
                                         </span>
                                     </td>
@@ -524,6 +524,36 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                 }
                 .payroll-grid-table tbody tr:hover .deduct-col {
                     background: rgba(220, 38, 38, 0.16);
+                }
+                /* Groups Total Earning/Total Deductions/Payable Salary in a yellow-outlined box
+                   — solid yellow top/bottom on every cell in the group (merges into one
+                   continuous line via border-collapse), a thin yellow divider between the three
+                   columns, and a thicker yellow edge where the group starts/ends, so the whole
+                   3-column section reads as one enclosed unit on every side. */
+                .payroll-grid-table .summary-col {
+                    border-top: 2px solid #F59E0B;
+                    border-bottom: 2px solid #F59E0B;
+                    border-left: 1px solid rgba(245, 158, 11, 0.5);
+                    border-right: 1px solid rgba(245, 158, 11, 0.5);
+                }
+                .payroll-grid-table .summary-col-first {
+                    border-left: 3px solid #F59E0B;
+                }
+                .payroll-grid-table .summary-col-last {
+                    border-right: 3px solid #F59E0B;
+                    box-shadow: 2px 0 4px -2px rgba(245, 158, 11, 0.4);
+                }
+                /* Payable Salary is the row's final, most important figure, so it gets the
+                   strongest visual treatment in the group: a richer green wash (deeper than the
+                   earn-col tint) plus an inset ring for extra definition — stronger again on
+                   hover, same pattern as the earn-col/deduct-col hover rules above, so the hover
+                   state doesn't wash it out via the shared .table tr:hover td rule. */
+                .payroll-grid-table .payable-highlight {
+                    background: rgba(22, 163, 74, 0.12);
+                    box-shadow: inset 0 0 0 1px rgba(22, 163, 74, 0.25);
+                }
+                .payroll-grid-table tbody tr:hover .payable-highlight {
+                    background: rgba(22, 163, 74, 0.22);
                 }
                 /* Second, sticky-to-viewport-bottom horizontal scrollbar mirroring the real
                    table's scroll range (kept in sync via the ref/onScroll wiring above) — stays
