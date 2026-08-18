@@ -18,16 +18,23 @@ interface DashboardStats {
     unpaidEmployees: number
     unpaidAmount: number
     totalBasicSalary: number
+    totalBasicSalaryPaid: number
+    totalBasicSalaryUnpaid: number
     totalTransportationBill: number
-    totalTransportationBillEmployees: number
+    totalTransportationBillPaid: number
+    totalTransportationBillUnpaid: number
     totalSnacksBill: number
-    totalSnacksBillEmployees: number
+    totalSnacksBillPaid: number
+    totalSnacksBillUnpaid: number
     totalExtraDuty: number
-    totalExtraDutyEmployees: number
+    totalExtraDutyPaid: number
+    totalExtraDutyUnpaid: number
     totalPerformanceBonus: number
-    totalPerformanceBonusEmployees: number
+    totalPerformanceBonusPaid: number
+    totalPerformanceBonusUnpaid: number
     totalFestivalBonus: number
-    totalFestivalBonusEmployees: number
+    totalFestivalBonusPaid: number
+    totalFestivalBonusUnpaid: number
     totalAdvance: number
     totalLoan: number
     totalProvidentFund: number
@@ -56,9 +63,10 @@ function rangeLabel(from: string, to: string) {
 
 // Icon-left "white section" stat tile — an icon badge on the left, label/value stacked on
 // the right, reusing the shared .card surface so it matches the app's existing card styling.
-// sub renders as plain text by default; subBadge switches it to a small colored pill (used for
-// the employee-count sub on the per-field cards below).
-function StatTile({ icon, label, value, sub, subColor, subBadge, color }: { icon: React.ReactNode; label: string; value: string; sub?: string; subColor?: string; subBadge?: boolean; color: string }) {
+// sub renders as plain text by default; subBadge switches it to a single small colored pill.
+// badges renders instead as several separately-colored pills side by side (used for the
+// Paid/Unpaid split on the per-field cards below, where each half needs its own color).
+function StatTile({ icon, label, value, sub, subColor, subBadge, badges, color }: { icon: React.ReactNode; label: string; value: string; sub?: string; subColor?: string; subBadge?: boolean; badges?: { text: string; color: string }[]; color: string }) {
     return (
         <motion.div variants={item} className="card" style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: `${color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -67,7 +75,15 @@ function StatTile({ icon, label, value, sub, subColor, subBadge, color }: { icon
             <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{label}</div>
                 <div style={{ fontSize: '1.25rem', fontWeight: 700, color, lineHeight: 1.3 }}>{value}</div>
-                {sub && (subBadge ? (
+                {badges ? (
+                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap' }}>
+                        {badges.map((b, i) => (
+                            <span key={i} style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '999px', fontSize: '0.6875rem', fontWeight: 600, background: `${b.color}33`, color: b.color }}>
+                                {b.text}
+                            </span>
+                        ))}
+                    </div>
+                ) : sub && (subBadge ? (
                     <span style={{ display: 'inline-block', marginTop: '4px', padding: '2px 8px', borderRadius: '999px', fontSize: '0.6875rem', fontWeight: 600, background: `${color}33`, color }}>
                         {sub}
                     </span>
@@ -110,8 +126,22 @@ export default function SalaryDashboard({ month = currentMonth() }: { month?: st
     // selection — cards fall back to the loading dash instead of showing them.
     const dash = loading || rangeInvalid
     const v = (n: number | undefined) => dash ? '—' : `৳${(n ?? 0).toLocaleString()}`
-    // These counts are Paid-only (see /api/payroll/dashboard/range), so the badge says so.
-    const employeeCount = (n: number | undefined) => `paid: ${n ?? 0}`
+    // Basic Salary/Transportation Bill/Snacks Bill/Festival Bonus/Extra Duty/Performance Bonus
+    // total both Paid and Unpaid entries now, so each card shows two separately-colored badges
+    // instead of one combined pill — Paid keeps that card's own accent color, Unpaid is always
+    // yellow so it reads as "still owed" consistently across every card.
+    const paidUnpaidBadges = (paidColor: string, paid: number | undefined, unpaid: number | undefined) => [
+        { text: `Paid: ${paid ?? 0}`, color: paidColor },
+        { text: `Unpaid: ${unpaid ?? 0}`, color: '#F59E0B' },
+    ]
+
+    // Total Salary Expense is the sum of gross earnings (Basic Salary + Transportation Bill +
+    // Snacks Bill + Festival Bonus + Extra Duty + Performance Bonus) across the range — the same
+    // six fields the per-field cards below already total, just added together — not the net
+    // payable (earnings minus deductions) figure used elsewhere.
+    const totalEarning = (stats?.totalBasicSalary ?? 0) + (stats?.totalTransportationBill ?? 0)
+        + (stats?.totalSnacksBill ?? 0) + (stats?.totalFestivalBonus ?? 0)
+        + (stats?.totalExtraDuty ?? 0) + (stats?.totalPerformanceBonus ?? 0)
 
     return (
         <div>
@@ -155,14 +185,16 @@ export default function SalaryDashboard({ month = currentMonth() }: { month?: st
             <AnimatePresence initial={false}>
                 {expanded && (
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} style={{ overflow: 'hidden' }}>
-                        {/* Total Employees / Total Salary Expense / Paid Employees / Unpaid
-                            Employees — all combined across the selected From/To range. */}
+                        {/* Total Employees is the system's total active headcount — fixed,
+                            unaffected by the From/To range. Total Salary Expense / Paid
+                            Employees / Unpaid Employees are all combined (paid + unpaid) across
+                            the selected range. */}
                         <motion.div variants={container} initial="hidden" animate="show"
                             style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
-                            <StatTile icon={<IconUsers size={20} color="#2563EB" />} color="#2563EB"
+                            <StatTile icon={<IconUsers size={20} color="#2563EB" />} color="#2564ebdc"
                                 label="Total Employees" value={dash ? '—' : String(stats?.totalEmployees ?? 0)} />
                             <StatTile icon={<IconWallet size={20} color="#2563EB" />} color="#2563EB"
-                                label="Total Salary Expense" value={v(stats?.totalSalaryExpense)}
+                                label="Total Salary Expense" value={dash ? '—' : `৳${totalEarning.toLocaleString()}`}
                                 sub={!rangeInvalid ? rangeLabel(fromMonth, toMonth) : undefined} subColor="var(--color-text-tertiary)" />
                             <StatTile icon={<IconCheckCircle size={20} color="#16A34A" />} color="#16A34A"
                                 label="Paid Employees" value={dash ? '—' : String(stats?.paidEmployees ?? 0)}
@@ -172,27 +204,28 @@ export default function SalaryDashboard({ month = currentMonth() }: { month?: st
                                 sub={`৳${(stats?.unpaidAmount ?? 0).toLocaleString()}`} />
                         </motion.div>
 
-                        {/* Per-field earnings across the range, each showing how many paid
-                            entries it applies to (except Basic Salary, which every paid entry has). */}
+                        {/* Per-field earnings across the range — each totals both Paid and
+                            Unpaid entries, with a badge breaking that total down by status. */}
                         <motion.div variants={container} initial="hidden" animate="show"
                             style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginTop: '12px' }}>
                             <StatTile icon={<IconBanknote size={20} color="#2563EB" />} color="#2563EB"
-                                label="Basic Salary" value={v(stats?.totalBasicSalary)} />
+                                label="Basic Salary" value={v(stats?.totalBasicSalary)}
+                                badges={paidUnpaidBadges('#2563EB', stats?.totalBasicSalaryPaid, stats?.totalBasicSalaryUnpaid)} />
                             <StatTile icon={<IconTruck size={20} color="#2563EB" />} color="#2563EB"
                                 label="Transportation Bill" value={v(stats?.totalTransportationBill)}
-                                sub={employeeCount(stats?.totalTransportationBillEmployees)} subBadge />
+                                badges={paidUnpaidBadges('#2563EB', stats?.totalTransportationBillPaid, stats?.totalTransportationBillUnpaid)} />
                             <StatTile icon={<IconPackage size={20} color="#2563EB" />} color="#2563EB"
                                 label="Snacks Bill" value={v(stats?.totalSnacksBill)}
-                                sub={employeeCount(stats?.totalSnacksBillEmployees)} subBadge />
+                                badges={paidUnpaidBadges('#2563EB', stats?.totalSnacksBillPaid, stats?.totalSnacksBillUnpaid)} />
                             <StatTile icon={<IconPartyPopper size={20} color="#DB2777" />} color="#DB2777"
                                 label="Festival Bonus" value={v(stats?.totalFestivalBonus)}
-                                sub={employeeCount(stats?.totalFestivalBonusEmployees)} subBadge />
+                                badges={paidUnpaidBadges('#DB2777', stats?.totalFestivalBonusPaid, stats?.totalFestivalBonusUnpaid)} />
                             <StatTile icon={<IconBolt size={20} color="#D97706" />} color="#D97706"
                                 label="Extra Duty" value={v(stats?.totalExtraDuty)}
-                                sub={employeeCount(stats?.totalExtraDutyEmployees)} subBadge />
+                                badges={paidUnpaidBadges('#D97706', stats?.totalExtraDutyPaid, stats?.totalExtraDutyUnpaid)} />
                             <StatTile icon={<IconAward size={20} color="#0D9488" />} color="#0D9488"
                                 label="Performance Bonus" value={v(stats?.totalPerformanceBonus)}
-                                sub={employeeCount(stats?.totalPerformanceBonusEmployees)} subBadge />
+                                badges={paidUnpaidBadges('#0D9488', stats?.totalPerformanceBonusPaid, stats?.totalPerformanceBonusUnpaid)} />
                         </motion.div>
 
                         {/* Per-field deductions across the range. */}

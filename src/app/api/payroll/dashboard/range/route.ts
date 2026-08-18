@@ -19,10 +19,9 @@ const MONTH_RE = /^\d{4}-\d{2}$/
 // just accumulated across every sheet instead of one — so a given month's contribution here
 // never drifts from what the Salary Sheet itself shows for that month.
 //
-// Total Employees is the one field that isn't a straight sum: summing each month's visible-
-// employee count would double-count someone paid every month in the range, so it's the count of
-// distinct employees who appear on any sheet in range instead — "how many people this range
-// covers," not "how many employee-months."
+// Total Employees is deliberately NOT range-scoped — it's the system's total active headcount
+// (same figure regardless of which From/To range is selected), while every other card below it
+// reflects the selected range's combined paid+unpaid activity.
 export async function GET(request: Request) {
     const auth = await requireAuth(2) // Super Admin only — salary data
     if (!isAuthed(auth)) return auth
@@ -38,12 +37,15 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'from must not be after to' }, { status: 400 })
     }
 
-    const { data: sheets } = await supabase
-        .from('salary_sheets')
-        .select('id, month')
-        .gte('month', from)
-        .lte('month', to)
-        .order('month', { ascending: true })
+    const [{ count: totalEmployees }, { data: sheets }] = await Promise.all([
+        supabase.from('employees').select('*', { count: 'exact', head: true }).eq('is_active', true),
+        supabase
+            .from('salary_sheets')
+            .select('id, month')
+            .gte('month', from)
+            .lte('month', to)
+            .order('month', { ascending: true }),
+    ])
     const sheetRows: { id: string; month: string }[] = sheets || []
 
     let totalSalaryExpense = 0
@@ -52,22 +54,28 @@ export async function GET(request: Request) {
     let unpaidEmployees = 0
     let unpaidAmount = 0
     let totalBasicSalary = 0
+    let totalBasicSalaryPaid = 0
+    let totalBasicSalaryUnpaid = 0
     let totalTransportationBill = 0
-    let totalTransportationBillEmployees = 0
+    let totalTransportationBillPaid = 0
+    let totalTransportationBillUnpaid = 0
     let totalSnacksBill = 0
-    let totalSnacksBillEmployees = 0
+    let totalSnacksBillPaid = 0
+    let totalSnacksBillUnpaid = 0
     let totalExtraDuty = 0
-    let totalExtraDutyEmployees = 0
+    let totalExtraDutyPaid = 0
+    let totalExtraDutyUnpaid = 0
     let totalPerformanceBonus = 0
-    let totalPerformanceBonusEmployees = 0
+    let totalPerformanceBonusPaid = 0
+    let totalPerformanceBonusUnpaid = 0
     let totalFestivalBonus = 0
-    let totalFestivalBonusEmployees = 0
+    let totalFestivalBonusPaid = 0
+    let totalFestivalBonusUnpaid = 0
     let totalAdvance = 0
     let totalProductBuy = 0
     let totalLoan = 0
     let totalProvidentFund = 0
     let totalFine = 0
-    const distinctEmployeeIds = new Set<string>()
 
     for (const sheet of sheetRows) {
         const { data: entries } = await supabase
@@ -90,7 +98,6 @@ export async function GET(request: Request) {
         if (rows.length === 0) continue
 
         const employeeIds = rows.map((r: { employee_id: string }) => r.employee_id)
-        employeeIds.forEach((id: string) => distinctEmployeeIds.add(id))
 
         const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails] = await Promise.all([
             getFineTotalsForMonth(supabase, employeeIds, sheet.month),
@@ -107,15 +114,38 @@ export async function GET(request: Request) {
             const providentFund = providentFundDetails[r.employee_id]?.total || 0
             const fine = fineTotals[r.employee_id] || 0
             const net = computeNetPayable(r, fine, advance, productBuy, loan, providentFund)
+            const isPaid = r.payment_status === 'Paid'
 
-            if (r.payment_status === 'Paid') {
+            // Basic Salary/Transportation Bill/Snacks Bill/Festival Bonus/Extra Duty/Performance
+            // Bonus now total every entry regardless of payment status — each one's Paid/Unpaid
+            // split moves into its own pair of counts instead of being folded into the total.
+            if (Number(r.basic_salary) > 0) {
+                totalBasicSalary += Number(r.basic_salary)
+                if (isPaid) totalBasicSalaryPaid++; else totalBasicSalaryUnpaid++
+            }
+            if (Number(r.transportation_bill) > 0) {
+                totalTransportationBill += Number(r.transportation_bill)
+                if (isPaid) totalTransportationBillPaid++; else totalTransportationBillUnpaid++
+            }
+            if (Number(r.snacks_bill) > 0) {
+                totalSnacksBill += Number(r.snacks_bill)
+                if (isPaid) totalSnacksBillPaid++; else totalSnacksBillUnpaid++
+            }
+            if (Number(r.extra_duty) > 0) {
+                totalExtraDuty += Number(r.extra_duty)
+                if (isPaid) totalExtraDutyPaid++; else totalExtraDutyUnpaid++
+            }
+            if (Number(r.performance_bonus) > 0) {
+                totalPerformanceBonus += Number(r.performance_bonus)
+                if (isPaid) totalPerformanceBonusPaid++; else totalPerformanceBonusUnpaid++
+            }
+            if (Number(r.festival_bonus) > 0) {
+                totalFestivalBonus += Number(r.festival_bonus)
+                if (isPaid) totalFestivalBonusPaid++; else totalFestivalBonusUnpaid++
+            }
+
+            if (isPaid) {
                 totalSalaryExpense += net
-                totalBasicSalary += Number(r.basic_salary) || 0
-                if (Number(r.transportation_bill) > 0) { totalTransportationBill += Number(r.transportation_bill); totalTransportationBillEmployees++ }
-                if (Number(r.snacks_bill) > 0) { totalSnacksBill += Number(r.snacks_bill); totalSnacksBillEmployees++ }
-                if (Number(r.extra_duty) > 0) { totalExtraDuty += Number(r.extra_duty); totalExtraDutyEmployees++ }
-                if (Number(r.performance_bonus) > 0) { totalPerformanceBonus += Number(r.performance_bonus); totalPerformanceBonusEmployees++ }
-                if (Number(r.festival_bonus) > 0) { totalFestivalBonus += Number(r.festival_bonus); totalFestivalBonusEmployees++ }
                 paidEmployees++
                 paidAmount += net
             } else {
@@ -123,6 +153,10 @@ export async function GET(request: Request) {
                 unpaidAmount += net
             }
 
+            // Salary Advance/Loan/Provident Fund/Product Buy/Monthly Fine are live-computed
+            // from their own modules (not stored on the salary entry), so they've always
+            // reflected the full paid+unpaid total already — no change needed here, and per
+            // the request they don't get a Paid/Unpaid badge like the fields above do.
             totalAdvance += advance
             totalProductBuy += productBuy
             totalLoan += loan
@@ -135,7 +169,7 @@ export async function GET(request: Request) {
         from,
         to,
         sheetCount: sheetRows.length,
-        totalEmployees: distinctEmployeeIds.size,
+        totalEmployees: totalEmployees || 0,
         totalSalaryExpense,
         totalMonthExpense: paidAmount + unpaidAmount,
         paidEmployees,
@@ -143,16 +177,23 @@ export async function GET(request: Request) {
         unpaidEmployees,
         unpaidAmount,
         totalBasicSalary,
+        totalBasicSalaryPaid,
+        totalBasicSalaryUnpaid,
         totalTransportationBill,
-        totalTransportationBillEmployees,
+        totalTransportationBillPaid,
+        totalTransportationBillUnpaid,
         totalSnacksBill,
-        totalSnacksBillEmployees,
+        totalSnacksBillPaid,
+        totalSnacksBillUnpaid,
         totalExtraDuty,
-        totalExtraDutyEmployees,
+        totalExtraDutyPaid,
+        totalExtraDutyUnpaid,
         totalPerformanceBonus,
-        totalPerformanceBonusEmployees,
+        totalPerformanceBonusPaid,
+        totalPerformanceBonusUnpaid,
         totalFestivalBonus,
-        totalFestivalBonusEmployees,
+        totalFestivalBonusPaid,
+        totalFestivalBonusUnpaid,
         totalAdvance,
         totalProductBuy,
         totalLoan,
