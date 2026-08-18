@@ -1,9 +1,8 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { syncLinkedExpense, deleteLinkedExpense } from '@/lib/productBuys'
 import { NextResponse } from 'next/server'
 
 // PUT /api/product-buys/:id — edit a product-buy record, including which employee it
-// belongs to (Admin+). Re-syncs the linked Expense row so Finance Hub stays consistent.
+// belongs to (Admin+).
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
@@ -52,28 +51,16 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         .from('product_buys')
         .update(update)
         .eq('id', id)
-        .select('id, employee_id, amount, purchase_date, item, note, payment_status, expense_id')
+        .select('id')
         .maybeSingle()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     if (!data) return NextResponse.json({ error: 'Product buy record not found' }, { status: 404 })
 
-    if (data.expense_id) {
-        await syncLinkedExpense(supabase, data.expense_id, {
-            employeeId: data.employee_id,
-            amount: Number(data.amount),
-            date: data.purchase_date,
-            item: data.item,
-            note: data.note,
-            paymentStatus: data.payment_status,
-            approvedBy: auth.employee.id,
-        })
-    }
-
     return NextResponse.json({ success: true })
 }
 
-// DELETE /api/product-buys/:id (Admin+) — also removes the linked Expense row.
+// DELETE /api/product-buys/:id (Admin+).
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
@@ -81,14 +68,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     const { id } = await params
     const supabase = auth.supabase
 
-    const { data: existing } = await supabase.from('product_buys').select('expense_id').eq('id', id).maybeSingle()
-
     const { error } = await supabase.from('product_buys').delete().eq('id', id)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    if (existing?.expense_id) {
-        await deleteLinkedExpense(supabase, existing.expense_id)
-    }
 
     return NextResponse.json({ success: true })
 }

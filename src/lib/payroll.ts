@@ -133,3 +133,50 @@ export function computeNetPayable(entry: SalaryAmounts, fine: number, advance: n
         - providentFund
         - (Number(entry.other_deduction) || 0)
 }
+
+export const SALARY_EXPENSE_CATEGORY = 'Employee Salary'
+
+// Mirrors a Paid salary entry into Finance Hub as a real Expense — same "linked expense"
+// pattern as Advance/EMI (src/lib/advances.ts, src/lib/emis.ts), just always at 'paid' status
+// since this only ever fires once a salary entry is Paid (it can't be reverted to Unpaid, see
+// src/app/api/payroll/salary-entries/route.ts). Creates the expense the first time an entry is
+// marked Paid; re-syncs the same expense (by expenseId) if a later edit changes the amount
+// while it's already Paid, so the two never drift apart.
+export async function createOrSyncSalaryExpense(supabase: SupabaseClient, params: {
+    expenseId: string | null
+    employeeId: string
+    month: string
+    amount: number
+    date: string | null
+    submittedBy: string
+}): Promise<string | null> {
+    const { data: employee } = await supabase.from('employees').select('name').eq('id', params.employeeId).maybeSingle()
+    const employeeName = employee?.name || 'employee'
+    const date = params.date || new Date().toISOString().slice(0, 10)
+    const description = `Salary for ${employeeName} - ${params.month}`
+
+    if (params.expenseId) {
+        await supabase
+            .from('expenses')
+            .update({ date, description, amount: params.amount, payment_status: 'paid', approved_by: params.submittedBy })
+            .eq('id', params.expenseId)
+        return params.expenseId
+    }
+
+    const { data: expense, error } = await supabase
+        .from('expenses')
+        .insert({
+            date,
+            category: SALARY_EXPENSE_CATEGORY,
+            description,
+            amount: params.amount,
+            payment_status: 'paid',
+            submitted_by: params.submittedBy,
+            approved_by: params.submittedBy,
+        })
+        .select('id')
+        .single()
+
+    if (error) return null
+    return expense.id
+}

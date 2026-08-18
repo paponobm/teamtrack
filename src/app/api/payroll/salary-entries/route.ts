@@ -1,7 +1,10 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { getMonthRangeFromString } from '@/lib/dateRange'
 import { advanceToExpenseStatus } from '@/lib/advances'
-import { productBuyToExpenseStatus } from '@/lib/productBuys'
+import { getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, createOrSyncSalaryExpense } from '@/lib/payroll'
+import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
+import { getEmiLoanDetailsForMonth } from '@/lib/emis'
+import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
 import { NextResponse } from 'next/server'
 
 // 'advance'/'product_buy'/'loan' are intentionally not editable here — computed live from
@@ -77,7 +80,10 @@ export async function PUT(request: Request) {
         .from('salary_entries')
         .update(update)
         .eq('id', id)
-        .select('id, employee_id, salary_sheet_id')
+        .select(`
+            id, employee_id, salary_sheet_id, expense_id, payment_date,
+            basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus, other_deduction
+        `)
         .maybeSingle()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -86,6 +92,9 @@ export async function PUT(request: Request) {
     // Marking the salary as Paid means that month's advance was recovered through this
     // payout, so settle any still-Unpaid advance records for that employee/month too — keeps
     // the Salary Sheet and Advance Management module in sync without a manual second step.
+    // This whole block also re-runs on a later edit to an already-Paid entry (the form always
+    // resends payment_status:'Paid' once it's locked in), which is exactly what's wanted for
+    // re-syncing the linked salary Expense below if extra_duty/performance_bonus changes.
     if (update.payment_status === 'Paid') {
         const { data: sheet } = await supabase.from('salary_sheets').select('month').eq('id', data.salary_sheet_id).maybeSingle()
         if (sheet) {
@@ -110,22 +119,48 @@ export async function PUT(request: Request) {
             }
 
             // Same settlement, mirrored for Product Buy — a separate deduction type/table
-            // from Advance, so it's settled and synced independently here.
-            const { data: settledProductBuys } = await supabase
+            // from Advance, so it's settled independently here. Product Buy no longer links
+            // into Finance Hub Expenses (see src/lib/productBuys.ts), so this only updates the
+            // product_buys row's own status, not a mirrored expense.
+            await supabase
                 .from('product_buys')
                 .update({ payment_status: 'Paid' })
                 .eq('employee_id', data.employee_id)
                 .eq('payment_status', 'Unpaid')
                 .gte('purchase_date', start)
                 .lte('purchase_date', end)
-                .select('expense_id')
 
-            const productBuyExpenseIds = (settledProductBuys || []).map((p: { expense_id: string | null }) => p.expense_id).filter((x: string | null): x is string => !!x)
-            if (productBuyExpenseIds.length > 0) {
-                await supabase
-                    .from('expenses')
-                    .update({ payment_status: productBuyToExpenseStatus('Paid'), approved_by: auth.employee.id })
-                    .in('id', productBuyExpenseIds)
+            // The payout itself also becomes a Finance Hub Expense (category "Employee
+            // Salary", amount = Payable Salary) — same live deduction lookups the Salary Sheet
+            // and Payroll Summary already use, so the linked amount can never drift from what
+            // the sheet shows for this entry.
+            const employeeIds = [data.employee_id]
+            const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails] = await Promise.all([
+                getFineTotalsForMonth(supabase, employeeIds, sheet.month),
+                getAdvanceDetailsForMonth(supabase, employeeIds, sheet.month),
+                getProductBuyDetailsForMonth(supabase, employeeIds, sheet.month),
+                getEmiLoanDetailsForMonth(supabase, employeeIds, sheet.month),
+                getProvidentFundDetailsForMonth(supabase, employeeIds, sheet.month),
+            ])
+            const netPayable = computeNetPayable(
+                data,
+                fineTotals[data.employee_id] || 0,
+                advanceDetails[data.employee_id]?.total || 0,
+                productBuyDetails[data.employee_id]?.total || 0,
+                emiDetails[data.employee_id]?.total || 0,
+                providentFundDetails[data.employee_id]?.total || 0,
+            )
+
+            const salaryExpenseId = await createOrSyncSalaryExpense(supabase, {
+                expenseId: data.expense_id,
+                employeeId: data.employee_id,
+                month: sheet.month,
+                amount: netPayable,
+                date: data.payment_date,
+                submittedBy: auth.employee.id,
+            })
+            if (salaryExpenseId && salaryExpenseId !== data.expense_id) {
+                await supabase.from('salary_entries').update({ expense_id: salaryExpenseId }).eq('id', id)
             }
         }
     }

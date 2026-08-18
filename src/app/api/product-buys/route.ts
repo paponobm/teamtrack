@@ -1,5 +1,4 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { createLinkedExpense } from '@/lib/productBuys'
 import { NextResponse } from 'next/server'
 
 // GET /api/product-buys?start_date=&end_date= — list product-buy records, optionally
@@ -73,22 +72,6 @@ export async function POST(request: Request) {
         .single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    // Mirror into Finance Hub as a real Expense (category "Employee Product Buy") — best
-    // effort: a failed link doesn't block the record itself, since the product_buys row is
-    // the record of truth for Payroll.
-    const expenseId = await createLinkedExpense(supabase, {
-        employeeId: employee_id,
-        amount: numAmount,
-        date: purchase_date,
-        item: item || null,
-        note: note || null,
-        paymentStatus: finalPaymentStatus,
-        submittedBy: auth.employee.id,
-    })
-    if (expenseId) {
-        await supabase.from('product_buys').update({ expense_id: expenseId }).eq('id', inserted.id)
-    }
 
     const { data, error: fetchError } = await supabase
         .from('product_buys')
