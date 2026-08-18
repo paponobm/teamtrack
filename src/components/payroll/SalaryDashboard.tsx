@@ -132,18 +132,21 @@ export default function SalaryDashboard({ month = currentMonth() }: { month?: st
                 </div>
 
                 {/* Independent from the Salary Sheet table's own Month filter below — this range
-                    drives only the summary cards above. */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-tertiary)' }}>Range</span>
-                    <input className="input" type="month" value={fromMonth} onChange={e => setFromMonth(e.target.value)}
-                        aria-label="From month" style={{ padding: '6px 10px', fontSize: '0.8125rem', width: 'auto' }} />
-                    <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>to</span>
-                    <input className="input" type="month" value={toMonth} onChange={e => setToMonth(e.target.value)}
-                        aria-label="To month" style={{ padding: '6px 10px', fontSize: '0.8125rem', width: 'auto' }} />
-                </div>
+                    drives only the summary cards above, so it collapses/expands together with
+                    them instead of staying pinned once there's nothing left for it to filter. */}
+                {expanded && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-tertiary)' }}>Range</span>
+                        <input className="input" type="month" value={fromMonth} onChange={e => setFromMonth(e.target.value)}
+                            aria-label="From month" style={{ padding: '6px 10px', fontSize: '0.8125rem', width: 'auto' }} />
+                        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>to</span>
+                        <input className="input" type="month" value={toMonth} onChange={e => setToMonth(e.target.value)}
+                            aria-label="To month" style={{ padding: '6px 10px', fontSize: '0.8125rem', width: 'auto' }} />
+                    </div>
+                )}
             </div>
 
-            {rangeInvalid && (
+            {expanded && rangeInvalid && (
                 <div style={{ marginBottom: '16px', fontSize: '0.8125rem', color: '#DC2626' }}>
                     From month must not be after To month.
                 </div>
