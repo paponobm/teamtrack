@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
 import { usePermissions } from '@/lib/PermissionsContext'
 import { useToast } from '@/lib/ToastContext'
-import { IconAlertCircle, IconCheckCircle, IconXCircle, IconTrendingUp, IconSearch, IconCalendar } from '@/components/icons/Icons'
+import { IconAlertCircle, IconCheckCircle, IconTrendingUp, IconSearch, IconClock, IconEdit, IconTrash, IconX } from '@/components/icons/Icons'
 import DatePicker from '@/components/ui/DatePicker'
 
 type Fine = {
@@ -16,9 +16,10 @@ type Fine = {
     category: string
     reason: string
     status: 'Active' | 'Appealed' | 'Waived'
+    payment_status: 'Paid' | 'Unpaid'
     appeal_reason: string | null
     created_at: string
-    member?: { name: string }
+    member?: { id: string; name: string; employee_id: string | null; avatar_url: string | null }
     issued_by_user?: { name: string }
 }
 
@@ -37,13 +38,21 @@ const fmtLocalDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1)
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }
 const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.22, 1, 0.36, 1] as [number, number, number, number] } } }
 
+// "Active" dropped from the tab bar (it's just the default resting state, not something worth
+// a dedicated filter) in favor of Paid/Unpaid — whether the fine's been recovered through
+// payroll. Appealed/Waived are untouched, still filtering on the original status column.
 const filterTabs = [
     { key: 'all', label: 'All' },
-    { key: 'Active', label: 'Active' },
+    { key: 'Unpaid', label: 'Unpaid' },
+    { key: 'Paid', label: 'Paid' },
     { key: 'Appealed', label: 'Appealed' },
-    { key: 'Waived', label: 'Waived' }
+    { key: 'Waived', label: 'Waived' },
 ]
 
+function getAvatarColor(name: string) {
+    const colors = ['#2563EB', '#1D4ED8', '#1E40AF', '#3B82F6', '#60A5FA', '#1E3A5F', '#172554', '#93C5FD']
+    return colors[(name || 'U').charCodeAt(0) % colors.length]
+}
 
 function UserSelect({ value, onChange, options }: { value: string, onChange: (val: string) => void, options: { id: string, name: string, avatar_url: string | null }[] }) {
     const [isOpen, setIsOpen] = useState(false)
@@ -66,8 +75,8 @@ function UserSelect({ value, onChange, options }: { value: string, onChange: (va
     return (
         <div className="form-group" style={{ position: 'relative' }} ref={containerRef}>
             <label className="form-label">Select Member</label>
-            <div 
-                className="form-input" 
+            <div
+                className="form-input"
                 style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '10px 12px' }}
                 onClick={() => setIsOpen(!isOpen)}
             >
@@ -87,19 +96,19 @@ function UserSelect({ value, onChange, options }: { value: string, onChange: (va
                 )}
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-text-tertiary)' }}><path d="m6 9 6 6 6-6"/></svg>
             </div>
-            
+
             <AnimatePresence>
                 {isOpen && (
-                    <motion.div 
+                    <motion.div
                         initial={{ opacity: 0, y: -5 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -5 }}
                         transition={{ duration: 0.15 }}
-                        style={{ 
-                            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, 
-                            background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', 
+                        style={{
+                            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
+                            background: 'var(--color-surface)', border: '1px solid var(--color-border-light)',
                             borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)', marginTop: '4px',
-                            maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column' 
+                            maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column'
                         }}
                     >
                         <div style={{ padding: '8px', borderBottom: '1px solid var(--color-border-light)', position: 'sticky', top: 0, background: 'var(--color-surface)', zIndex: 2 }}>
@@ -107,9 +116,9 @@ function UserSelect({ value, onChange, options }: { value: string, onChange: (va
                                 <div style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-tertiary)' }}>
                                     <IconSearch size={14} />
                                 </div>
-                                <input 
-                                    type="text" 
-                                    placeholder="Search members..." 
+                                <input
+                                    type="text"
+                                    placeholder="Search members..."
                                     value={search}
                                     onChange={e => setSearch(e.target.value)}
                                     autoFocus
@@ -123,11 +132,11 @@ function UserSelect({ value, onChange, options }: { value: string, onChange: (va
                                 <div style={{ padding: '12px', textAlign: 'center', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>No members found</div>
                             ) : (
                                 filteredOptions.map(emp => (
-                                    <div 
+                                    <div
                                         key={emp.id}
                                         onClick={() => { onChange(emp.id); setIsOpen(false); setSearch('') }}
-                                        style={{ 
-                                            padding: '8px 10px', display: 'flex', alignItems: 'center', gap: '10px', 
+                                        style={{
+                                            padding: '8px 10px', display: 'flex', alignItems: 'center', gap: '10px',
                                             cursor: 'pointer', borderRadius: '6px',
                                             background: value === emp.id ? 'var(--color-bg-secondary)' : 'transparent',
                                             transition: 'background 0.15s'
@@ -159,6 +168,93 @@ function UserSelect({ value, onChange, options }: { value: string, onChange: (va
     )
 }
 
+// Page-level employee filter — same searchable-dropdown pattern as UserSelect above, but with
+// an "All Employees" clearable option instead of requiring a selection, since it's a filter
+// rather than a form field.
+function EmployeeFilterSelect({ value, onChange, options }: { value: string, onChange: (val: string) => void, options: { id: string, name: string, avatar_url: string | null }[] }) {
+    const [isOpen, setIsOpen] = useState(false)
+    const [search, setSearch] = useState('')
+    const containerRef = useRef<HTMLDivElement>(null)
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (containerRef.current && !containerRef.current.contains(e.target as Node)) setIsOpen(false)
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [])
+
+    const filteredOptions = options.filter(o => o.name.toLowerCase().includes(search.toLowerCase()))
+    const selected = options.find(o => o.id === value)
+
+    return (
+        <div style={{ position: 'relative', width: '240px' }} ref={containerRef}>
+            <div className="input" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', height: '38px', padding: '0 10px' }}
+                onClick={() => setIsOpen(o => !o)}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                    <IconSearch size={14} color="var(--color-text-tertiary)" />
+                    <span style={{ fontSize: '0.8125rem', color: selected ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {selected ? selected.name : 'All Employees'}
+                    </span>
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }}><path d="m6 9 6 6 6-6"/></svg>
+            </div>
+
+            <AnimatePresence>
+                {isOpen && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} transition={{ duration: 0.15 }}
+                        style={{
+                            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
+                            background: 'var(--color-surface)', border: '1px solid var(--color-border-light)',
+                            borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)', marginTop: '4px',
+                            maxHeight: '280px', overflowY: 'auto', display: 'flex', flexDirection: 'column',
+                        }}>
+                        <div style={{ padding: '8px', borderBottom: '1px solid var(--color-border-light)', position: 'sticky', top: 0, background: 'var(--color-surface)', zIndex: 2 }}>
+                            <div style={{ position: 'relative' }}>
+                                <div style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-tertiary)' }}>
+                                    <IconSearch size={14} />
+                                </div>
+                                <input type="text" placeholder="Search employees..." value={search} onChange={e => setSearch(e.target.value)} autoFocus
+                                    className="input" style={{ width: '100%', padding: '8px 10px 8px 32px', fontSize: '0.8125rem', height: '34px', borderRadius: '6px' }} />
+                            </div>
+                        </div>
+                        <div style={{ padding: '4px' }}>
+                            <div onClick={() => { onChange(''); setIsOpen(false); setSearch('') }}
+                                style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', borderRadius: '6px', background: value === '' ? 'var(--color-bg-secondary)' : 'transparent', fontWeight: value === '' ? 600 : 400, fontSize: '0.875rem' }}
+                                onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-secondary)'}
+                                onMouseLeave={e => e.currentTarget.style.background = value === '' ? 'var(--color-bg-secondary)' : 'transparent'}>
+                                All Employees
+                                {value === '' && <div style={{ marginLeft: 'auto', color: '#10B981' }}><IconCheckCircle size={16} /></div>}
+                            </div>
+                            {filteredOptions.length === 0 ? (
+                                <div style={{ padding: '12px', textAlign: 'center', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>No employees found</div>
+                            ) : (
+                                filteredOptions.map(emp => (
+                                    <div key={emp.id} onClick={() => { onChange(emp.id); setIsOpen(false); setSearch('') }}
+                                        style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', borderRadius: '6px', background: value === emp.id ? 'var(--color-bg-secondary)' : 'transparent' }}
+                                        onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-secondary)'}
+                                        onMouseLeave={e => e.currentTarget.style.background = value === emp.id ? 'var(--color-bg-secondary)' : 'transparent'}>
+                                        {emp.avatar_url ? (
+                                            <img src={emp.avatar_url} alt="" style={{ width: '28px', height: '28px', borderRadius: '50%', objectFit: 'cover' }} />
+                                        ) : (
+                                            <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600 }}>
+                                                {emp.name.charAt(0)}
+                                            </div>
+                                        )}
+                                        <span style={{ fontSize: '0.875rem', fontWeight: value === emp.id ? 600 : 400 }}>{emp.name}</span>
+                                        {value === emp.id && <div style={{ marginLeft: 'auto', color: '#10B981' }}><IconCheckCircle size={16} /></div>}
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    )
+}
+
 export default function FinesPage() {
     const supabase = createClient()
     const toast = useToast()
@@ -172,6 +268,7 @@ export default function FinesPage() {
 
     // Interactive Filters
     const [activeFilter, setActiveFilter] = useState('all')
+    const [employeeFilter, setEmployeeFilter] = useState('')
     const [searchQuery, setSearchQuery] = useState('')
     const [dateRangeMode, setDateRangeMode] = useState<'all'|'today'|'week'|'month'|'custom'>('all')
     const [refDate, setRefDate] = useState(() => fmtLocalDate(new Date()))
@@ -182,6 +279,8 @@ export default function FinesPage() {
     const [showAddModal, setShowAddModal] = useState(false)
     const [showAppealModal, setShowAppealModal] = useState<string | null>(null)
     const [appealReason, setAppealReason] = useState('')
+    const [editingFine, setEditingFine] = useState<Fine | null>(null)
+    const [editForm, setEditForm] = useState({ category: '', reason: '', payment_status: 'Unpaid' as 'Paid' | 'Unpaid' })
 
     // Add Fine form state
     const [addForm, setAddForm] = useState({
@@ -285,7 +384,7 @@ export default function FinesPage() {
 
     const handleReview = async (fineId: string, action: 'waive' | 'reject') => {
         if (!window.confirm(`Are you sure you want to ${action} this appeal?`)) return
-        
+
         try {
             const res = await fetch(`/api/fines/${fineId}/review`, {
                 method: 'PATCH',
@@ -304,6 +403,56 @@ export default function FinesPage() {
         }
     }
 
+    const openEditModal = (fine: Fine) => {
+        setEditingFine(fine)
+        setEditForm({ category: fine.category, reason: fine.reason, payment_status: fine.payment_status })
+    }
+
+    // Amount and member are deliberately not editable here — see the doc comment on
+    // PATCH /api/fines/:id for why. Payment status (Paid/Due, independent of the automatic
+    // settlement that runs when payroll covers this fine's month) is edited the same way.
+    const handleEditSubmit = async () => {
+        if (!editingFine) return
+        setIsSubmitting(true)
+        try {
+            const res = await fetch(`/api/fines/${editingFine.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(editForm)
+            })
+            const json = await res.json()
+            if (res.ok) {
+                toast.success('Fine updated')
+                setEditingFine(null)
+                fetchFines()
+            } else {
+                toast.error(json.error || 'Failed to update fine')
+            }
+        } catch (error) {
+            toast.error('An error occurred')
+        } finally {
+            setIsSubmitting(false)
+        }
+    }
+
+    // Deleting refunds the fine's points first (unless it was already Waived, which already
+    // refunded them) — see the doc comment on DELETE /api/fines/:id.
+    const handleDelete = async (fineId: string) => {
+        if (!window.confirm('Delete this fine? This cannot be undone.')) return
+        try {
+            const res = await fetch(`/api/fines/${fineId}`, { method: 'DELETE' })
+            const json = await res.json()
+            if (res.ok) {
+                toast.success('Fine deleted')
+                fetchFines()
+            } else {
+                toast.error(json.error || 'Failed to delete fine')
+            }
+        } catch (error) {
+            toast.error('An error occurred')
+        }
+    }
+
     const canAppeal = (fine: Fine) => {
         if (isAdmin) return false // Admins don't appeal their own view here
         if (fine.status !== 'Active') return false
@@ -313,9 +462,15 @@ export default function FinesPage() {
     }
 
     const filteredFines = fines.filter(fine => {
-        // Status filter
-        if (activeFilter !== 'all' && fine.status !== activeFilter) return false
-        
+        // Status/payment filter
+        if (activeFilter === 'Paid' && fine.payment_status !== 'Paid') return false
+        if (activeFilter === 'Unpaid' && fine.payment_status !== 'Unpaid') return false
+        if (activeFilter === 'Appealed' && fine.status !== 'Appealed') return false
+        if (activeFilter === 'Waived' && fine.status !== 'Waived') return false
+
+        // Employee filter
+        if (employeeFilter && fine.member_id !== employeeFilter) return false
+
         // Search filter
         if (searchQuery) {
             const q = searchQuery.toLowerCase()
@@ -323,7 +478,7 @@ export default function FinesPage() {
                 !(fine.reason || '').toLowerCase().includes(q) &&
                 !(fine.category || '').toLowerCase().includes(q)) return false
         }
-        
+
         // Date filter
         if (dateRangeMode !== 'all') {
             const d = new Date(fine.created_at)
@@ -343,22 +498,26 @@ export default function FinesPage() {
                 if (dStr < customStart || dStr > customEnd) return false
             }
         }
-        
+
         return true
     })
 
+    const paidFines = filteredFines.filter(f => f.payment_status === 'Paid')
+    const dueFines = filteredFines.filter(f => f.payment_status === 'Unpaid')
     const stats = {
         totalFines: filteredFines.length,
-        activeAppeals: filteredFines.filter(f => f.status === 'Appealed').length,
-        waivedFines: filteredFines.filter(f => f.status === 'Waived').length,
-        pointsDeducted: filteredFines.filter(f => f.status !== 'Waived').reduce((acc, curr) => acc + curr.amount, 0)
+        totalAmount: filteredFines.reduce((acc, curr) => acc + curr.amount, 0),
+        totalPaidAmount: paidFines.reduce((acc, curr) => acc + curr.amount, 0),
+        totalPaidCount: paidFines.length,
+        totalDueAmount: dueFines.reduce((acc, curr) => acc + curr.amount, 0),
+        totalDueCount: dueFines.length,
     }
 
     const statCards = [
-        { label: 'Total Fines', value: stats.totalFines, color: '#1E3A5F', icon: <IconAlertCircle size={20} color="#1E3A5F" /> },
-        { label: 'Points Deducted', value: stats.pointsDeducted, color: '#DC2626', icon: <IconTrendingUp size={20} color="#DC2626" /> },
-        { label: 'Active Appeals', value: stats.activeAppeals, color: '#F59E0B', icon: <IconAlertCircle size={20} color="#F59E0B" /> },
-        { label: 'Fines Waived', value: stats.waivedFines, color: '#10B981', icon: <IconCheckCircle size={20} color="#10B981" /> },
+        { label: 'Total Fines', value: String(stats.totalFines), color: '#1E3A5F', icon: <IconAlertCircle size={20} color="#1E3A5F" /> },
+        { label: 'Total Fine Amount', value: `৳${stats.totalAmount.toLocaleString()}`, color: '#DC2626', icon: <IconTrendingUp size={20} color="#DC2626" /> },
+        { label: 'Total Fine Paid', value: `৳${stats.totalPaidAmount.toLocaleString()}`, sub: `${stats.totalPaidCount} paid`, color: '#16A34A', icon: <IconCheckCircle size={20} color="#16A34A" /> },
+        { label: 'Total Fine Due', value: `৳${stats.totalDueAmount.toLocaleString()}`, sub: `${stats.totalDueCount} due`, color: '#F59E0B', icon: <IconClock size={20} color="#F59E0B" /> },
     ]
 
     return (
@@ -427,8 +586,13 @@ export default function FinesPage() {
                     <div key={s.label} className="card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, borderRadius: '10px', background: `${s.color}10` }}>{s.icon}</span>
                         <div>
-                            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: s.color, lineHeight: 1 }}>{s.value}</div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginTop: '2px' }}>{s.label}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{s.label}</div>
+                            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: s.color, lineHeight: 1, marginTop: '2px' }}>{s.value}</div>
+                            {'sub' in s && (
+                                <span style={{ display: 'inline-block', marginTop: '4px', padding: '2px 8px', borderRadius: '999px', fontSize: '0.6875rem', fontWeight: 600, background: `${s.color}1a`, color: s.color }}>
+                                    {s.sub}
+                                </span>
+                            )}
                         </div>
                     </div>
                 ))}
@@ -455,107 +619,105 @@ export default function FinesPage() {
                         </button>
                     ))}
                 </div>
-                
+
+                {isAdmin && (
+                    <EmployeeFilterSelect value={employeeFilter} onChange={setEmployeeFilter} options={employees} />
+                )}
+
                 <div style={{ flex: 1, minWidth: '200px', position: 'relative' }}>
                     <div style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-tertiary)' }}>
                         <IconSearch size={16} />
                     </div>
-                    <input 
-                        type="text" 
-                        placeholder="Search by member, category, or reason..." 
+                    <input
+                        type="text"
+                        placeholder="Search by member, category, or reason..."
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
-                        className="input" 
+                        className="input"
                         style={{ paddingLeft: '36px', width: '100%' }}
                     />
                 </div>
             </motion.div>
 
-            <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
-                {loading ? (
-                    <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
-                        <div className="spinner" style={{ margin: '0 auto var(--space-lg)' }}></div>
-                        <p>Loading fines...</p>
-                    </div>
-                ) : filteredFines.length === 0 ? (
-                    <div className="empty-state card" style={{ gridColumn: '1 / -1' }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-                        <h3>No fines found</h3>
-                        <p>There are currently no fines matching your filters.</p>
-                    </div>
-                ) : (
-                    filteredFines.map(fine => (
-                        <motion.div key={fine.id} className="card" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                <div>
-                                    <div style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-                                        - {fine.amount} Pts
-                                    </div>
-                                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
-                                        {new Date(fine.created_at).toLocaleDateString()}
-                                    </div>
-                                </div>
-                                <span style={{
-                                    padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600, borderRadius: '20px',
-                                    background: fine.status === 'Active' ? 'rgba(220,38,38,0.1)' : fine.status === 'Appealed' ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)',
-                                    color: fine.status === 'Active' ? '#DC2626' : fine.status === 'Appealed' ? '#F59E0B' : '#10B981'
-                                }}>
-                                    {fine.status}
-                                </span>
-                            </div>
-
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                <div style={{ fontSize: '0.875rem' }}>
-                                    <span style={{ color: 'var(--color-text-secondary)' }}>Member: </span>
-                                    <span style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>{fine.member?.name || 'Unknown'}</span>
-                                </div>
-                                <div style={{ fontSize: '0.875rem' }}>
-                                    <span style={{ color: 'var(--color-text-secondary)' }}>Category: </span>
-                                    <span style={{ color: 'var(--color-text-primary)' }}>{fine.category.split(' (')[0]}</span>
-                                </div>
-                                <div style={{ fontSize: '0.875rem', background: 'var(--color-bg-secondary)', padding: '12px', borderRadius: '8px', color: 'var(--color-text-secondary)' }}>
-                                    "{fine.reason}"
-                                </div>
-                            </div>
-
-                            {fine.status === 'Appealed' && (
-                                <div style={{ marginTop: '8px', padding: '12px', background: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '8px' }}>
-                                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#D97706', marginBottom: '4px' }}>Appeal Reason:</div>
-                                    <div style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>"{fine.appeal_reason}"</div>
-                                    
-                                    {isSuper && (
-                                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                                            <button 
-                                                onClick={() => handleReview(fine.id, 'waive')}
-                                                className="btn btn-sm"
-                                                style={{ flex: 1, background: '#10B981', color: 'white' }}
-                                            >
-                                                Waive & Refund
-                                            </button>
-                                            <button 
-                                                onClick={() => handleReview(fine.id, 'reject')}
-                                                className="btn btn-danger btn-sm"
-                                                style={{ flex: 1 }}
-                                            >
-                                                Reject
-                                            </button>
+            {/* Fines table — same layout language as the Advance/EMI table in Finance Hub */}
+            <motion.div variants={item} className="card" style={{ overflowX: 'auto', padding: 0 }}>
+                <table className="table">
+                    <thead>
+                        <tr>
+                            <th>SL</th>
+                            <th>Employee</th>
+                            <th>Category</th>
+                            <th>Reason</th>
+                            <th>Amount</th>
+                            <th>Date</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {loading ? (
+                            <tr><td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-tertiary)' }}>Loading fines...</td></tr>
+                        ) : filteredFines.length === 0 ? (
+                            <tr><td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-tertiary)' }}>No fines found matching your filters.</td></tr>
+                        ) : (
+                            filteredFines.map((fine, i) => (
+                                <tr key={fine.id}>
+                                    <td>{i + 1}</td>
+                                    <td>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <div className="avatar avatar-sm" style={{ background: getAvatarColor(fine.member?.name || 'U'), overflow: 'hidden', flexShrink: 0, width: 28, height: 28, fontSize: '0.75rem' }}>
+                                                {fine.member?.avatar_url ? (
+                                                    <img src={fine.member.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                ) : (fine.member?.name || 'U')[0].toUpperCase()}
+                                            </div>
+                                            <div>
+                                                <div style={{ fontWeight: 600 }}>{fine.member?.name || 'Unknown'}</div>
+                                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{fine.member?.employee_id || '—'}</div>
+                                            </div>
                                         </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {canAppeal(fine) && (
-                                <button
-                                    onClick={() => setShowAppealModal(fine.id)}
-                                    className="btn btn-secondary w-full"
-                                    style={{ marginTop: '8px' }}
-                                >
-                                    Appeal Fine
-                                </button>
-                            )}
-                        </motion.div>
-                    ))
-                )}
+                                    </td>
+                                    <td>{fine.category.split(' (')[0]}</td>
+                                    <td style={{ maxWidth: '220px' }}>
+                                        <span title={fine.reason} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {fine.reason}
+                                        </span>
+                                    </td>
+                                    <td style={{ fontWeight: 700 }}>৳{fine.amount.toLocaleString()}</td>
+                                    <td>{new Date(fine.created_at).toLocaleDateString()}</td>
+                                    <td>
+                                        <span title={fine.status === 'Appealed' && fine.appeal_reason ? `Appeal Reason: ${fine.appeal_reason}` : undefined}
+                                            style={{
+                                                padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600,
+                                                background: fine.payment_status === 'Paid' ? 'rgba(22,163,74,0.1)' : 'rgba(217,119,6,0.12)',
+                                                color: fine.payment_status === 'Paid' ? '#16A34A' : '#B45309',
+                                            }}>
+                                            {fine.payment_status === 'Paid' ? 'Paid' : 'Due'}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                            {isSuper && fine.status === 'Appealed' && (
+                                                <>
+                                                    <button onClick={() => handleReview(fine.id, 'waive')} className="btn btn-sm" style={{ background: '#10B981', color: 'white' }}>Waive</button>
+                                                    <button onClick={() => handleReview(fine.id, 'reject')} className="btn btn-danger btn-sm">Reject</button>
+                                                </>
+                                            )}
+                                            {canAppeal(fine) && (
+                                                <button onClick={() => setShowAppealModal(fine.id)} className="btn btn-secondary btn-sm">Appeal</button>
+                                            )}
+                                            {isAdmin && (
+                                                <>
+                                                    <button onClick={() => openEditModal(fine)} className="btn btn-ghost btn-icon" title="Edit"><IconEdit size={15} /></button>
+                                                    <button onClick={() => handleDelete(fine.id)} className="btn btn-ghost btn-icon" title="Delete" style={{ color: '#DC2626' }}><IconTrash size={15} /></button>
+                                                </>
+                                            )}
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                </table>
             </motion.div>
 
             {/* Add Fine Modal */}
@@ -573,10 +735,10 @@ export default function FinesPage() {
                             </div>
                             <form onSubmit={handleAddFine}>
                                 <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                                    <UserSelect 
-                                        value={addForm.member_id} 
-                                        onChange={val => setAddForm({...addForm, member_id: val})} 
-                                        options={employees} 
+                                    <UserSelect
+                                        value={addForm.member_id}
+                                        onChange={val => setAddForm({...addForm, member_id: val})}
+                                        options={employees}
                                     />
                                     <div className="form-group">
                                         <label className="form-label">Fine Amount (Points)</label>
@@ -680,6 +842,83 @@ export default function FinesPage() {
                                     className="btn btn-primary"
                                 >
                                     {isSubmitting ? 'Submitting...' : 'Submit Appeal'}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* Edit Fine Modal — category/reason/payment status only, see the doc comment on
+                PATCH /api/fines/:id for why amount and employee aren't editable here. */}
+            <AnimatePresence>
+                {editingFine && (
+                    <div className="modal-overlay">
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="modal"
+                        >
+                            <div className="modal-header">
+                                <h2 className="modal-title">Edit Fine</h2>
+                                <button onClick={() => setEditingFine(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: 'var(--color-text-tertiary)' }}><IconX size={18} /></button>
+                            </div>
+                            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                                <div className="form-group">
+                                    <label className="form-label">Member</label>
+                                    <div className="form-input" style={{ display: 'flex', alignItems: 'center', color: 'var(--color-text-tertiary)' }}>
+                                        {editingFine.member?.name || 'Unknown'} — ৳{editingFine.amount.toLocaleString()}
+                                    </div>
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label">Category</label>
+                                    <select
+                                        value={editForm.category}
+                                        onChange={e => setEditForm({ ...editForm, category: e.target.value })}
+                                        className="form-input"
+                                    >
+                                        {CATEGORIES.map(cat => (
+                                            <option key={cat} value={cat}>{cat}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label">Reason / Details</label>
+                                    <textarea
+                                        value={editForm.reason}
+                                        onChange={e => setEditForm({ ...editForm, reason: e.target.value })}
+                                        className="form-input"
+                                        style={{ minHeight: '100px' }}
+                                        required
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label className="form-label">Payment Status</label>
+                                    <select
+                                        value={editForm.payment_status}
+                                        onChange={e => setEditForm({ ...editForm, payment_status: e.target.value as 'Paid' | 'Unpaid' })}
+                                        className="form-input"
+                                    >
+                                        <option value="Unpaid">Due</option>
+                                        <option value="Paid">Paid</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="modal-footer">
+                                <button
+                                    type="button"
+                                    onClick={() => setEditingFine(null)}
+                                    className="btn btn-secondary"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleEditSubmit}
+                                    disabled={isSubmitting || !editForm.reason.trim()}
+                                    className="btn btn-primary"
+                                >
+                                    {isSubmitting ? 'Saving...' : 'Save Changes'}
                                 </button>
                             </div>
                         </motion.div>

@@ -130,6 +130,21 @@ export async function PUT(request: Request) {
                 .gte('purchase_date', start)
                 .lte('purchase_date', end)
 
+            // Same again for Fines — Active, still-Unpaid fines count as "recovered through this
+            // payout" (an Appealed or already-Waived fine isn't part of what
+            // getFineTotalsForMonth deducted, so it has nothing to settle here). No lower bound
+            // on created_at, matching getFineTotalsForMonth's own "rolls forward until paid"
+            // rule — a fine from an earlier month that's still Unpaid was included in this
+            // month's deduction too, so it needs to settle here, not just fines issued this
+            // exact month.
+            await supabase
+                .from('fines')
+                .update({ payment_status: 'Paid' })
+                .eq('member_id', data.employee_id)
+                .eq('status', 'Active')
+                .eq('payment_status', 'Unpaid')
+                .lte('created_at', `${end}T23:59:59`)
+
             // The payout itself also becomes a Finance Hub Expense (category "Employee
             // Salary", amount = Payable Salary) — same live deduction lookups the Salary Sheet
             // and Payroll Summary already use, so the linked amount can never drift from what

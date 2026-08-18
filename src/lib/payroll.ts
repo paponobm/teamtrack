@@ -41,18 +41,26 @@ export async function getAttendanceStatsForMonth(supabase: SupabaseClient, emplo
 // Only 'Active' fines count as a confirmed deduction — 'Waived' fines were forgiven and
 // 'Appealed' ones are still under dispute, so neither should reduce pay. Reuses the
 // existing `fines` table (see src/app/api/fines/route.ts) rather than a new one.
+//
+// Still-Unpaid fines roll forward into every month after the one they were issued in, not just
+// their own — an August fine that's still Unpaid keeps counting against September, October,
+// etc. until it's actually settled (payment_status flips to 'Paid', either via the payroll
+// settlement in src/app/api/payroll/salary-entries/route.ts or a manual mark-paid), at which
+// point it stops counting from that point on. So this only bounds by the month's end, not its
+// start — a fine created after this month can't count (it didn't exist yet), but one from any
+// earlier month still can.
 export async function getFineTotalsForMonth(supabase: SupabaseClient, employeeIds: string[], month: string): Promise<Record<string, number>> {
-    const { start, end } = getMonthRangeFromString(month)
+    const { end } = getMonthRangeFromString(month)
     const totals: Record<string, number> = {}
     employeeIds.forEach(id => { totals[id] = 0 })
     if (employeeIds.length === 0) return totals
 
     const { data } = await supabase
         .from('fines')
-        .select('member_id, amount, status, created_at')
+        .select('member_id, amount, status, payment_status, created_at')
         .in('member_id', employeeIds)
         .eq('status', 'Active')
-        .gte('created_at', `${start}T00:00:00`)
+        .eq('payment_status', 'Unpaid')
         .lte('created_at', `${end}T23:59:59`)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

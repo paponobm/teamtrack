@@ -13,7 +13,7 @@ export async function GET(request: Request) {
             .from('fines')
             .select(`
                 *,
-                member:employees!fines_member_id_fkey(id, name),
+                member:employees!fines_member_id_fkey(id, name, employee_id, avatar_url),
                 issued_by_user:employees!fines_issued_by_fkey(id, name)
             `)
             .order('created_at', { ascending: false })
@@ -63,7 +63,8 @@ export async function POST(request: Request) {
                 amount,
                 category,
                 reason,
-                status: 'Active'
+                status: 'Active',
+                payment_status: 'Unpaid'
             })
             .select()
             .single()
