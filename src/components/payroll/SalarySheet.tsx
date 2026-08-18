@@ -213,15 +213,15 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                 <th className="earn-col">Snacks Bill</th>
                                 <th className="earn-col">Festival Bonus</th>
                                 <th className="earn-col">Extra Duty</th>
-                                <th className="earn-col earn-col-last">Performance Bonus</th>
+                                <th className="earn-col">Performance Bonus</th>
+                                <th className="earning-highlight-col">Total Earning</th>
                                 <th className="deduct-col deduct-col-first">Salary Advance</th>
                                 <th className="deduct-col">Loan</th>
                                 <th className="deduct-col">Provident Fund</th>
                                 <th className="deduct-col">Product Buy</th>
                                 <th className="deduct-col">Monthly Fine</th>
-                                <th className="summary-col summary-col-first">Total Earning</th>
-                                <th className="summary-col">Total Deductions</th>
-                                <th className="summary-col summary-col-last payable-highlight">Payable Salary</th>
+                                <th className="deduction-highlight-col">Total Deductions</th>
+                                <th className="payable-highlight">Payable Salary</th>
                                 <th>Paid / Non-Paid</th>
                                 <th>Payment Method</th>
                                 <th>Payment Date</th>
@@ -263,7 +263,10 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                         )}
                                     </td>
                                     <td className="earn-col" style={{ color: e.extra_duty > 0 ? '#16A34A' : undefined }}>৳{e.extra_duty.toLocaleString()}</td>
-                                    <td className="earn-col earn-col-last" style={{ color: e.performance_bonus > 0 ? '#16A34A' : undefined }}>৳{e.performance_bonus.toLocaleString()}</td>
+                                    <td className="earn-col" style={{ color: e.performance_bonus > 0 ? '#16A34A' : undefined }}>৳{e.performance_bonus.toLocaleString()}</td>
+                                    <td className="earning-highlight-col" style={{ color: '#16A34A', fontWeight: 600 }}>
+                                        ৳{(e.basic_salary + e.extra_duty + e.transportation_bill + e.snacks_bill + e.performance_bonus + e.festival_bonus).toLocaleString()}
+                                    </td>
                                     <td className="advance-cell deduct-col deduct-col-first" style={{ color: e.advance > 0 ? '#DC2626' : undefined }}>
                                         ৳{e.advance.toLocaleString()}
                                         {e.advance_records.length > 0 && (
@@ -315,13 +318,10 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                         )}
                                     </td>
                                     <td className="deduct-col" style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
-                                    <td className="summary-col summary-col-first" style={{ color: '#16A34A', fontWeight: 600 }}>
-                                        ৳{(e.basic_salary + e.extra_duty + e.transportation_bill + e.snacks_bill + e.performance_bonus + e.festival_bonus).toLocaleString()}
-                                    </td>
-                                    <td className="summary-col" style={{ color: '#DC2626', fontWeight: 600 }}>
+                                    <td className="deduction-highlight-col" style={{ color: '#DC2626', fontWeight: 600 }}>
                                         ৳{(e.fine + e.advance + e.product_buy + e.loan + e.provident_fund + e.other_deduction).toLocaleString()}
                                     </td>
-                                    <td className="summary-col summary-col-last payable-highlight">
+                                    <td className="payable-highlight">
                                         <span style={{ display: 'inline-block', padding: '4px 12px', borderRadius: '6px', border: '2px solid #16A34A', background: 'rgba(22, 163, 74, 0.12)', boxShadow: '0 1px 3px rgba(22, 163, 74, 0.3)', fontWeight: 800, fontSize: '0.9375rem', color: '#16A34A' }}>
                                             ৳{e.net_payable.toLocaleString()}
                                         </span>
@@ -496,8 +496,9 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                 /* Groups the earning columns (Basic Salary → Performance Bonus) and deduction
                    columns (Salary Advance → Monthly Fine) into two visually distinct sections
                    — same border color on every edge within a section so collapsed borders
-                   merge cleanly with no doubling, plus a single stronger divider where the
-                   two sections meet. Applies to header and body cells alike. */
+                   merge cleanly with no doubling. The blue divider that used to sit right at the
+                   Performance Bonus/Salary Advance boundary now lives on Total Earning's own
+                   right edge instead (below), since that column sits between the two sections. */
                 .payroll-grid-table .earn-col {
                     border: 1px solid rgba(22, 163, 74, 0.35);
                     background: rgba(22, 163, 74, 0.05);
@@ -505,10 +506,6 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                 .payroll-grid-table .deduct-col {
                     border: 1px solid rgba(220, 38, 38, 0.35);
                     background: rgba(220, 38, 38, 0.05);
-                }
-                .payroll-grid-table .earn-col-last {
-                    border-right: 3px solid var(--color-primary, #2563EB);
-                    box-shadow: 2px 0 4px -2px rgba(37, 99, 235, 0.4);
                 }
                 .payroll-grid-table .deduct-col-first {
                     border-left: 3px solid var(--color-primary, #2563EB);
@@ -525,30 +522,45 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                 .payroll-grid-table tbody tr:hover .deduct-col {
                     background: rgba(220, 38, 38, 0.16);
                 }
-                /* Groups Total Earning/Total Deductions/Payable Salary in a yellow-outlined box
-                   — solid yellow top/bottom on every cell in the group (merges into one
-                   continuous line via border-collapse), a thin yellow divider between the three
-                   columns, and a thicker yellow edge where the group starts/ends, so the whole
-                   3-column section reads as one enclosed unit on every side. */
-                .payroll-grid-table .summary-col {
-                    border-top: 2px solid #F59E0B;
-                    border-bottom: 2px solid #F59E0B;
-                    border-left: 1px solid rgba(245, 158, 11, 0.5);
-                    border-right: 1px solid rgba(245, 158, 11, 0.5);
+                /* Total Earning (right after Performance Bonus), Total Deductions (right after
+                   Monthly Fine), and Payable Salary are each their own standalone, fully boxed
+                   column now — a solid border on all four sides in that column's own color,
+                   rather than sharing one outline as a contiguous group, since they're no longer
+                   adjacent to each other in the column order.
+                   The one edge each of these touches a neighboring highlighted/accented column
+                   is handled explicitly so the two colors never fight for the same collapsed
+                   line: Total Earning's right edge (facing Salary Advance) is blue, matching the
+                   existing earn/deduct boundary accent instead of competing with its own green;
+                   Total Deductions gives up its right edge entirely (border-right: none) so
+                   Payable Salary's yellow border-left is the sole claim on that edge and always
+                   wins cleanly, rather than the two colliding. */
+                .payroll-grid-table .earning-highlight-col {
+                    border-top: 3px solid #15803c6c;
+                    border-bottom: 3px solid #15803c6c;
+                    border-left: 3px solid #15803c6c;
+                    border-right: 3px solid #2563EB;
+                    background: rgba(22, 163, 74, 0.06);
                 }
-                .payroll-grid-table .summary-col-first {
-                    border-left: 3px solid #F59E0B;
+                .payroll-grid-table tbody tr:hover .earning-highlight-col {
+                    background: rgba(22, 163, 74, 0.16);
                 }
-                .payroll-grid-table .summary-col-last {
-                    border-right: 3px solid #F59E0B;
-                    box-shadow: 2px 0 4px -2px rgba(245, 158, 11, 0.4);
+                .payroll-grid-table .deduction-highlight-col {
+                    border-top: 3px solid #eb070754;
+                    border-bottom: 3px solid #eb070754;
+                    border-left: 3px solid #eb070754;
+                    border-right: none;
+                    background: rgba(220, 38, 38, 0.06);
+                }
+                .payroll-grid-table tbody tr:hover .deduction-highlight-col {
+                    background: rgba(220, 38, 38, 0.16);
                 }
                 /* Payable Salary is the row's final, most important figure, so it gets the
-                   strongest visual treatment in the group: a richer green wash (deeper than the
-                   earn-col tint) plus an inset ring for extra definition — stronger again on
-                   hover, same pattern as the earn-col/deduct-col hover rules above, so the hover
-                   state doesn't wash it out via the shared .table tr:hover td rule. */
+                   strongest visual treatment: a solid yellow box border plus a richer green wash
+                   (deeper than the earn-col tint) and an inset ring for extra definition —
+                   stronger again on hover, same pattern as the rules above, so the hover state
+                   doesn't wash it out via the shared .table tr:hover td rule. */
                 .payroll-grid-table .payable-highlight {
+                    border: 3px solid #c8ff0398;
                     background: rgba(22, 163, 74, 0.12);
                     box-shadow: inset 0 0 0 1px rgba(22, 163, 74, 0.25);
                 }
