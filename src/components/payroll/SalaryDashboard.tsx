@@ -185,10 +185,11 @@ export default function SalaryDashboard({ month = currentMonth() }: { month?: st
             <AnimatePresence initial={false}>
                 {expanded && (
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} style={{ overflow: 'hidden' }}>
-                        {/* Total Employees is the system's total active headcount — fixed,
-                            unaffected by the From/To range. Total Salary Expense / Paid
+                        {/* Total Employees is the distinct count of employees actually visible
+                            (paid or unpaid) somewhere in the selected From/To range — dynamic,
+                            not the system's whole headcount. Total Salary Expense / Paid
                             Employees / Unpaid Employees are all combined (paid + unpaid) across
-                            the selected range. */}
+                            the selected range too. */}
                         <motion.div variants={container} initial="hidden" animate="show"
                             style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
                             <StatTile icon={<IconUsers size={20} color="#2563EB" />} color="#2564ebdc"

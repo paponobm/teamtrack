@@ -19,9 +19,11 @@ const MONTH_RE = /^\d{4}-\d{2}$/
 // just accumulated across every sheet instead of one — so a given month's contribution here
 // never drifts from what the Salary Sheet itself shows for that month.
 //
-// Total Employees is deliberately NOT range-scoped — it's the system's total active headcount
-// (same figure regardless of which From/To range is selected), while every other card below it
-// reflects the selected range's combined paid+unpaid activity.
+// Total Employees is dynamic per the selected From/To range — the count of distinct employees
+// who actually have a visible salary entry (Basic Salary Starting Month reached) somewhere in
+// range, i.e. "how many people get paid this month/range," not the system's whole headcount.
+// Summing each month's own count would double-count someone paid every month in the range, so
+// it's a distinct-employee count instead — "how many people this range covers."
 export async function GET(request: Request) {
     const auth = await requireAuth(2) // Super Admin only — salary data
     if (!isAuthed(auth)) return auth
@@ -37,16 +39,14 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'from must not be after to' }, { status: 400 })
     }
 
-    const [{ count: totalEmployees }, { data: sheets }] = await Promise.all([
-        supabase.from('employees').select('*', { count: 'exact', head: true }).eq('is_active', true),
-        supabase
-            .from('salary_sheets')
-            .select('id, month')
-            .gte('month', from)
-            .lte('month', to)
-            .order('month', { ascending: true }),
-    ])
+    const { data: sheets } = await supabase
+        .from('salary_sheets')
+        .select('id, month')
+        .gte('month', from)
+        .lte('month', to)
+        .order('month', { ascending: true })
     const sheetRows: { id: string; month: string }[] = sheets || []
+    const distinctEmployeeIds = new Set<string>()
 
     let totalSalaryExpense = 0
     let paidEmployees = 0
@@ -98,6 +98,7 @@ export async function GET(request: Request) {
         if (rows.length === 0) continue
 
         const employeeIds = rows.map((r: { employee_id: string }) => r.employee_id)
+        employeeIds.forEach((id: string) => distinctEmployeeIds.add(id))
 
         const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails] = await Promise.all([
             getFineTotalsForMonth(supabase, employeeIds, sheet.month),
@@ -169,7 +170,7 @@ export async function GET(request: Request) {
         from,
         to,
         sheetCount: sheetRows.length,
-        totalEmployees: totalEmployees || 0,
+        totalEmployees: distinctEmployeeIds.size,
         totalSalaryExpense,
         totalMonthExpense: paidAmount + unpaidAmount,
         paidEmployees,

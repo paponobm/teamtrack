@@ -214,14 +214,14 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                 <th className="earn-col">Festival Bonus</th>
                                 <th className="earn-col">Extra Duty</th>
                                 <th className="earn-col">Performance Bonus</th>
-                                <th className="earning-highlight-col">Total Earning</th>
+                                <th className="earning-highlight-col" style={{ fontWeight: 800,color: "#f81dd4"  }}>Total Earning</th>
                                 <th className="deduct-col deduct-col-first">Salary Advance</th>
                                 <th className="deduct-col">Loan</th>
                                 <th className="deduct-col">Provident Fund</th>
                                 <th className="deduct-col">Product Buy</th>
                                 <th className="deduct-col">Monthly Fine</th>
-                                <th className="deduction-highlight-col">Total Deductions</th>
-                                <th className="payable-highlight">Payable Salary</th>
+                                <th className="deduction-highlight-col" style={{ fontWeight: 800,color: "#f81dd4"  }}>Total Deductions</th>
+                                <th className="payable-highlight" style={{ fontWeight: 800,color: "#f81dd4"  }}>Payable Salary</th>
                                 <th>Paid / Non-Paid</th>
                                 <th>Payment Method</th>
                                 <th>Payment Date</th>
@@ -527,28 +527,27 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                    column now — a solid border on all four sides in that column's own color,
                    rather than sharing one outline as a contiguous group, since they're no longer
                    adjacent to each other in the column order.
-                   The one edge each of these touches a neighboring highlighted/accented column
-                   is handled explicitly so the two colors never fight for the same collapsed
-                   line: Total Earning's right edge (facing Salary Advance) is blue, matching the
-                   existing earn/deduct boundary accent instead of competing with its own green;
-                   Total Deductions gives up its right edge entirely (border-right: none) so
-                   Payable Salary's yellow border-left is the sole claim on that edge and always
-                   wins cleanly, rather than the two colliding. */
+                   Total Earning's right edge (facing Salary Advance) is bold red rather than its
+                   own green, and Total Deductions is bold red on every side it owns (it gives up
+                   its left edge entirely — border-left: none — so nothing competes with Monthly
+                   Fine's own border there; its bold red sits on the right instead, facing
+                   Payable Salary, which in turn gives up its own border-left so the two don't
+                   collide on that shared edge). */
                 .payroll-grid-table .earning-highlight-col {
                     border-top: 3px solid #15803c6c;
                     border-bottom: 3px solid #15803c6c;
                     border-left: 3px solid #15803c6c;
-                    border-right: 3px solid #2563EB;
+                    border-right: 3px solid #B91C1C;
                     background: rgba(22, 163, 74, 0.06);
                 }
                 .payroll-grid-table tbody tr:hover .earning-highlight-col {
                     background: rgba(22, 163, 74, 0.16);
                 }
                 .payroll-grid-table .deduction-highlight-col {
-                    border-top: 3px solid #eb070754;
-                    border-bottom: 3px solid #eb070754;
-                    border-left: 3px solid #eb070754;
-                    border-right: none;
+                    border-top: 3px solid #b91c1c6c;
+                    border-bottom: 3px solid #b91c1c6c;
+                    border-left: 3px solid #b91c1c6c;
+                    border-right: 3px solid #B91C1C;
                     background: rgba(220, 38, 38, 0.06);
                 }
                 .payroll-grid-table tbody tr:hover .deduction-highlight-col {
@@ -558,9 +557,13 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                    strongest visual treatment: a solid yellow box border plus a richer green wash
                    (deeper than the earn-col tint) and an inset ring for extra definition —
                    stronger again on hover, same pattern as the rules above, so the hover state
-                   doesn't wash it out via the shared .table tr:hover td rule. */
+                   doesn't wash it out via the shared .table tr:hover td rule. No border-left —
+                   Total Deductions already owns that shared edge with its own bold red left
+                   border, so this doesn't compete with it there. */
                 .payroll-grid-table .payable-highlight {
-                    border: 3px solid #c8ff0398;
+                    border-top: 3px solid #c8ff0398;
+                    border-right: 3px solid #c8ff0398;
+                    border-bottom: 3px solid #c8ff0398;
                     background: rgba(22, 163, 74, 0.12);
                     box-shadow: inset 0 0 0 1px rgba(22, 163, 74, 0.25);
                 }
