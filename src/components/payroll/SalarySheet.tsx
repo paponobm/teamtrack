@@ -267,55 +267,27 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                                     <td className="earning-highlight-col" style={{ color: '#16A34A', fontWeight: 600 }}>
                                         ৳{(e.basic_salary + e.extra_duty + e.transportation_bill + e.snacks_bill + e.performance_bonus + e.festival_bonus).toLocaleString()}
                                     </td>
-                                    <td className="advance-cell deduct-col deduct-col-first" style={{ color: e.advance > 0 ? '#DC2626' : undefined }}>
+                                    <td className="deduct-col deduct-col-first" style={{ color: e.advance > 0 ? '#DC2626' : undefined }}>
                                         ৳{e.advance.toLocaleString()}
-                                        {e.advance_records.length > 0 && (
-                                            <div className="advance-tooltip">
-                                                {e.advance_records.map((r, idx) => (
-                                                    <div key={idx}>{formatDate(r.date)}: ৳{r.amount.toLocaleString()}</div>
-                                                ))}
-                                            </div>
-                                        )}
                                     </td>
-                                    <td className="loan-cell deduct-col" style={{ color: e.loan > 0 ? '#DC2626' : undefined }}>
+                                    <td className="deduct-col" style={{ color: e.loan > 0 ? '#DC2626' : undefined }}>
                                         ৳{e.loan.toLocaleString()}
                                         {e.loan_records.length > 0 && (
-                                            <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginLeft: '4px' }}>
+                                            <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
                                                 ({e.loan_records.map(r => `${r.month_number}/${r.term_months}`).join(', ')} Installment)
-                                            </span>
-                                        )}
-                                        {e.loan_records.length > 0 && (
-                                            <div className="advance-tooltip">
-                                                {e.loan_records.map(r => (
-                                                    <div key={r.id}>EMI {r.month_number}/{r.term_months}: ৳{r.monthly_installment.toLocaleString()}</div>
-                                                ))}
                                             </div>
                                         )}
                                     </td>
-                                    <td className="provident-fund-cell deduct-col" style={{ color: e.provident_fund > 0 ? '#DC2626' : undefined }}>
+                                    <td className="deduct-col" style={{ color: e.provident_fund > 0 ? '#DC2626' : undefined }}>
                                         ৳{e.provident_fund.toLocaleString()}
                                         {e.provident_fund_records.length > 0 && (
-                                            <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginLeft: '4px' }}>
+                                            <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
                                                 ({e.provident_fund_records.map(r => `${r.month_number}/${r.duration_months}`).join(', ')} Installment)
-                                            </span>
-                                        )}
-                                        {e.provident_fund_records.length > 0 && (
-                                            <div className="advance-tooltip">
-                                                {e.provident_fund_records.map(r => (
-                                                    <div key={r.id}>PF {r.month_number}/{r.duration_months}: ৳{r.monthly_installment.toLocaleString()}</div>
-                                                ))}
                                             </div>
                                         )}
                                     </td>
-                                    <td className="product-buy-cell deduct-col" style={{ color: e.product_buy > 0 ? '#DC2626' : undefined }}>
+                                    <td className="deduct-col" style={{ color: e.product_buy > 0 ? '#DC2626' : undefined }}>
                                         ৳{e.product_buy.toLocaleString()}
-                                        {e.product_buy_records.length > 0 && (
-                                            <div className="advance-tooltip">
-                                                {e.product_buy_records.map((r, idx) => (
-                                                    <div key={idx}>{formatDate(r.date)}: ৳{r.amount.toLocaleString()}</div>
-                                                ))}
-                                            </div>
-                                        )}
                                     </td>
                                     <td className="deduct-col" style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
                                     <td className="deduction-highlight-col" style={{ color: '#DC2626', fontWeight: 600 }}>
@@ -463,35 +435,6 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                 .payroll-grid-table tbody tr:hover .sticky-col-1,
                 .payroll-grid-table tbody tr:hover .sticky-col-2 {
                     background: var(--color-surface-hover);
-                }
-                .payroll-grid-table .advance-cell,
-                .payroll-grid-table .product-buy-cell,
-                .payroll-grid-table .loan-cell,
-                .payroll-grid-table .provident-fund-cell {
-                    position: relative;
-                }
-                .payroll-grid-table .advance-tooltip {
-                    display: none;
-                    position: absolute;
-                    top: 100%;
-                    left: 0;
-                    z-index: 5;
-                    margin-top: 4px;
-                    padding: 8px 10px;
-                    background: var(--color-surface);
-                    border: 1px solid var(--color-border-light);
-                    border-radius: 8px;
-                    box-shadow: var(--shadow-md);
-                    font-size: 0.75rem;
-                    font-weight: 500;
-                    white-space: nowrap;
-                    color: var(--color-text-secondary);
-                }
-                .payroll-grid-table .advance-cell:hover .advance-tooltip,
-                .payroll-grid-table .product-buy-cell:hover .advance-tooltip,
-                .payroll-grid-table .loan-cell:hover .advance-tooltip,
-                .payroll-grid-table .provident-fund-cell:hover .advance-tooltip {
-                    display: block;
                 }
                 /* Groups the earning columns (Basic Salary → Performance Bonus) and deduction
                    columns (Salary Advance → Monthly Fine) into two visually distinct sections
