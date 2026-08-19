@@ -2,14 +2,70 @@ import { createAdminClient } from './supabase/admin'
 
 type SupabaseClient = ReturnType<typeof createAdminClient>
 
-// Flat interest, split evenly across the term: Total repayment = Amount × (1 + rate/100),
-// Monthly Installment = Total repayment ÷ term months. Same installment every month.
-export function computeTotalPayable(amount: number, interestRate: number): number {
-    return amount * (1 + (interestRate || 0) / 100)
+function round2(n: number): number {
+    return Math.round(n * 100) / 100
 }
 
-export function computeMonthlyInstallment(amount: number, interestRate: number, termMonths: number): number {
-    return computeTotalPayable(amount, interestRate) / termMonths
+// Reducing-balance EMI (the standard bank/loan formula): EMI = P × [r(1+r)^n] / [(1+r)^n − 1],
+// where P is the principal, r is the *monthly* rate derived from the annual interestRate
+// (annual ÷ 12 ÷ 100), and n is termMonths. Interest each month accrues only on the balance
+// still outstanding after prior payments — not on the original principal for every month — so
+// as the loan is paid down, a growing share of each (constant) installment goes toward
+// principal and a shrinking share toward interest. Replaces the old flat/simple-interest split
+// (interest on the full original principal, spread evenly across every month regardless of how
+// much had already been repaid), which overstated interest on partially-repaid balances.
+// A 0% rate degenerates to an even principal-only split (P/n), matching what this formula
+// converges to as r → 0 (avoids a 0/0 division at r = 0).
+export function computeMonthlyInstallment(principal: number, annualInterestRate: number, termMonths: number): number {
+    if (!principal || !termMonths) return 0
+    const r = (annualInterestRate || 0) / 12 / 100
+    if (r === 0) return round2(principal / termMonths)
+    const factor = Math.pow(1 + r, termMonths)
+    return round2(principal * (r * factor) / (factor - 1))
+}
+
+export interface EmiAmortizationRow {
+    month: number
+    openingPrincipal: number
+    interest: number
+    principalPayment: number
+    installment: number
+    closingPrincipal: number
+}
+
+// Full month-by-month reducing-balance breakdown of a single EMI: each month's interest is
+// opening balance × monthly rate, the rest of that month's (constant) installment pays down
+// principal, and the closing balance carries forward as next month's opening balance. The
+// final month's principal payment is whatever balance is still outstanding (rather than the
+// installment-minus-interest split used for every other month), so the loan always closes to
+// exactly ৳0 — never a positive or negative leftover from rounding monthly_installment to 2
+// decimals along the way.
+export function computeEmiAmortizationSchedule(principal: number, annualInterestRate: number, termMonths: number): EmiAmortizationRow[] {
+    const installment = computeMonthlyInstallment(principal, annualInterestRate, termMonths)
+    const r = (annualInterestRate || 0) / 12 / 100
+    const schedule: EmiAmortizationRow[] = []
+    let balance = principal
+
+    for (let month = 1; month <= termMonths; month++) {
+        const opening = round2(balance)
+        const interest = round2(opening * r)
+        const isLast = month === termMonths
+        const principalPayment = isLast ? opening : round2(installment - interest)
+        const rowInstallment = isLast ? round2(principalPayment + interest) : installment
+        balance = Math.max(0, round2(opening - principalPayment))
+        schedule.push({ month, openingPrincipal: opening, interest, principalPayment, installment: rowInstallment, closingPrincipal: balance })
+    }
+
+    return schedule
+}
+
+// Total repayment (principal + interest) across the full term — summed from the exact
+// amortization schedule above (not installment × termMonths), so it reflects the final
+// installment's rounding correction instead of drifting a few paisa off the flat, 2-decimal
+// per-month figure that's actually deducted from payroll every month.
+export function computeTotalPayable(principal: number, annualInterestRate: number, termMonths: number): number {
+    if (!principal || !termMonths) return 0
+    return round2(computeEmiAmortizationSchedule(principal, annualInterestRate, termMonths).reduce((sum, row) => sum + row.installment, 0))
 }
 
 export const EMI_EXPENSE_CATEGORY = 'Employee Loan'
@@ -211,7 +267,7 @@ export async function getEmiPaidSummaries(supabase: SupabaseClient, emiRecords: 
         const installment = Number(r.monthly_installment) || 0
         // Total Payable is the exact formula result, not installment × term — that would
         // re-introduce rounding drift since monthly_installment is stored rounded to 2 decimals.
-        const totalPayable = computeTotalPayable(Number(r.amount) || 0, Number(r.interest_rate) || 0)
+        const totalPayable = computeTotalPayable(Number(r.amount) || 0, Number(r.interest_rate) || 0, Number(r.term_months) || 0)
         const paidSet = paidMonthsByEmployee[r.employee_id] || new Set<string>()
 
         let paid = 0

@@ -580,11 +580,19 @@ function EmiForm({ emi, employees, onClose, onSaved }: {
 
     const isEdit = !!emi
 
-    // Flat interest, split evenly: Total = Amount × (1 + rate/100), Monthly = Total ÷ term.
-    // Mirrors src/lib/emis.ts computeMonthlyInstallment exactly — shown live so the admin
-    // sees what will land in the Salary Sheet's Loan column before saving.
-    const previewTotalPayable = amount * (1 + (interestRate || 0) / 100)
-    const previewInstallment = amount > 0 && termMonths > 0 ? previewTotalPayable / termMonths : 0
+    // Reducing-balance EMI — mirrors src/lib/emis.ts computeMonthlyInstallment/
+    // computeTotalPayable exactly (duplicated here rather than imported since that module
+    // pulls in the server-only admin Supabase client) — shown live so the admin sees what will
+    // land in the Salary Sheet's Loan column before saving. Interest each month accrues only on
+    // the balance still outstanding, not the original principal, so this is a constant monthly
+    // installment even though the interest/principal split within it changes month to month.
+    const monthlyRate = (interestRate || 0) / 12 / 100
+    const previewInstallment = amount > 0 && termMonths > 0
+        ? (monthlyRate === 0
+            ? amount / termMonths
+            : (amount * monthlyRate * Math.pow(1 + monthlyRate, termMonths)) / (Math.pow(1 + monthlyRate, termMonths) - 1))
+        : 0
+    const previewTotalPayable = previewInstallment * termMonths
 
     const handleSave = async () => {
         if (!employeeId) { toastError('Please select an employee'); return }
@@ -671,8 +679,12 @@ function EmiForm({ emi, employees, onClose, onSaved }: {
                 </div>
 
                 {amount > 0 && (
-                    <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', background: 'rgba(217,119,6,0.08)', borderRadius: '8px', padding: '8px 10px' }}>
-                        Monthly installment: <strong style={{ color: '#D97706' }}>৳{previewInstallment.toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong> × {termMonths} months
+                    <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', background: 'rgba(217,119,6,0.08)', borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div>Principal Amount: <strong style={{ color: 'var(--color-text-primary)' }}>৳{amount.toLocaleString()}</strong></div>
+                        <div>Interest Rate: <strong style={{ color: 'var(--color-text-primary)' }}>{interestRate}%</strong></div>
+                        <div>Monthly Installment: <strong style={{ color: '#D97706' }}>৳{previewInstallment.toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong> × {termMonths} months</div>
+                        <div>Interest Amount: <strong style={{ color: '#DC2626' }}>৳{(previewTotalPayable - amount).toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong></div>
+                        <div>Total Amount (principal + interest): <strong style={{ color: '#16A34A' }}>৳{previewTotalPayable.toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong></div>
                     </div>
                 )}
             </div>

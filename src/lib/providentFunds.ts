@@ -15,10 +15,26 @@ export function computeMonthlyInstallment(principal: number, durationMonths: num
 }
 
 // Total Amount is a *separate* figure from the above: what the employee ultimately receives
-// back from the company at maturity — principal + interest — shown for reference only. It has
-// no bearing on Paid/Due, which track the principal-only deduction against payroll.
-export function computeMaturityAmount(principal: number, interestRate: number): number {
-    return principal * (1 + (interestRate || 0) / 100)
+// back from the company at maturity — shown for reference only, with no bearing on Paid/Due,
+// which track the principal-only deduction against payroll (computeMonthlyInstallment above).
+//
+// The contribution is a *recurring* monthly deposit (the same amount already deducted from
+// salary each month), not a lump sum invested once on day one — so maturity value is the
+// future value of that whole stream of monthly deposits compounding at the fund's interest
+// rate, not a single flat interest add-on applied once to the full principal.
+//
+// Contributions are treated as landing at the END of the month they're deducted for: a given
+// month's deduction only exists once that month's Salary Sheet entry is actually marked Paid
+// (see getProvidentFundPaidSummaries below) — there's no beginning-of-month advance
+// contribution anywhere in this flow — so this uses the ordinary-annuity future-value formula:
+// FV = P × [((1+r)^n − 1) / r], where P is the monthly contribution, r is the monthly rate
+// (annual interestRate ÷ 12 ÷ 100), and n is durationMonths. A 0% rate degenerates to
+// FV = P × n = the total principal contributed, matching what the formula converges to as r → 0.
+export function computeMaturityAmount(monthlyContribution: number, interestRate: number, durationMonths: number): number {
+    if (!monthlyContribution || !durationMonths) return 0
+    const r = (interestRate || 0) / 12 / 100
+    if (r === 0) return monthlyContribution * durationMonths
+    return monthlyContribution * ((Math.pow(1 + r, durationMonths) - 1) / r)
 }
 
 function monthKeyToIndex(month: string): number {
@@ -153,7 +169,7 @@ export async function getProvidentFundPaidSummaries(supabase: SupabaseClient, pf
         // — that would re-introduce rounding drift, since monthly_installment is stored
         // rounded to 2 decimals (e.g. ৳8,333.33 × 12 = ৳99,999.96, not the actual ৳100,000).
         const totalPayable = Number(r.principal_amount) || 0
-        const totalAmount = computeMaturityAmount(Number(r.principal_amount) || 0, Number(r.interest_rate) || 0)
+        const totalAmount = computeMaturityAmount(Number(r.monthly_installment) || 0, Number(r.interest_rate) || 0, Number(r.duration_months) || 0)
         const paidSet = paidMonthsByEmployee[r.employee_id] || new Set<string>()
 
         let paid = 0

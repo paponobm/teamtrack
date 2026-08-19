@@ -348,11 +348,18 @@ function ProvidentFundModal({ fund, employees, onClose, onSaved }: {
     // Unlike EMI, the employee only ever pays back their own principal — the monthly
     // deduction (and Paid/Due) is principal ÷ duration, never inflated by interest (see
     // src/lib/providentFunds.ts computeMonthlyInstallment). Total Amount is a separate,
-    // informational figure: principal + interest, what the employee receives back from the
-    // company at maturity — it has no bearing on what's deducted or on Due.
+    // informational figure: the future value of that recurring monthly deposit compounding at
+    // the fund's interest rate (ordinary annuity, contributions at month-end — mirrors
+    // src/lib/providentFunds.ts computeMaturityAmount exactly; duplicated here rather than
+    // imported since that module pulls in the server-only admin Supabase client) — what the
+    // employee receives back from the company at maturity. It has no bearing on what's
+    // deducted or on Due.
     const totalPayable = principalAmount
     const monthlyInstallment = principalAmount > 0 && durationMonths > 0 ? totalPayable / durationMonths : 0
-    const totalAmount = principalAmount * (1 + (interestRate || 0) / 100)
+    const monthlyRate = (interestRate || 0) / 12 / 100
+    const totalAmount = monthlyInstallment > 0 && durationMonths > 0
+        ? (monthlyRate === 0 ? monthlyInstallment * durationMonths : monthlyInstallment * ((Math.pow(1 + monthlyRate, durationMonths) - 1) / monthlyRate))
+        : 0
 
     const handleSave = async () => {
         if (!employeeId) { toastError('Please select an employee'); return }

@@ -47,8 +47,9 @@ export async function GET(request: Request) {
 }
 
 // POST /api/emis — create a new EMI (installment loan) record (Admin+). monthly_installment
-// is computed once here (flat interest, split evenly across the term) and stored, so it
-// never silently drifts if amount/rate/term are edited later without recomputing it.
+// is computed once here (reducing-balance EMI — see computeMonthlyInstallment in
+// src/lib/emis.ts) and stored, so it never silently drifts if amount/rate/term are edited
+// later without recomputing it.
 export async function POST(request: Request) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
@@ -122,7 +123,7 @@ export async function POST(request: Request) {
     if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 })
 
     // A brand-new record has no salary sheets touching it yet, so Paid is always 0 here.
-    const totalPayable = computeTotalPayable(numAmount, numRate)
+    const totalPayable = computeTotalPayable(numAmount, numRate, numTerm)
     return NextResponse.json({
         emi: {
             ...data,

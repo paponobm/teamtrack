@@ -45,9 +45,10 @@ export async function GET(request: Request) {
 // POST /api/provident-funds — create a new Provident Fund record (Admin+). Duration is
 // intentionally not restricted to a fixed set server-side (the Add form's dropdown offers
 // 3/6/12/18/24 months, but any positive integer is accepted) so new duration options can be
-// added later without a migration. monthly_installment is computed once here (flat interest,
-// split evenly across the duration, same formula as EMI) and stored, so it never silently
-// drifts if amount/rate/duration are edited later without recomputing it.
+// added later without a migration. monthly_installment is computed once here (principal split
+// evenly across the duration — interest never inflates it, see computeMonthlyInstallment in
+// src/lib/providentFunds.ts) and stored, so it never silently drifts if amount/rate/duration
+// are edited later without recomputing it.
 export async function POST(request: Request) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
@@ -109,7 +110,7 @@ export async function POST(request: Request) {
     // (principal + interest — what the employee ultimately receives back) is a separate,
     // informational figure with no bearing on Paid/Due.
     const totalPayable = numPrincipal
-    const totalAmount = computeMaturityAmount(numPrincipal, numRate)
+    const totalAmount = computeMaturityAmount(monthlyInstallment, numRate, numDuration)
     return NextResponse.json({
         provident_fund: {
             ...data,
