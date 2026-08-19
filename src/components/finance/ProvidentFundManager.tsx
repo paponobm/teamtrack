@@ -336,7 +336,14 @@ function ProvidentFundModal({ fund, employees, onClose, onSaved }: {
 }) {
     const { success: toastSuccess, error: toastError } = useToast()
     const [employeeId, setEmployeeId] = useState(fund?.employee_id || '')
-    const [principalAmount, setPrincipalAmount] = useState(fund?.principal_amount ?? 0)
+    // The form field is what the admin actually knows and types: the amount deducted from
+    // salary each month (e.g. ৳1,000/month), not the total. Seeded from the record's own
+    // monthly_installment when editing (already the exact per-month figure — see
+    // src/lib/providentFunds.ts) rather than back-deriving it from principal_amount, which
+    // avoids reintroducing rounding drift. principalAmount (the total contributed over the
+    // whole duration — e.g. ৳1,000 × 12 = ৳12,000) is derived from it below, never typed in
+    // directly, and is what's actually sent to the API as principal_amount.
+    const [monthlyAmount, setMonthlyAmount] = useState(fund?.monthly_installment ?? 0)
     const [durationMonths, setDurationMonths] = useState<number>(fund?.duration_months || 12)
     const [interestRate, setInterestRate] = useState(fund?.interest_rate ?? 0)
     const [startDate, setStartDate] = useState(fund?.start_date || getLocalDateString())
@@ -347,15 +354,17 @@ function ProvidentFundModal({ fund, employees, onClose, onSaved }: {
 
     // Unlike EMI, the employee only ever pays back their own principal — the monthly
     // deduction (and Paid/Due) is principal ÷ duration, never inflated by interest (see
-    // src/lib/providentFunds.ts computeMonthlyInstallment). Total Amount is a separate,
-    // informational figure: the future value of that recurring monthly deposit compounding at
-    // the fund's interest rate (ordinary annuity, contributions at month-end — mirrors
-    // src/lib/providentFunds.ts computeMaturityAmount exactly; duplicated here rather than
-    // imported since that module pulls in the server-only admin Supabase client) — what the
-    // employee receives back from the company at maturity. It has no bearing on what's
+    // src/lib/providentFunds.ts computeMonthlyInstallment) — so principalAmount here is just
+    // monthlyAmount × durationMonths, the exact inverse of that same division. Total Amount is
+    // a separate, informational figure: the future value of that recurring monthly deposit
+    // compounding at the fund's interest rate (ordinary annuity, contributions at month-end —
+    // mirrors src/lib/providentFunds.ts computeMaturityAmount exactly; duplicated here rather
+    // than imported since that module pulls in the server-only admin Supabase client) — what
+    // the employee receives back from the company at maturity. It has no bearing on what's
     // deducted or on Due.
+    const principalAmount = monthlyAmount * durationMonths
     const totalPayable = principalAmount
-    const monthlyInstallment = principalAmount > 0 && durationMonths > 0 ? totalPayable / durationMonths : 0
+    const monthlyInstallment = monthlyAmount
     const monthlyRate = (interestRate || 0) / 12 / 100
     const totalAmount = monthlyInstallment > 0 && durationMonths > 0
         ? (monthlyRate === 0 ? monthlyInstallment * durationMonths : monthlyInstallment * ((Math.pow(1 + monthlyRate, durationMonths) - 1) / monthlyRate))
@@ -363,7 +372,7 @@ function ProvidentFundModal({ fund, employees, onClose, onSaved }: {
 
     const handleSave = async () => {
         if (!employeeId) { toastError('Please select an employee'); return }
-        if (!Number.isFinite(principalAmount) || principalAmount <= 0) { toastError('Provident Fund Amount must be greater than 0'); return }
+        if (!Number.isFinite(monthlyAmount) || monthlyAmount <= 0) { toastError('Provident Fund Amount must be greater than 0'); return }
         if (!Number.isFinite(interestRate) || interestRate < 0) { toastError('Interest rate must be 0 or greater'); return }
 
         setSaving(true)
@@ -429,10 +438,10 @@ function ProvidentFundModal({ fund, employees, onClose, onSaved }: {
                     </div>
 
                     <div>
-                        <label className="form-label">Provident Fund Amount (৳) *</label>
-                        <input className="form-input" type="number" min={1} value={principalAmount}
+                        <label className="form-label">Provident Fund Amount (৳ / month) *</label>
+                        <input className="form-input" type="number" min={1} value={monthlyAmount}
                             onFocus={e => e.target.select()}
-                            onChange={e => setPrincipalAmount(Math.max(0, Number(e.target.value) || 0))} />
+                            onChange={e => setMonthlyAmount(Math.max(0, Number(e.target.value) || 0))} />
                     </div>
 
                     <div>
@@ -461,7 +470,7 @@ function ProvidentFundModal({ fund, employees, onClose, onSaved }: {
 
                     {principalAmount > 0 && (
                         <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', background: 'rgba(37,99,235,0.08)', borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <div>Principal Amount: <strong style={{ color: 'var(--color-text-primary)' }}>৳{principalAmount.toLocaleString()}</strong></div>
+                            <div>Principal Amount ({durationMonths} × ৳{monthlyAmount.toLocaleString()}): <strong style={{ color: 'var(--color-text-primary)' }}>৳{principalAmount.toLocaleString()}</strong></div>
                             <div>Interest Rate: <strong style={{ color: 'var(--color-text-primary)' }}>{interestRate}%</strong></div>
                             <div>Duration: <strong style={{ color: 'var(--color-text-primary)' }}>{durationMonths} Months</strong></div>
                             <div>Monthly Installment (deducted from salary): <strong style={{ color: '#2563EB' }}>৳{monthlyInstallment.toLocaleString(undefined, { maximumFractionDigits: 2 })}</strong></div>
