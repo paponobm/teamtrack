@@ -74,15 +74,16 @@ export async function POST(request: Request) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    // Mirror this advance into Finance Hub as a real Expense (category "Salary Advance")
-    // so Total Expenses/Net Balance reflect it — best-effort: a failed link doesn't block the
-    // advance itself, since the advance is the record of truth for Payroll.
+    // Mirror this advance into Finance Hub as a real Expense (category "Salary Advance"),
+    // always 'paid' immediately — the company has disbursed this money regardless of the
+    // advance's own payment_status (that tracks employee repayment separately, see
+    // createLinkedExpense's doc comment in src/lib/advances.ts) — best-effort: a failed link
+    // doesn't block the advance itself, since the advance is the record of truth for Payroll.
     const expenseId = await createLinkedExpense(supabase, {
         employeeId: employee_id,
         amount: numAmount,
         date: advance_date,
         note: note || null,
-        paymentStatus: finalPaymentStatus,
         submittedBy: auth.employee.id,
     })
     if (expenseId) {

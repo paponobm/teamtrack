@@ -1,6 +1,5 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { getMonthRangeFromString } from '@/lib/dateRange'
-import { advanceToExpenseStatus } from '@/lib/advances'
 import { getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, createOrSyncSalaryExpense } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
@@ -99,24 +98,20 @@ export async function PUT(request: Request) {
         const { data: sheet } = await supabase.from('salary_sheets').select('month').eq('id', data.salary_sheet_id).maybeSingle()
         if (sheet) {
             const { start, end } = getMonthRangeFromString(sheet.month)
-            const { data: settledAdvances } = await supabase
+            // Settling here only updates the advance's own payment_status (employee repayment
+            // tracking) — it deliberately does NOT touch the advance's linked Finance Hub
+            // Expense. That expense represents the company's original disbursement and is
+            // permanently 'paid' from the moment the advance was created (see createLinkedExpense
+            // in src/lib/advances.ts); employee repayment is a separate concern, surfaced as
+            // "Receiving Status" wherever that expense is shown (see /api/expenses), never by
+            // flipping the expense's own payment_status.
+            await supabase
                 .from('advances')
                 .update({ payment_status: 'Paid' })
                 .eq('employee_id', data.employee_id)
                 .eq('payment_status', 'Unpaid')
                 .gte('advance_date', start)
                 .lte('advance_date', end)
-                .select('expense_id')
-
-            // Mirror the settlement into each advance's linked Finance Hub Expense too, so
-            // Total Expenses/Net Balance stay consistent with what Payroll just marked Paid.
-            const expenseIds = (settledAdvances || []).map(a => a.expense_id).filter((x): x is string => !!x)
-            if (expenseIds.length > 0) {
-                await supabase
-                    .from('expenses')
-                    .update({ payment_status: advanceToExpenseStatus('Paid'), approved_by: auth.employee.id })
-                    .in('id', expenseIds)
-            }
 
             // Same settlement, mirrored for Product Buy — a separate deduction type/table
             // from Advance, so it's settled independently here. Product Buy no longer links
@@ -136,10 +131,12 @@ export async function PUT(request: Request) {
             // on created_at, matching getFineTotalsForMonth's own "rolls forward until paid"
             // rule — a fine from an earlier month that's still Unpaid was included in this
             // month's deduction too, so it needs to settle here, not just fines issued this
-            // exact month.
+            // exact month. settled_month is stamped with the sheet's own month so
+            // getFineTotalsForMonth still counts it for THIS month (and any earlier one it
+            // rolled through) even though payment_status flips to 'Paid' in this same request.
             await supabase
                 .from('fines')
-                .update({ payment_status: 'Paid' })
+                .update({ payment_status: 'Paid', settled_month: sheet.month })
                 .eq('member_id', data.employee_id)
                 .eq('status', 'Active')
                 .eq('payment_status', 'Unpaid')

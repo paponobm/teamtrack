@@ -17,13 +17,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const supabase = auth.supabase
     const body = await request.json()
 
-    const update: Record<string, string> = {}
+    const update: Record<string, string | null> = {}
 
     if (body.payment_status !== undefined) {
         if (body.payment_status !== 'Paid' && body.payment_status !== 'Unpaid') {
             return NextResponse.json({ error: 'payment_status must be Paid or Unpaid' }, { status: 400 })
         }
         update.payment_status = body.payment_status
+        // Stamped/cleared alongside payment_status so getFineTotalsForMonth (src/lib/payroll.ts)
+        // knows which month this fine was actually settled in — marking Paid here (outside a
+        // payroll run) settles it as of the current month; marking back Unpaid re-opens it.
+        update.settled_month = body.payment_status === 'Paid'
+            ? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
+            : null
     }
 
     if (body.category !== undefined) {

@@ -4,12 +4,6 @@ type SupabaseClient = ReturnType<typeof createAdminClient>
 
 export const ADVANCE_EXPENSE_CATEGORY = 'Salary Advance'
 
-// advances.payment_status ('Paid'/'Unpaid') <-> expenses.payment_status ('paid'/'pending').
-// 'rejected' is never used here — an advance is either outstanding or settled, never denied.
-export function advanceToExpenseStatus(status: 'Paid' | 'Unpaid'): 'paid' | 'pending' {
-    return status === 'Paid' ? 'paid' : 'pending'
-}
-
 function buildDescription(employeeName: string) {
     return `Advance to ${employeeName}`
 }
@@ -18,18 +12,23 @@ function buildDescription(employeeName: string) {
 // counts toward Finance Hub's Total Expenses/Net Balance without a second parallel total.
 // Returns the new expense id, or null if the employee/expense insert fails (advance creation
 // still proceeds — a missing linked expense is recoverable, a blocked advance is not).
+//
+// The company has already handed this money to the employee the moment the advance record
+// exists, so the Expense is unconditionally 'paid' from creation — it is NOT derived from the
+// advance's own payment_status. That field tracks something different: whether the EMPLOYEE
+// has since repaid the advance (surfaced as "Receiving Status" wherever this expense is shown,
+// see /api/expenses). The two must stay independent: repaying an advance later must never flip
+// this expense back to pending, and this expense being 'paid' must never imply repayment.
 export async function createLinkedExpense(supabase: SupabaseClient, params: {
     employeeId: string
     amount: number
     date: string
     note: string | null
-    paymentStatus: 'Paid' | 'Unpaid'
     submittedBy: string
 }): Promise<string | null> {
     const { data: employee } = await supabase.from('employees').select('name').eq('id', params.employeeId).maybeSingle()
     const employeeName = employee?.name || 'employee'
 
-    const expenseStatus = advanceToExpenseStatus(params.paymentStatus)
     const { data: expense, error } = await supabase
         .from('expenses')
         .insert({
@@ -37,9 +36,9 @@ export async function createLinkedExpense(supabase: SupabaseClient, params: {
             category: ADVANCE_EXPENSE_CATEGORY,
             description: buildDescription(employeeName),
             amount: params.amount,
-            payment_status: expenseStatus,
+            payment_status: 'paid',
             submitted_by: params.submittedBy,
-            approved_by: expenseStatus === 'paid' ? params.submittedBy : null,
+            approved_by: params.submittedBy,
             note: params.note,
         })
         .select('id')
@@ -49,18 +48,18 @@ export async function createLinkedExpense(supabase: SupabaseClient, params: {
     return expense.id
 }
 
-// Keeps an advance's linked expense in sync after an edit (amount/date/status/employee change).
+// Keeps an advance's linked expense in sync after an edit (amount/date/employee/note change) —
+// deliberately does NOT touch payment_status/approved_by, since the Expense's 'paid' status is
+// permanent from creation and independent of the advance's own repayment tracking (see
+// createLinkedExpense's doc comment above).
 export async function syncLinkedExpense(supabase: SupabaseClient, expenseId: string, params: {
     employeeId: string
     amount: number
     date: string
     note: string | null
-    paymentStatus: 'Paid' | 'Unpaid'
-    approvedBy: string
 }) {
     const { data: employee } = await supabase.from('employees').select('name').eq('id', params.employeeId).maybeSingle()
     const employeeName = employee?.name || 'employee'
-    const expenseStatus = advanceToExpenseStatus(params.paymentStatus)
 
     await supabase
         .from('expenses')
@@ -68,8 +67,6 @@ export async function syncLinkedExpense(supabase: SupabaseClient, expenseId: str
             date: params.date,
             description: buildDescription(employeeName),
             amount: params.amount,
-            payment_status: expenseStatus,
-            approved_by: expenseStatus === 'paid' ? params.approvedBy : null,
             note: params.note,
         })
         .eq('id', expenseId)

@@ -741,7 +741,7 @@ export default function FinesPage() {
                                         options={employees}
                                     />
                                     <div className="form-group">
-                                        <label className="form-label">Fine Amount (Points)</label>
+                                        <label className="form-label">Fine Amount</label>
                                         <input
                                             type="number"
                                             min="1"

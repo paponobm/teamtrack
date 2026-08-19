@@ -22,11 +22,13 @@ function buildEmiDescription(employeeName: string) {
 // principal disbursed to the employee counts toward Finance Hub's Total Expenses/Net Balance
 // — same pattern as createLinkedExpense in src/lib/advances.ts. The expense amount is the
 // principal (the actual cash handed to the employee at disbursement), not the interest-
-// inclusive repayment total. Unlike Advance, EMI has no payment_status of its own to mirror,
-// so the linked expense is simply left 'pending' (the loan is outstanding) — repayment happens
-// via the Salary Sheet's live Loan deduction, not a status flip here. Returns the new expense
-// id, or null if the insert fails (EMI creation still proceeds — a missing linked expense is
-// recoverable, a blocked EMI is not).
+// inclusive repayment total. The company has already disbursed that principal the moment this
+// EMI exists, so the linked expense is unconditionally 'paid' from creation — repayment
+// (tracked installment-by-installment via getEmiPaidSummaries, live off the Salary Sheet's own
+// Paid status) is a separate concern, surfaced as "Receiving Status" wherever this expense is
+// shown (see /api/expenses), never by flipping this expense's own payment_status. Returns the
+// new expense id, or null if the insert fails (EMI creation still proceeds — a missing linked
+// expense is recoverable, a blocked EMI is not).
 export async function createLinkedExpense(supabase: SupabaseClient, params: {
     employeeId: string
     amount: number
@@ -43,9 +45,9 @@ export async function createLinkedExpense(supabase: SupabaseClient, params: {
             category: EMI_EXPENSE_CATEGORY,
             description: buildEmiDescription(employeeName),
             amount: params.amount,
-            payment_status: 'pending',
+            payment_status: 'paid',
             submitted_by: params.submittedBy,
-            approved_by: null,
+            approved_by: params.submittedBy,
         })
         .select('id')
         .single()

@@ -44,11 +44,14 @@ export async function getAttendanceStatsForMonth(supabase: SupabaseClient, emplo
 //
 // Still-Unpaid fines roll forward into every month after the one they were issued in, not just
 // their own — an August fine that's still Unpaid keeps counting against September, October,
-// etc. until it's actually settled (payment_status flips to 'Paid', either via the payroll
-// settlement in src/app/api/payroll/salary-entries/route.ts or a manual mark-paid), at which
-// point it stops counting from that point on. So this only bounds by the month's end, not its
-// start — a fine created after this month can't count (it didn't exist yet), but one from any
-// earlier month still can.
+// etc. until it's actually settled. Once settled, a fine keeps counting for every month up to
+// and including settled_month (the month it was actually recovered in — set alongside
+// payment_status='Paid', see the payroll settlement in
+// src/app/api/payroll/salary-entries/route.ts and the manual toggle in
+// src/app/api/fines/[id]/route.ts), then stops counting after that. This is deliberately NOT
+// just "payment_status='Unpaid'" — that would make a fine vanish from its OWN settlement
+// month's total the instant it's marked Paid (corrupting that month's already-computed Payable
+// Salary/linked Expense), since settlement and this computation can happen in the same request.
 export async function getFineTotalsForMonth(supabase: SupabaseClient, employeeIds: string[], month: string): Promise<Record<string, number>> {
     const { end } = getMonthRangeFromString(month)
     const totals: Record<string, number> = {}
@@ -57,14 +60,15 @@ export async function getFineTotalsForMonth(supabase: SupabaseClient, employeeId
 
     const { data } = await supabase
         .from('fines')
-        .select('member_id, amount, status, payment_status, created_at')
+        .select('member_id, amount, status, payment_status, settled_month, created_at')
         .in('member_id', employeeIds)
         .eq('status', 'Active')
-        .eq('payment_status', 'Unpaid')
         .lte('created_at', `${end}T23:59:59`)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(data || []).forEach((r: any) => {
+        const counts = r.payment_status === 'Unpaid' || (!!r.settled_month && r.settled_month >= month)
+        if (!counts) return
         totals[r.member_id] = (totals[r.member_id] || 0) + Number(r.amount || 0)
     })
     return totals

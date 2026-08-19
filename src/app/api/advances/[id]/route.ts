@@ -64,8 +64,6 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
             amount: Number(data.amount),
             date: data.advance_date,
             note: data.note,
-            paymentStatus: data.payment_status,
-            approvedBy: auth.employee.id,
         })
     }
 

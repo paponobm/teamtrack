@@ -1,4 +1,6 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
+import { ADVANCE_EXPENSE_CATEGORY } from '@/lib/advances'
+import { EMI_EXPENSE_CATEGORY, getEmiPaidSummaries } from '@/lib/emis'
 import { NextResponse } from 'next/server'
 
 // GET /api/expenses (super admin sees everyone's, admins/members see only their own)
@@ -58,7 +60,44 @@ export async function GET(request: Request) {
         count: expenses.length,
     }
 
-    return NextResponse.json({ expenses, stats })
+    // Receiving Status — independent of payment_status above (which is the company's own
+    // disbursement/approval status, and for Salary Advance/Employee Loan expenses is always
+    // 'paid' from creation, see src/lib/advances.ts and src/lib/emis.ts). This instead tracks
+    // whether the EMPLOYEE has repaid the linked Advance/EMI — null for every other expense,
+    // since only these two categories have a receivable to track.
+    const advanceExpenseIds = expenses.filter(e => e.category === ADVANCE_EXPENSE_CATEGORY).map(e => e.id)
+    const emiExpenseIds = expenses.filter(e => e.category === EMI_EXPENSE_CATEGORY).map(e => e.id)
+    const receivingStatusByExpenseId: Record<string, string> = {}
+
+    if (advanceExpenseIds.length > 0) {
+        const { data: linkedAdvances } = await supabase.from('advances').select('expense_id, payment_status').in('expense_id', advanceExpenseIds)
+        ;(linkedAdvances || []).forEach((a: { expense_id: string | null; payment_status: 'Paid' | 'Unpaid' }) => {
+            if (a.expense_id) receivingStatusByExpenseId[a.expense_id] = a.payment_status === 'Paid' ? 'Paid' : 'Pending'
+        })
+    }
+
+    if (emiExpenseIds.length > 0) {
+        const { data: linkedEmis } = await supabase
+            .from('emis')
+            .select('id, expense_id, employee_id, start_date, term_months, amount, interest_rate, monthly_installment')
+            .in('expense_id', emiExpenseIds)
+        const emiRows = linkedEmis || []
+        if (emiRows.length > 0) {
+            const summaries = await getEmiPaidSummaries(supabase, emiRows)
+            emiRows.forEach((e: { id: string; expense_id: string | null }) => {
+                const summary = summaries[e.id]
+                if (e.expense_id && summary) {
+                    receivingStatusByExpenseId[e.expense_id] = summary.remaining_installments <= 0
+                        ? `Paid ${summary.total_installments}/${summary.total_installments}`
+                        : `Pending ${summary.paid_installments}/${summary.total_installments}`
+                }
+            })
+        }
+    }
+
+    const enrichedExpenses = expenses.map(e => ({ ...e, receiving_status: receivingStatusByExpenseId[e.id] || null }))
+
+    return NextResponse.json({ expenses: enrichedExpenses, stats })
 }
 
 // POST /api/expenses (any employee)

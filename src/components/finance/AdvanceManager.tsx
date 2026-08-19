@@ -83,11 +83,12 @@ function formatDate(d: string) {
 // Advance & EMI Management, embedded as a Finance Hub tab. Every advance is mirrored into
 // the `expenses` table (category "Salary Advance", see src/lib/advances.ts) at creation/
 // edit/delete time, so it's automatically included in the Overview tab's Total Expenses/Net
-// Balance. EMI is a separate installment-loan module (src/lib/emis.ts) that also feeds the
-// Salary Sheet's Loan column directly, and is mirrored into `expenses` the same way (category
-// "Employee Loan", principal amount only — the linked expense's status stays 'pending' since
-// EMI has no payment_status of its own; repayment happens via the Salary Sheet's live
-// deduction, not a status flip on the expense).
+// Balance — always 'paid' immediately (the company disbursement is complete the moment the
+// record exists), independent of employee repayment. EMI is a separate installment-loan module
+// (src/lib/emis.ts) that also feeds the Salary Sheet's Loan column directly, and is mirrored
+// into `expenses` the same way (category "Employee Loan", principal amount only, also always
+// 'paid' immediately). Employee repayment for both is tracked entirely separately — this page's
+// own Status column here, and "Receiving Status" on the Finance Hub Expenses table.
 export default function AdvanceManager() {
     const { success: toastSuccess, error: toastError } = useToast()
 
@@ -360,9 +361,22 @@ export default function AdvanceManager() {
                                     )}
                                 </td>
                                 <td>
-                                    <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: row.due <= 0 ? '#16A34A' : '#DC2626', background: row.due <= 0 ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)' }}>
-                                        {row.due <= 0 ? 'Paid' : 'Due'}
-                                    </span>
+                                    {/* Employee repayment status — Advance is a single lump sum
+                                        (Paid once the whole amount is recovered), EMI is
+                                        installment-based so it shows progress as a fraction
+                                        (paid_installments/total_installments) instead of a
+                                        plain binary, per row.emi's own live-computed summary. */}
+                                    {row.record_type === 'Advance' ? (
+                                        <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: row.due <= 0 ? '#16A34A' : '#DC2626', background: row.due <= 0 ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)' }}>
+                                            {row.due <= 0 ? 'Paid' : 'Pending'}
+                                        </span>
+                                    ) : row.emi && (
+                                        <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: row.emi.remaining_installments <= 0 ? '#16A34A' : '#DC2626', background: row.emi.remaining_installments <= 0 ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)' }}>
+                                            {row.emi.remaining_installments <= 0
+                                                ? `Paid ${row.emi.total_installments}/${row.emi.total_installments}`
+                                                : `Pending ${row.emi.paid_installments}/${row.emi.total_installments}`}
+                                        </span>
+                                    )}
                                 </td>
                                 <td>
                                     <div style={{ display: 'flex', gap: '4px' }}>

@@ -24,6 +24,10 @@ interface Expense {
     payment_method: string | null
     fund_id?: string | null
     payment_status: 'pending' | 'paid' | 'rejected'
+    // Independent of payment_status above — only set for Salary Advance/Employee Loan
+    // expenses, tracking whether the EMPLOYEE has repaid it (see /api/expenses). "Paid" or
+    // "Pending"/"Pending X/N" for EMI installment progress; null for every other expense.
+    receiving_status: string | null
     note: string | null
     submitter: { id: string; name: string } | null
     approver: { id: string; name: string } | null
@@ -772,6 +776,7 @@ export default function ExpensesPage() {
                                     <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Amount</th>
                                     <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Method</th>
                                     <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Status</th>
+                                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Receiving Status</th>
                                     <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>By</th>
                                     {isAdmin && <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Actions</th>}
                                 </tr>
@@ -809,6 +814,24 @@ export default function ExpensesPage() {
                                             <td style={{ padding: '10px 16px', color: 'var(--color-text-tertiary)' }}>{e.payment_method || '-'}</td>
                                             <td style={{ padding: '10px 16px' }}>
                                                 <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: sc.bg }}>{sc.label}</span>
+                                            </td>
+                                            <td style={{ padding: '10px 16px' }}>
+                                                {/* Independent of Status above — tracks employee
+                                                    repayment of the linked Salary Advance/
+                                                    Employee Loan, not the company's own paid/
+                                                    pending approval. Only set for those two
+                                                    categories; every other expense shows '-'. */}
+                                                {e.receiving_status ? (
+                                                    <span style={{
+                                                        padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600,
+                                                        color: e.receiving_status.startsWith('Paid') ? '#16A34A' : '#B45309',
+                                                        background: e.receiving_status.startsWith('Paid') ? 'rgba(22,163,74,0.1)' : 'rgba(217,119,6,0.12)',
+                                                    }}>
+                                                        {e.receiving_status}
+                                                    </span>
+                                                ) : (
+                                                    <span style={{ color: 'var(--color-text-tertiary)' }}>-</span>
+                                                )}
                                             </td>
                                             <td style={{ padding: '10px 16px', color: 'var(--color-text-tertiary)', fontSize: '0.75rem' }}>
                                                 {getName(e.submitter) || '-'}
