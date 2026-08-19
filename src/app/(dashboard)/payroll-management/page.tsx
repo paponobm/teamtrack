@@ -22,6 +22,9 @@ export default function PayrollManagementPage() {
     const { data, isLoading } = usePermissions()
     const [month, setMonth] = useState(currentMonth)
     const [search, setSearch] = useState('')
+    // Bumped whenever the Salary Sheet below reports a payment update, so the Payroll Summary
+    // cards re-fetch and reflect it immediately — no browser refresh needed.
+    const [dashboardRefreshSignal, setDashboardRefreshSignal] = useState(0)
 
     if (isLoading) return null
 
@@ -44,7 +47,7 @@ export default function PayrollManagementPage() {
             </motion.div>
 
             <motion.div variants={item} style={{ marginBottom: '24px' }}>
-                <SalaryDashboard month={month} />
+                <SalaryDashboard month={month} refreshSignal={dashboardRefreshSignal} />
             </motion.div>
 
             <motion.div variants={item} style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
@@ -61,7 +64,7 @@ export default function PayrollManagementPage() {
             </motion.div>
 
             <motion.div variants={item}>
-                <SalarySheet month={month} search={search} />
+                <SalarySheet month={month} search={search} onPaymentUpdate={() => setDashboardRefreshSignal(s => s + 1)} />
             </motion.div>
         </motion.div>
     )

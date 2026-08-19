@@ -98,7 +98,10 @@ function StatTile({ icon, label, value, sub, subColor, subBadge, badges, color }
 // month seeds the initial From/To range (both default to it) but is otherwise independent of
 // it from then on — this range filter is its own, separate control from the Salary Sheet
 // table's single Month filter below, per its own From Month/To Month selectors here.
-export default function SalaryDashboard({ month = currentMonth() }: { month?: string }) {
+// refreshSignal is bumped by the parent page whenever a salary entry is paid/edited in the
+// Salary Sheet below — re-fetches the current range so these cards stay live without needing
+// a browser refresh, without changing any of the fetching/filter logic itself.
+export default function SalaryDashboard({ month = currentMonth(), refreshSignal }: { month?: string; refreshSignal?: number }) {
     const [fromMonth, setFromMonth] = useState(month)
     const [toMonth, setToMonth] = useState(month)
     const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -120,7 +123,7 @@ export default function SalaryDashboard({ month = currentMonth() }: { month?: st
     useEffect(() => {
         if (rangeInvalid) return
         load(fromMonth, toMonth)
-    }, [fromMonth, toMonth, rangeInvalid, load])
+    }, [fromMonth, toMonth, rangeInvalid, load, refreshSignal])
 
     // While the range is invalid, the last-fetched stats are stale for the (now nonsensical)
     // selection — cards fall back to the loading dash instead of showing them.

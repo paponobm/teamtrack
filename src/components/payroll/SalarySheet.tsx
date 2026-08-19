@@ -90,7 +90,10 @@ function formatMonthLabel(month: string) {
 
 // month/search are controlled by the parent Payroll Management page — a single shared filter
 // bar above this table drives both this sheet and the Salary Dashboard cards above it.
-export default function SalarySheet({ month = currentMonth(), search = '' }: { month?: string; search?: string }) {
+// onPaymentUpdate is called after any successful entry save (Mark as Paid, or an edit to an
+// already-Paid entry) — the parent page uses it to re-fetch the Salary Dashboard cards above,
+// so a payout is reflected there immediately instead of needing a browser refresh.
+export default function SalarySheet({ month = currentMonth(), search = '', onPaymentUpdate }: { month?: string; search?: string; onPaymentUpdate?: () => void }) {
     const { success: toastSuccess, error: toastError } = useToast()
     const [sheetExists, setSheetExists] = useState<boolean | null>(null)
     const [entries, setEntries] = useState<SalaryEntry[]>([])
@@ -188,13 +191,24 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                 <h2 style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.02em' }}>{formatMonthLabel(month)} Employee Salary Sheet</h2>
             </motion.div>
 
+            {loading && (
+                <div className="card" style={{ padding: '40px', textAlign: 'center' }}>
+                    <span className="spinner" style={{ margin: '0 auto', display: 'block', width: '32px', height: '32px' }} />
+                </div>
+            )}
+
             {!loading && sheetExists === false && (
                 <div className="card" style={{ padding: '32px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', textAlign: 'center' }}>
                     <IconFileText size={28} color="var(--color-text-tertiary)" />
                     <div style={{ fontSize: '0.9375rem', fontWeight: 600 }}>No salary sheet for this month yet</div>
                     <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>Create one to auto-load active employees and start entering salary amounts.</div>
                     <button className="btn btn-primary" disabled={creating} onClick={handleCreate} style={{ marginTop: '8px' }}>
-                        {creating ? 'Creating...' : 'Create Salary Sheet'}
+                        {creating ? (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span className="spinner" style={{ width: '16px', height: '16px', borderColor: 'rgba(255,255,255,0.3)', borderTopColor: 'white' }} />
+                                Creating...
+                            </span>
+                        ) : 'Create Salary Sheet'}
                     </button>
                 </div>
             )}
@@ -349,6 +363,7 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                         onSaved={(updated) => {
                             setEntries(prev => prev.map(e => e.id === updated.id ? updated : e))
                             setEditing(null)
+                            onPaymentUpdate?.()
                         }}
                     />
                 )}
@@ -373,6 +388,7 @@ export default function SalarySheet({ month = currentMonth(), search = '' }: { m
                         onSaved={(updated) => {
                             setEntries(prev => prev.map(e => e.id === updated.id ? updated : e))
                             setMarkPaidEntry(null)
+                            onPaymentUpdate?.()
                         }}
                     />
                 )}
