@@ -41,7 +41,7 @@ interface MemberModalProps {
     onSave: () => void
     isAdmin?: boolean
     isSuperAdmin?: boolean
-    initialTab?: 'profile' | 'access' | 'logs' | 'performance' | 'points' | 'payroll' | 'festivalBonus'
+    initialTab?: 'profile' | 'access' | 'logs' | 'performance' | 'points' | 'payroll'
 }
 
 const MONTHS = [
@@ -92,7 +92,7 @@ interface Feature {
 
 export default function MemberModal({ member, departments, roles, onClose, onSave, isAdmin = false, isSuperAdmin = false, initialTab }: MemberModalProps) {
     const isEdit = !!member
-    const [activeTab, setActiveTab] = useState<'profile' | 'access' | 'logs' | 'performance' | 'points' | 'payroll' | 'festivalBonus'>(initialTab || 'profile')
+    const [activeTab, setActiveTab] = useState<'profile' | 'access' | 'logs' | 'performance' | 'points' | 'payroll'>(initialTab || 'profile')
 
     const [form, setForm] = useState({
         employee_id: member?.employee_id || '',
@@ -195,7 +195,6 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
         percentage: String(member?.festival_bonus_percentage ?? 0),
         months: member?.festival_bonus_months || [] as number[],
     })
-    const [savingFestivalBonus, setSavingFestivalBonus] = useState(false)
 
     // Load features and permissions when switching to access tab
     useEffect(() => {
@@ -414,11 +413,12 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                             { key: 'logs' as const, label: 'Logs', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8v4l3 3" /><circle cx="12" cy="12" r="10" /></svg> },
                             { key: 'performance' as const, label: 'Performance', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 20V10" /><path d="M12 20V4" /><path d="M6 20v-6" /></svg> },
                             { key: 'points' as const, label: 'Points', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg> },
-                            // Payroll/Festival Bonus are Super-Admin-only, both to show and to
-                            // edit (server-side enforced too, see src/app/api/members/[id]/route.ts).
+                            // Payroll & Bonus (Basic Salary/Increase/Transportation/Snacks plus
+                            // Festival Bonus, all in one tab) is Super-Admin-only, both to show
+                            // and to edit (server-side enforced too, see
+                            // src/app/api/members/[id]/route.ts).
                             ...(isSuperAdmin ? [
-                                { key: 'payroll' as const, label: 'Payroll', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M2 10h20" /></svg> },
-                                { key: 'festivalBonus' as const, label: 'Festival Bonus', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 12v9H4v-9" /><path d="M2 7h20v5H2z" /><path d="M12 22V7" /><path d="M12 7c-2 0-3.5-1.5-3.5-3S10 1 12 3c0-2 1.5-3 3.5-1.5S14 7 12 7z" /></svg> },
+                                { key: 'payroll' as const, label: 'Payroll & Bonus', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M2 10h20" /></svg> },
                             ] : []),
                         ].map(tab => (
                             <button
@@ -1208,51 +1208,91 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                         ) : activeTab === 'payroll' ? (
                             <motion.div key="payroll" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={{ duration: 0.15 }}>
                                 <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginBottom: '16px', lineHeight: 1.5 }}>
-                                    Default Basic Salary, Transportation Bill, and Snacks Bill used whenever a new month&apos;s Salary Sheet is created for this employee. Changing these does not affect salary sheets already created.
+                                   
                                 </div>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                                    <div className="input-group">
-                                        <label className="input-label">Basic Salary (৳)</label>
-                                        <input className="input" type="number" min="0" value={payrollForm.basic_salary}
-                                            onFocus={e => e.target.select()}
-                                            onChange={e => setPayrollForm(p => ({ ...p, basic_salary: e.target.value }))} />
-                                    </div>
-                                    <div className="input-group">
-                                        <label className="input-label">Basic Salary Starting Month *</label>
-                                        <input className="input" type="month" required value={payrollForm.basic_salary_effective_month}
-                                            onChange={e => { setPayrollForm(p => ({ ...p, basic_salary_effective_month: e.target.value })); setPayrollError('') }} />
-                                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginTop: '6px', lineHeight: 1.5 }}>
-                                            Basic Salary only appears in Salary Sheets for this month onward. Sheets for earlier months show ৳0 Basic Salary for this employee.
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                                    <div>
+                                        {/* <div style={{ fontSize: '0.8125rem', fontWeight: 900, marginBottom: '12px' }}>Salary Section</div> */}
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', alignItems: 'start' }}>
+                                            <div className="input-group">
+                                                <label className="input-label">Basic Salary (৳)</label>
+                                                <input className="input" type="number" min="0" value={payrollForm.basic_salary}
+                                                    onFocus={e => e.target.select()}
+                                                    onChange={e => setPayrollForm(p => ({ ...p, basic_salary: e.target.value }))} />
+                                            </div>
+                                            <div style={{ gridRow: '1 / 3', gridColumn: '2', display: 'flex', flexDirection: 'column', gap: '14px', padding: '14px', borderRadius: '10px', background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)' }}>
+                                                {/* <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', lineHeight: 1.5 }}>
+                                                    Optional raise added on top of Basic Salary starting from the selected month (and every month after) — leave the month empty to keep no increment active.
+                                                </div> */}
+                                                <div className="input-group">
+                                                    <label className="input-label">Increase Salary (৳)</label>
+                                                    <input className="input" type="number" min="0" value={payrollForm.increment_amount}
+                                                        onFocus={e => e.target.select()}
+                                                        onChange={e => setPayrollForm(p => ({ ...p, increment_amount: e.target.value }))} />
+                                                </div>
+                                                <div className="input-group">
+                                                    <label className="input-label">Increase Salary Starting Month</label>
+                                                    <input className="input" type="month" value={payrollForm.increment_effective_month}
+                                                        onChange={e => setPayrollForm(p => ({ ...p, increment_effective_month: e.target.value }))} />
+                                                </div>
+                                            </div>
+                                            <div className="input-group">
+                                                <label className="input-label">Basic Salary Starting Month *</label>
+                                                <input className="input" type="month" required value={payrollForm.basic_salary_effective_month}
+                                                    onChange={e => { setPayrollForm(p => ({ ...p, basic_salary_effective_month: e.target.value })); setPayrollError('') }} />
+                                                {/* <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', lineHeight: 1.5 }}>
+                                                    Basic Salary only appears in Salary Sheets for this month onward. Sheets for earlier months show ৳0 Basic Salary for this employee.
+                                                </div> */}
+                                            </div>
                                         </div>
                                     </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '14px', borderRadius: '10px', background: 'var(--color-bg-secondary)' }}>
-                                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', lineHeight: 1.5 }}>
-                                            Optional raise added on top of Basic Salary starting from the selected month (and every month after) — leave the month empty to keep no increment active.
-                                        </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                                         <div className="input-group">
-                                            <label className="input-label">Increase Salary (৳)</label>
-                                            <input className="input" type="number" min="0" value={payrollForm.increment_amount}
+                                            <label className="input-label">Transportation Bill (৳)</label>
+                                            <input className="input" type="number" min="0" value={payrollForm.transportation_bill}
                                                 onFocus={e => e.target.select()}
-                                                onChange={e => setPayrollForm(p => ({ ...p, increment_amount: e.target.value }))} />
+                                                onChange={e => setPayrollForm(p => ({ ...p, transportation_bill: e.target.value }))} />
                                         </div>
                                         <div className="input-group">
-                                            <label className="input-label">Increase Salary Starting Month</label>
-                                            <input className="input" type="month" value={payrollForm.increment_effective_month}
-                                                onChange={e => setPayrollForm(p => ({ ...p, increment_effective_month: e.target.value }))} />
+                                            <label className="input-label">Snacks Bill (৳)</label>
+                                            <input className="input" type="number" min="0" value={payrollForm.snacks_bill}
+                                                onFocus={e => e.target.select()}
+                                                onChange={e => setPayrollForm(p => ({ ...p, snacks_bill: e.target.value }))} />
                                         </div>
                                     </div>
-                                    <div className="input-group">
-                                        <label className="input-label">Transportation Bill (৳)</label>
-                                        <input className="input" type="number" min="0" value={payrollForm.transportation_bill}
-                                            onFocus={e => e.target.select()}
-                                            onChange={e => setPayrollForm(p => ({ ...p, transportation_bill: e.target.value }))} />
+
+                                    <div style={{ borderTop: '1px solid var(--color-border-light)', paddingTop: '20px' }}>
+                                        <div style={{ fontSize: '0.8125rem', fontWeight: 700, marginBottom: '12px' }}>Festival Bonus</div>
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginBottom: '16px', lineHeight: 1.5 }}>
+                                            Festival Bonus = this percentage × Basic Salary, automatically included in the Salary Sheet only for the calendar months selected below (every year).
+                                        </div>
+                                        <div className="input-group" style={{ marginBottom: '16px' }}>
+                                            <label className="input-label">Bonus Percentage (%)</label>
+                                            <input className="input" type="number" min="0" max="100" value={festivalBonusForm.percentage}
+                                                onFocus={e => e.target.select()}
+                                                onChange={e => setFestivalBonusForm(p => ({ ...p, percentage: e.target.value }))} />
+                                        </div>
+                                        <div className="input-group">
+                                            <label className="input-label">Applies In</label>
+                                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+                                                {MONTHS.map(m => {
+                                                    const checked = festivalBonusForm.months.includes(m.value)
+                                                    return (
+                                                        <label key={m.value} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '8px', border: `1px solid ${checked ? 'var(--color-primary, #2563EB)' : 'var(--color-border-light)'}`, background: checked ? 'rgba(37,99,235,0.08)' : 'transparent', cursor: 'pointer', fontSize: '0.8125rem' }}>
+                                                            <input type="checkbox" checked={checked} onChange={e => {
+                                                                const next = e.target.checked
+                                                                    ? [...festivalBonusForm.months, m.value]
+                                                                    : festivalBonusForm.months.filter(v => v !== m.value)
+                                                                setFestivalBonusForm(p => ({ ...p, months: next }))
+                                                            }} />
+                                                            {m.label}
+                                                        </label>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="input-group">
-                                        <label className="input-label">Snacks Bill (৳)</label>
-                                        <input className="input" type="number" min="0" value={payrollForm.snacks_bill}
-                                            onFocus={e => e.target.select()}
-                                            onChange={e => setPayrollForm(p => ({ ...p, snacks_bill: e.target.value }))} />
-                                    </div>
+
                                     {payrollError && (
                                         <div style={{
                                             padding: '10px 14px', borderRadius: '10px', fontSize: '0.8125rem',
@@ -1262,9 +1302,9 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                         </div>
                                     )}
                                     <button
-                                        className="btn btn-primary btn-sm"
+                                        className="btn btn-primary"
                                         disabled={savingPayroll}
-                                        style={{ alignSelf: 'flex-start', fontSize: '0.75rem' }}
+                                        style={{ alignSelf: 'flex-end' }}
                                         onClick={async () => {
                                             if (!member) return
                                             if (!payrollForm.basic_salary_effective_month) {
@@ -1284,6 +1324,8 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                                         payroll_snacks_bill: Math.max(0, Number(payrollForm.snacks_bill) || 0),
                                                         salary_increment_amount: Math.max(0, Number(payrollForm.increment_amount) || 0),
                                                         salary_increment_effective_month: payrollForm.increment_effective_month || null,
+                                                        festival_bonus_percentage: Math.max(0, Number(festivalBonusForm.percentage) || 0),
+                                                        festival_bonus_months: festivalBonusForm.months,
                                                     }),
                                                 })
                                                 if (res.ok) onSave()
@@ -1296,64 +1338,9 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                             }
                                         }}
                                     >
-                                        {savingPayroll ? 'Saving...' : 'Save Payroll Settings'}
+                                        {savingPayroll ? 'Saving...' : 'Save Payroll & Bonus Settings'}
                                     </button>
                                 </div>
-                            </motion.div>
-                        ) : activeTab === 'festivalBonus' ? (
-                            <motion.div key="festivalBonus" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} transition={{ duration: 0.15 }}>
-                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginBottom: '16px', lineHeight: 1.5 }}>
-                                    Festival Bonus = this percentage × Basic Salary, automatically included in the Salary Sheet only for the calendar months selected below (every year).
-                                </div>
-                                <div className="input-group" style={{ marginBottom: '16px' }}>
-                                    <label className="input-label">Bonus Percentage (%)</label>
-                                    <input className="input" type="number" min="0" max="100" value={festivalBonusForm.percentage}
-                                        onFocus={e => e.target.select()}
-                                        onChange={e => setFestivalBonusForm(p => ({ ...p, percentage: e.target.value }))} />
-                                </div>
-                                <div className="input-group">
-                                    <label className="input-label">Applies In</label>
-                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
-                                        {MONTHS.map(m => {
-                                            const checked = festivalBonusForm.months.includes(m.value)
-                                            return (
-                                                <label key={m.value} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '8px', border: `1px solid ${checked ? 'var(--color-primary, #2563EB)' : 'var(--color-border-light)'}`, background: checked ? 'rgba(37,99,235,0.08)' : 'transparent', cursor: 'pointer', fontSize: '0.8125rem' }}>
-                                                    <input type="checkbox" checked={checked} onChange={e => {
-                                                        const next = e.target.checked
-                                                            ? [...festivalBonusForm.months, m.value]
-                                                            : festivalBonusForm.months.filter(v => v !== m.value)
-                                                        setFestivalBonusForm(p => ({ ...p, months: next }))
-                                                    }} />
-                                                    {m.label}
-                                                </label>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
-                                <button
-                                    className="btn btn-primary btn-sm"
-                                    disabled={savingFestivalBonus}
-                                    style={{ marginTop: '16px', fontSize: '0.75rem' }}
-                                    onClick={async () => {
-                                        if (!member) return
-                                        setSavingFestivalBonus(true)
-                                        try {
-                                            const res = await fetch(`/api/members/${member.id}`, {
-                                                method: 'PATCH',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({
-                                                    festival_bonus_percentage: Math.max(0, Number(festivalBonusForm.percentage) || 0),
-                                                    festival_bonus_months: festivalBonusForm.months,
-                                                }),
-                                            })
-                                            if (res.ok) onSave()
-                                        } finally {
-                                            setSavingFestivalBonus(false)
-                                        }
-                                    }}
-                                >
-                                    {savingFestivalBonus ? 'Saving...' : 'Save Festival Bonus Settings'}
-                                </button>
                             </motion.div>
                         ) : null}
                     </AnimatePresence>
