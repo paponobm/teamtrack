@@ -6,7 +6,7 @@ import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString, getWeekRange, getMonthRange } from '@/lib/dateRange'
 import {
     IconWallet, IconUsers, IconPlus, IconX, IconBanknote, IconCheckCircle, IconClock,
-    IconSearch, IconEdit, IconTrash, IconChevronLeft, IconChevronRight, IconCalendar,
+    IconSearch, IconEdit, IconTrash, IconChevronLeft, IconChevronRight, IconCalendar, IconPrinter,
 } from '@/components/icons/Icons'
 
 interface Advance {
@@ -105,6 +105,7 @@ export default function AdvanceManager() {
     const [showModal, setShowModal] = useState(false)
     const [addType, setAddType] = useState<'Advance' | 'EMI'>('Advance')
     const [editing, setEditing] = useState<CombinedRow | null>(null)
+    const [payslipRow, setPayslipRow] = useState<CombinedRow | null>(null)
 
     const fetchData = useCallback(async () => {
         setLoading(true)
@@ -304,6 +305,7 @@ export default function AdvanceManager() {
                             <th>Due</th>
                             <th>Total Amount</th>
                             <th>Status</th>
+                            <th>Pay Slip</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -379,6 +381,16 @@ export default function AdvanceManager() {
                                     )}
                                 </td>
                                 <td>
+                                    {/* Pay Slip only makes sense for EMI — an Advance is a single
+                                        lump-sum disbursement with no installment schedule to
+                                        summarize, so there's nothing here for it to print. */}
+                                    {row.record_type === 'EMI' && row.emi ? (
+                                        <button className="btn btn-secondary btn-sm" style={{ color: '#2563EB' }} onClick={() => setPayslipRow(row)}>
+                                            <IconPrinter size={14} /> Pay Slip
+                                        </button>
+                                    ) : '—'}
+                                </td>
+                                <td>
                                     <div style={{ display: 'flex', gap: '4px' }}>
                                         <button className="btn btn-ghost btn-icon" onClick={() => { setEditing(row); setAddType(row.record_type); setShowModal(true) }} title="Edit"><IconEdit size={15} /></button>
                                         <button className="btn btn-ghost btn-icon" onClick={() => handleDelete(row)} title="Delete" style={{ color: '#DC2626' }}><IconTrash size={15} /></button>
@@ -387,10 +399,10 @@ export default function AdvanceManager() {
                             </tr>
                         ))}
                         {!loading && filtered.length === 0 && (
-                            <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No advance or EMI records found.</td></tr>
+                            <tr><td colSpan={11} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No advance or EMI records found.</td></tr>
                         )}
                         {loading && (
-                            <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
+                            <tr><td colSpan={11} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
                         )}
                     </tbody>
                 </table>
@@ -413,6 +425,12 @@ export default function AdvanceManager() {
                             setShowModal(false)
                         }}
                     />
+                )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+                {payslipRow && payslipRow.emi && (
+                    <EmiPaySlipModal row={payslipRow} emi={payslipRow.emi} onClose={() => setPayslipRow(null)} />
                 )}
             </AnimatePresence>
         </motion.div>
@@ -694,5 +712,103 @@ function EmiForm({ emi, employees, onClose, onSaved }: {
                 <button className="btn btn-primary" disabled={saving} onClick={handleSave}>{saving ? 'Saving...' : 'Save'}</button>
             </div>
         </>
+    )
+}
+
+// EMI-only pay slip — an Advance is a single lump-sum disbursement with no installment
+// schedule, so there's nothing here for it to summarize; the Pay Slip button in the table only
+// appears for EMI rows. Reuses the same print-isolation classes (.payslip-printable/
+// .payslip-no-print, see globals.css) and document layout as the Payroll Salary Sheet's own
+// PaySlipModal (src/components/payroll/PaySlipModal.tsx) for a consistent look, tailored to
+// what an EMI record actually has: loan terms, interest, and installment progress rather than
+// salary earnings/deductions.
+function EmiPaySlipModal({ row, emi, onClose }: { row: CombinedRow; emi: Emi; onClose: () => void }) {
+    const totalInterest = emi.total_payable - emi.amount
+    const isFullyPaid = emi.remaining_installments <= 0
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <motion.div initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 10 }}
+                className="modal payslip-printable" style={{ maxWidth: '640px', padding: 0, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+
+                <div className="payslip-no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: '1px solid var(--color-border-light)' }}>
+                    <div style={{ fontWeight: 700, fontSize: '1rem' }}>EMI Pay Slip Preview</div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        <button className="btn btn-primary btn-sm" onClick={() => window.print()}>
+                            <IconPrinter size={15} /> Print
+                        </button>
+                        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: 'var(--color-text-tertiary)' }}><IconX size={18} /></button>
+                    </div>
+                </div>
+
+                {/* Printable document — hardcoded to a light paper look regardless of app theme,
+                    since this is a physical/downloadable document, not a themed UI panel. */}
+                <div style={{ background: '#ffffff', color: '#111827', padding: '32px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #E5E7EB', paddingBottom: '16px', marginBottom: '20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+                                <rect width="48" height="48" rx="12" fill="url(#emi-payslip-logo-gradient)" />
+                                <path d="M14 20h20M14 28h12" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+                                <circle cx="33" cy="28" r="3" fill="white" />
+                                <defs><linearGradient id="emi-payslip-logo-gradient" x1="0" y1="0" x2="48" y2="48"><stop stopColor="#1E40AF" /><stop offset="1" stopColor="#2563EB" /></linearGradient></defs>
+                            </svg>
+                            <div style={{ fontWeight: 700, fontSize: '1.0625rem', color: '#111827' }}>Online Burmese Market</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontWeight: 700, fontSize: '1.0625rem', color: '#111827' }}>EMI Pay Slip</div>
+                            <div style={{ fontSize: '0.8125rem', color: '#6B7280' }}>{formatDate(emi.start_date)}</div>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 24px', marginBottom: '20px', fontSize: '0.8125rem' }}>
+                        <EmiPayslipRow label="Employee ID" value={row.employee?.employee_id || '—'} />
+                        <EmiPayslipRow label="Term" value={`${emi.term_months} months`} />
+                        <EmiPayslipRow label="Employee Name" value={row.employee?.name || '—'} />
+                        <EmiPayslipRow label="Interest Rate" value={`${emi.interest_rate}%`} />
+                        <EmiPayslipRow label="Start Date" value={formatDate(emi.start_date)} />
+                        <EmiPayslipRow label="Monthly Installment" value={`৳${emi.monthly_installment.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} />
+                    </div>
+
+                    <div style={{ border: '1px solid #E5E7EB', borderRadius: '10px', padding: '14px 16px', marginBottom: '20px' }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.8125rem', color: '#111827', marginBottom: '10px' }}>Loan Summary</div>
+                        <EmiPayslipLine label="Principal Amount" value={emi.amount} />
+                        <EmiPayslipLine label="Interest Amount" value={totalInterest} />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', margin: '10px 0', paddingTop: '10px', borderTop: '1px solid #E5E7EB', fontWeight: 700, fontSize: '0.8125rem' }}>
+                            <span>Total Payable</span>
+                            <span>৳{emi.total_payable.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                        </div>
+                        <EmiPayslipLine label="Paid" value={emi.paid} color="#16A34A" />
+                        <EmiPayslipLine label="Due" value={emi.due} color={emi.due > 0 ? '#DC2626' : '#16A34A'} />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', padding: '3px 0', marginTop: '6px' }}>
+                            <span style={{ color: '#6B7280' }}>Installments</span>
+                            <span style={{ fontWeight: 600 }}>{emi.paid_installments} / {emi.total_installments} paid</span>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderRadius: '10px', background: isFullyPaid ? 'rgba(22,163,74,0.08)' : 'rgba(220,38,38,0.08)' }}>
+                        <span style={{ fontWeight: 700, fontSize: '0.9375rem', color: '#111827' }}>{isFullyPaid ? 'Fully Paid' : 'Due Amount'}</span>
+                        <span style={{ fontWeight: 700, fontSize: '1.5rem', color: isFullyPaid ? '#16A34A' : '#DC2626' }}>৳{emi.due.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                    </div>
+                </div>
+            </motion.div>
+        </div>
+    )
+}
+
+function EmiPayslipRow({ label, value }: { label: string; value: string }) {
+    return (
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ color: '#6B7280' }}>{label}</span>
+            <span style={{ fontWeight: 600, color: '#111827' }}>{value}</span>
+        </div>
+    )
+}
+
+function EmiPayslipLine({ label, value, color }: { label: string; value: number; color?: string }) {
+    return (
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', padding: '3px 0' }}>
+            <span style={{ color: '#6B7280' }}>{label}</span>
+            <span style={{ fontWeight: 600, color: color || '#111827' }}>৳{value.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+        </div>
     )
 }
