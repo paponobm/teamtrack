@@ -2,7 +2,8 @@ import { requireAuth, isAuthed } from '@/lib/auth'
 import { NextResponse } from 'next/server'
 
 // PUT /api/product-buys/:id — edit a product-buy record, including which employee it
-// belongs to (Admin+).
+// belongs to (Admin+). Recomputes `amount` whenever product_price/discount_price changes —
+// same product_price - discount_price formula used at creation (see POST above).
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
@@ -11,6 +12,15 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const supabase = auth.supabase
     const body = await request.json()
 
+    const { data: existing, error: fetchError } = await supabase
+        .from('product_buys')
+        .select('product_price, discount_price, amount')
+        .eq('id', id)
+        .maybeSingle()
+
+    if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 })
+    if (!existing) return NextResponse.json({ error: 'Product buy record not found' }, { status: 404 })
+
     const update: Record<string, number | string | null> = {}
 
     if (body.employee_id !== undefined) {
@@ -18,12 +28,29 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         update.employee_id = body.employee_id
     }
 
-    if (body.amount !== undefined) {
-        const numAmount = Number(body.amount)
-        if (!Number.isFinite(numAmount) || numAmount <= 0) {
-            return NextResponse.json({ error: 'amount must be a positive number' }, { status: 400 })
+    if (body.product_price !== undefined) {
+        const numProductPrice = Number(body.product_price)
+        if (!Number.isFinite(numProductPrice) || numProductPrice <= 0) {
+            return NextResponse.json({ error: 'product_price must be a positive number' }, { status: 400 })
         }
-        update.amount = numAmount
+        update.product_price = numProductPrice
+    }
+
+    if (body.discount_price !== undefined) {
+        const numDiscountPrice = Number(body.discount_price)
+        if (!Number.isFinite(numDiscountPrice) || numDiscountPrice < 0) {
+            return NextResponse.json({ error: 'discount_price must be a non-negative number' }, { status: 400 })
+        }
+        update.discount_price = numDiscountPrice
+    }
+
+    if (update.product_price !== undefined || update.discount_price !== undefined) {
+        const finalProductPrice = (update.product_price as number) ?? existing.product_price ?? existing.amount ?? 0
+        const finalDiscountPrice = (update.discount_price as number) ?? existing.discount_price ?? 0
+        if (finalDiscountPrice > finalProductPrice) {
+            return NextResponse.json({ error: 'discount_price cannot exceed product_price' }, { status: 400 })
+        }
+        update.amount = finalProductPrice - finalDiscountPrice
     }
 
     if (body.purchase_date !== undefined) {

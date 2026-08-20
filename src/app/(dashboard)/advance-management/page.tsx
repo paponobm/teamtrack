@@ -4,16 +4,18 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { usePermissions } from '@/lib/PermissionsContext'
 import { useToast } from '@/lib/ToastContext'
-import { getLocalDateString, getWeekRange, getMonthRange } from '@/lib/dateRange'
+import { getLocalDateString, getMonthRangeFromString } from '@/lib/dateRange'
 import {
     IconWallet, IconBanknote, IconCheckCircle, IconClock, IconPlus, IconX,
-    IconSearch, IconEdit, IconTrash, IconChevronLeft, IconChevronRight, IconCalendar, IconShieldAlert,
+    IconSearch, IconEdit, IconTrash, IconShieldAlert,
 } from '@/components/icons/Icons'
 
 interface ProductBuy {
     id: string
     employee_id: string
     amount: number
+    product_price: number | null
+    discount_price: number
     purchase_date: string
     item: string | null
     note: string | null
@@ -30,7 +32,10 @@ interface EmployeeOption {
     avatar_url: string | null
 }
 
-type DateRangeMode = 'all' | 'today' | 'week' | 'month' | 'custom'
+function currentMonth() {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
 
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.04 } } }
 const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } }
@@ -57,10 +62,7 @@ export default function ProductBuyPage() {
     const [loading, setLoading] = useState(true)
     const [search, setSearch] = useState('')
     const [statusFilter, setStatusFilter] = useState<'all' | 'Paid' | 'Unpaid'>('all')
-    const [dateRangeMode, setDateRangeMode] = useState<DateRangeMode>('all')
-    const [refDate, setRefDate] = useState(() => getLocalDateString())
-    const [customStart, setCustomStart] = useState('')
-    const [customEnd, setCustomEnd] = useState('')
+    const [month, setMonth] = useState(currentMonth)
     const [showModal, setShowModal] = useState(false)
     const [editing, setEditing] = useState<ProductBuy | null>(null)
 
@@ -69,16 +71,8 @@ export default function ProductBuyPage() {
     const fetchProductBuys = useCallback(async () => {
         setLoading(true)
         try {
-            const params = new URLSearchParams()
-            if (dateRangeMode === 'today') {
-                params.set('start_date', refDate); params.set('end_date', refDate)
-            } else if (dateRangeMode === 'week') {
-                const r = getWeekRange(new Date(refDate)); params.set('start_date', r.start); params.set('end_date', r.end)
-            } else if (dateRangeMode === 'month') {
-                const r = getMonthRange(new Date(refDate)); params.set('start_date', r.start); params.set('end_date', r.end)
-            } else if (dateRangeMode === 'custom' && customStart && customEnd) {
-                params.set('start_date', customStart); params.set('end_date', customEnd)
-            }
+            const { start, end } = getMonthRangeFromString(month)
+            const params = new URLSearchParams({ start_date: start, end_date: end })
             const res = await fetch(`/api/product-buys?${params}`)
             if (res.ok) {
                 const json = await res.json()
@@ -87,7 +81,7 @@ export default function ProductBuyPage() {
         } finally {
             setLoading(false)
         }
-    }, [dateRangeMode, refDate, customStart, customEnd])
+    }, [month])
 
     useEffect(() => { fetchProductBuys() }, [fetchProductBuys])
 
@@ -167,6 +161,11 @@ export default function ProductBuyPage() {
             </motion.div>
 
             <motion.div variants={item} style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Month</label>
+                    <input className="input" type="month" value={month} onChange={e => setMonth(e.target.value)}
+                        style={{ padding: '8px 12px', fontSize: '0.8125rem', width: 'auto' }} />
+                </div>
                 <div style={{ position: 'relative', width: '240px' }}>
                     <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', display: 'flex' }}><IconSearch size={15} color="var(--color-text-tertiary)" /></span>
                     <input className="form-input" type="text" placeholder="Search by employee ID or name..." value={search} onChange={e => setSearch(e.target.value)}
@@ -178,42 +177,6 @@ export default function ProductBuyPage() {
                     <option value="Paid">Paid</option>
                     <option value="Unpaid">Unpaid</option>
                 </select>
-                <div style={{ display: 'flex', position: 'relative', background: 'rgba(118,118,128,0.08)', borderRadius: '10px', padding: '2px' }}>
-                    {([{ key: 'all', label: 'All' }, { key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' }, { key: 'month', label: 'This Month' }, { key: 'custom', label: 'Custom' }] as const).map(opt => (
-                        <button key={opt.key} onClick={() => setDateRangeMode(opt.key)}
-                            style={{ position: 'relative', padding: '6px 12px', borderRadius: '8px', border: 'none', fontSize: '0.8125rem', fontWeight: 500, background: 'transparent', color: dateRangeMode === opt.key ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)', cursor: 'pointer', zIndex: 1 }}>
-                            {dateRangeMode === opt.key && (
-                                <motion.div layoutId="productBuyDateTab" style={{ position: 'absolute', inset: 0, background: 'var(--color-bg-primary)', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
-                            )}
-                            <span style={{ position: 'relative', zIndex: 1 }}>{opt.label}</span>
-                        </button>
-                    ))}
-                </div>
-                {(dateRangeMode === 'today' || dateRangeMode === 'week' || dateRangeMode === 'month') && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', borderRadius: '10px', padding: '4px' }}>
-                        <button className="btn btn-ghost btn-icon" onClick={() => {
-                            const d = new Date(refDate); d.setDate(d.getDate() - (dateRangeMode === 'week' ? 7 : dateRangeMode === 'month' ? 30 : 1)); setRefDate(getLocalDateString(d))
-                        }} style={{ borderRadius: '8px' }}>
-                            <IconChevronLeft size={16} />
-                        </button>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 4px', fontSize: '0.8125rem' }}>
-                            <IconCalendar size={14} color="var(--color-text-tertiary)" />
-                            <input type="date" value={refDate} onChange={e => setRefDate(e.target.value)} className="input" style={{ border: 'none', background: 'transparent', padding: '0', fontSize: '0.8125rem', width: '130px' }} />
-                        </div>
-                        <button className="btn btn-ghost btn-icon" onClick={() => {
-                            const d = new Date(refDate); d.setDate(d.getDate() + (dateRangeMode === 'week' ? 7 : dateRangeMode === 'month' ? 30 : 1)); setRefDate(getLocalDateString(d))
-                        }} style={{ borderRadius: '8px' }}>
-                            <IconChevronRight size={16} />
-                        </button>
-                    </div>
-                )}
-                {dateRangeMode === 'custom' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} className="input" style={{ padding: '6px 8px', fontSize: '0.8125rem', width: '150px', border: '1px solid var(--color-border-light)', borderRadius: '8px' }} />
-                        <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8125rem' }}>to</span>
-                        <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="input" style={{ padding: '6px 8px', fontSize: '0.8125rem', width: '150px', border: '1px solid var(--color-border-light)', borderRadius: '8px' }} />
-                    </div>
-                )}
             </motion.div>
 
             <motion.div variants={item} className="card" style={{ overflowX: 'auto', padding: 0 }}>
@@ -302,7 +265,11 @@ function ProductBuyModal({ productBuy, employees, onClose, onSaved }: {
     const { success: toastSuccess, error: toastError } = useToast()
     const [employeeId, setEmployeeId] = useState(productBuy?.employee_id || '')
     const [item, setItem] = useState(productBuy?.item || '')
-    const [amount, setAmount] = useState(productBuy?.amount ?? 0)
+    // Records created before Product Price/Discount Price existed as separate fields have no
+    // stored breakdown — product_price falls back to the record's own amount (its net,
+    // pre-split figure) and discount_price to 0, the best available reconstruction.
+    const [productPrice, setProductPrice] = useState(productBuy?.product_price ?? productBuy?.amount ?? 0)
+    const [discountPrice, setDiscountPrice] = useState(productBuy?.discount_price ?? 0)
     const [purchaseDate, setPurchaseDate] = useState(productBuy?.purchase_date || getLocalDateString())
     const [note, setNote] = useState(productBuy?.note || '')
     const [paymentStatus, setPaymentStatus] = useState<'Paid' | 'Unpaid'>(productBuy?.payment_status || 'Unpaid')
@@ -310,9 +277,16 @@ function ProductBuyModal({ productBuy, employees, onClose, onSaved }: {
 
     const isEdit = !!productBuy
 
+    // The amount actually deducted via payroll (what the Salary Sheet's Product Buy column and
+    // every other consumer reads) — mirrors the same product_price - discount_price the API
+    // computes server-side (see POST/PUT /api/product-buys), shown live here for confirmation.
+    const amount = Math.max(0, productPrice - discountPrice)
+
     const handleSave = async () => {
         if (!employeeId) { toastError('Please select an employee'); return }
-        if (!Number.isFinite(amount) || amount <= 0) { toastError('Amount must be greater than 0'); return }
+        if (!Number.isFinite(productPrice) || productPrice <= 0) { toastError('Product Price must be greater than 0'); return }
+        if (!Number.isFinite(discountPrice) || discountPrice < 0) { toastError('Discount Price must be 0 or greater'); return }
+        if (discountPrice > productPrice) { toastError('Discount Price cannot exceed Product Price'); return }
 
         setSaving(true)
         try {
@@ -320,12 +294,12 @@ function ProductBuyModal({ productBuy, employees, onClose, onSaved }: {
                 const res = await fetch(`/api/product-buys/${productBuy.id}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ employee_id: employeeId, amount, purchase_date: purchaseDate, item, note, payment_status: paymentStatus }),
+                    body: JSON.stringify({ employee_id: employeeId, product_price: productPrice, discount_price: discountPrice, purchase_date: purchaseDate, item, note, payment_status: paymentStatus }),
                 })
                 if (res.ok) {
                     const selectedEmployee = employees.find(e => e.id === employeeId)
                     onSaved({
-                        ...productBuy, employee_id: employeeId, amount, purchase_date: purchaseDate, item, note, payment_status: paymentStatus,
+                        ...productBuy, employee_id: employeeId, amount, product_price: productPrice, discount_price: discountPrice, purchase_date: purchaseDate, item, note, payment_status: paymentStatus,
                         employee: selectedEmployee ? { id: selectedEmployee.id, name: selectedEmployee.name, employee_id: selectedEmployee.employee_id, avatar_url: selectedEmployee.avatar_url } : productBuy.employee,
                     }, false)
                     toastSuccess('Product buy updated')
@@ -337,7 +311,7 @@ function ProductBuyModal({ productBuy, employees, onClose, onSaved }: {
                 const res = await fetch('/api/product-buys', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ employee_id: employeeId, amount, purchase_date: purchaseDate, item, note, payment_status: paymentStatus }),
+                    body: JSON.stringify({ employee_id: employeeId, product_price: productPrice, discount_price: discountPrice, purchase_date: purchaseDate, item, note, payment_status: paymentStatus }),
                 })
                 if (res.ok) {
                     const json = await res.json()
@@ -379,11 +353,24 @@ function ProductBuyModal({ productBuy, employees, onClose, onSaved }: {
                     </div>
 
                     <div>
-                        <label className="form-label">Total Amount (৳) *</label>
-                        <input className="form-input" type="number" min={1} value={amount}
+                        <label className="form-label">Product Price (৳) *</label>
+                        <input className="form-input" type="number" min={1} value={productPrice}
                             onFocus={e => e.target.select()}
-                            onChange={e => setAmount(Math.max(0, Number(e.target.value) || 0))} />
+                            onChange={e => setProductPrice(Math.max(0, Number(e.target.value) || 0))} />
                     </div>
+
+                    <div>
+                        <label className="form-label">Discount Price (৳)</label>
+                        <input className="form-input" type="number" min={0} value={discountPrice}
+                            onFocus={e => e.target.select()}
+                            onChange={e => setDiscountPrice(Math.max(0, Number(e.target.value) || 0))} />
+                    </div>
+
+                    {productPrice > 0 && (
+                        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', background: 'rgba(37,99,235,0.08)', borderRadius: '8px', padding: '10px 12px' }}>
+                            Amount (Product Price − Discount): <strong style={{ color: '#2563EB' }}>৳{amount.toLocaleString()}</strong>
+                        </div>
+                    )}
 
                     <div>
                         <label className="form-label">Purchase Date *</label>
