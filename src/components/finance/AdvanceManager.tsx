@@ -106,6 +106,10 @@ export default function AdvanceManager() {
     const [addType, setAddType] = useState<'Advance' | 'EMI'>('Advance')
     const [editing, setEditing] = useState<CombinedRow | null>(null)
     const [payslipRow, setPayslipRow] = useState<CombinedRow | null>(null)
+    // Set by clicking a summary card above the table — narrows the table to just that card's
+    // records (e.g. Total Advance → Advance rows only, Total EMI Due → EMI rows still owing
+    // money). Clicking the same card again (or Total Employees) clears back to 'all'.
+    const [cardFilter, setCardFilter] = useState<'all' | 'advance' | 'emi' | 'advancePaid' | 'advanceDue' | 'emiPaid' | 'emiDue'>('all')
 
     const fetchData = useCallback(async () => {
         setLoading(true)
@@ -158,6 +162,12 @@ export default function AdvanceManager() {
 
     const filtered = combined.filter(row => {
         if (employeeFilter && row.employee_id !== employeeFilter) return false
+        if (cardFilter === 'advance' && row.record_type !== 'Advance') return false
+        if (cardFilter === 'emi' && row.record_type !== 'EMI') return false
+        if (cardFilter === 'advancePaid' && !(row.record_type === 'Advance' && row.due <= 0)) return false
+        if (cardFilter === 'advanceDue' && !(row.record_type === 'Advance' && row.due > 0)) return false
+        if (cardFilter === 'emiPaid' && !(row.record_type === 'EMI' && row.due <= 0)) return false
+        if (cardFilter === 'emiDue' && !(row.record_type === 'EMI' && row.due > 0)) return false
         if (!search) return true
         const q = search.toLowerCase()
         return (row.employee?.name || '').toLowerCase().includes(q) || (row.employee?.employee_id || '').toLowerCase().includes(q)
@@ -211,35 +221,50 @@ export default function AdvanceManager() {
             </div>
 
             <motion.div variants={item} initial="hidden" animate="show" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '20px' }}>
-                <div className="stat-card">
+                <div className="stat-card" style={{ cursor: 'pointer', ...(cardFilter === 'advance' ? { boxShadow: '0 0 0 2px #2563EB' } : {}) }}
+                    onClick={() => setCardFilter(f => f === 'advance' ? 'all' : 'advance')} title="Show only Advance records">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconWallet size={14} color="var(--color-text-tertiary)" /> Total Advance</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>৳{summary.totalAdvance.toLocaleString()}</span>
                 </div>
-                <div className="stat-card">
+                <div className="stat-card" style={{ cursor: 'pointer', ...(cardFilter === 'emi' ? { boxShadow: '0 0 0 2px #D97706' } : {}) }}
+                    onClick={() => setCardFilter(f => f === 'emi' ? 'all' : 'emi')} title="Show only EMI records">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconBanknote size={14} color="var(--color-text-tertiary)" /> Total EMI</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#D97706' }}>৳{summary.totalEmi.toLocaleString()}</span>
                 </div>
-                <div className="stat-card">
+                <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setCardFilter('all')} title="Show all records">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconUsers size={14} color="var(--color-text-tertiary)" /> Total Employees</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>{summary.employeeIds.size}</span>
                 </div>
-                <div className="stat-card">
+                <div className="stat-card" style={{ cursor: 'pointer', ...(cardFilter === 'advancePaid' ? { boxShadow: '0 0 0 2px #16A34A' } : {}) }}
+                    onClick={() => setCardFilter(f => f === 'advancePaid' ? 'all' : 'advancePaid')} title="Show only Paid Advance records">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconCheckCircle size={14} color="var(--color-text-tertiary)" /> Total Advance Paid</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A' }}>৳{summary.totalAdvancePaid.toLocaleString()}</span>
                 </div>
-                <div className="stat-card">
+                <div className="stat-card" style={{ cursor: 'pointer', ...(cardFilter === 'advanceDue' ? { boxShadow: '0 0 0 2px #DC2626' } : {}) }}
+                    onClick={() => setCardFilter(f => f === 'advanceDue' ? 'all' : 'advanceDue')} title="Show only Advance records still due">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Total Advance Due</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{summary.totalAdvanceDue.toLocaleString()}</span>
                 </div>
-                <div className="stat-card">
+                <div className="stat-card" style={{ cursor: 'pointer', ...(cardFilter === 'emiPaid' ? { boxShadow: '0 0 0 2px #16A34A' } : {}) }}
+                    onClick={() => setCardFilter(f => f === 'emiPaid' ? 'all' : 'emiPaid')} title="Show only fully paid EMI records">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconCheckCircle size={14} color="var(--color-text-tertiary)" /> Total EMI Paid</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A' }}>৳{summary.totalEmiPaid.toLocaleString()}</span>
                 </div>
-                <div className="stat-card">
+                <div className="stat-card" style={{ cursor: 'pointer', ...(cardFilter === 'emiDue' ? { boxShadow: '0 0 0 2px #DC2626' } : {}) }}
+                    onClick={() => setCardFilter(f => f === 'emiDue' ? 'all' : 'emiDue')} title="Show only EMI records still due">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Total EMI Due</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{summary.totalEmiDue.toLocaleString()}</span>
                 </div>
             </motion.div>
+
+            {cardFilter !== 'all' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>
+                    Filtered by card —
+                    <button className="btn btn-ghost btn-sm" style={{ padding: '2px 10px', color: 'var(--color-primary, #2563EB)' }} onClick={() => setCardFilter('all')}>
+                        Clear filter
+                    </button>
+                </div>
+            )}
 
             <motion.div variants={item} initial="hidden" animate="show" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
                 <div style={{ position: 'relative', width: '220px' }}>
@@ -305,7 +330,6 @@ export default function AdvanceManager() {
                             <th>Due</th>
                             <th>Total Amount</th>
                             <th>Status</th>
-                            <th>Pay Slip</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -381,28 +405,25 @@ export default function AdvanceManager() {
                                     )}
                                 </td>
                                 <td>
-                                    {/* Pay Slip only makes sense for EMI — an Advance is a single
-                                        lump-sum disbursement with no installment schedule to
-                                        summarize, so there's nothing here for it to print. */}
-                                    {row.record_type === 'EMI' && row.emi ? (
-                                        <button className="btn btn-secondary btn-sm" style={{ color: '#2563EB' }} onClick={() => setPayslipRow(row)}>
-                                            <IconPrinter size={14} /> Pay Slip
-                                        </button>
-                                    ) : '—'}
-                                </td>
-                                <td>
                                     <div style={{ display: 'flex', gap: '4px' }}>
                                         <button className="btn btn-ghost btn-icon" onClick={() => { setEditing(row); setAddType(row.record_type); setShowModal(true) }} title="Edit"><IconEdit size={15} /></button>
                                         <button className="btn btn-ghost btn-icon" onClick={() => handleDelete(row)} title="Delete" style={{ color: '#DC2626' }}><IconTrash size={15} /></button>
+                                        {/* Pay Slip only makes sense for EMI — an Advance is a
+                                            single lump-sum disbursement with no installment
+                                            schedule to summarize, so there's nothing here for it
+                                            to print. */}
+                                        {row.record_type === 'EMI' && row.emi && (
+                                            <button className="btn btn-ghost btn-sm" onClick={() => setPayslipRow(row)} title="Pay Slip" style={{ color: '#2563EB', display: 'flex', alignItems: 'center', gap: '4px' }}><IconPrinter size={15} /> Pay Slip</button>
+                                        )}
                                     </div>
                                 </td>
                             </tr>
                         ))}
                         {!loading && filtered.length === 0 && (
-                            <tr><td colSpan={11} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No advance or EMI records found.</td></tr>
+                            <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No advance or EMI records found.</td></tr>
                         )}
                         {loading && (
-                            <tr><td colSpan={11} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
+                            <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
                         )}
                     </tbody>
                 </table>

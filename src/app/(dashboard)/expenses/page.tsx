@@ -421,13 +421,14 @@ export default function ExpensesPage() {
             <motion.div variants={item} style={{ display: 'flex', gap: '24px', borderBottom: '1px solid var(--color-border-light)', marginBottom: '24px', paddingBottom: '0' }}>
                 {[
                     { id: 'overview', label: 'Overview' },
-                    { id: 'transactions', label: 'Transactions' },
-                    { id: 'categories', label: 'Categories' },
+                    // { id: 'transactions', label: 'Transactions' },
+                    // { id: 'categories', label: 'Categories' },
                     { id: 'budgets', label: 'Budgets' },
                     { id: 'reports', label: 'Reports' },
                     { id: 'funds', label: 'Funds' },
                     ...(isAdmin ? [{ id: 'advance', label: 'Salary Advance & EMI' }] : []),
                     ...(isAdmin ? [{ id: 'providentFund', label: 'Provident Fund' }] : []),
+                     { id: 'categories', label: 'Categories' },
                 ].map(tab => (
                     <button
                         key={tab.id}
