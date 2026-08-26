@@ -44,7 +44,7 @@ const translations: Record<string, Record<Language, string>> = {
     'nav.attendance': { en: 'Employee Attendance', bn: 'কর্মচারী উপস্থিতি' },
     'nav.performance': { en: 'Performance', bn: 'পারফরম্যান্স' },
     'nav.courier': { en: 'Courier', bn: 'কুরিয়ার' },
-    'nav.expenses': { en: 'Expenses', bn: 'এক্সপেন্স' },
+    'nav.finance': { en: 'Finance', bn: 'ফিন্যান্স' },
     'nav.requisitions': { en: 'Requisitions', bn: 'রিকুইজিশন' },
     'nav.ideas': { en: 'Ideas', bn: 'আইডিয়া' },
     'nav.content': { en: 'Content', bn: 'কনটেন্ট' },

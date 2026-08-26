@@ -129,8 +129,14 @@ export default function ExpensesPage() {
     const [showIncomeModal, setShowIncomeModal] = useState(false)
     const [incomeForm, setIncomeForm] = useState(emptyIncomeForm)
     const [incomeSaving, setIncomeSaving] = useState(false)
-    const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'categories' | 'budgets' | 'reports' | 'funds' | 'advance' | 'providentFund'>('overview')
+    // Finance Hub's primary navigation is now just Expenses | Income | Reports (see the tab
+    // bar below). The other tab ids below (transactions/categories/budgets/funds/advance/
+    // providentFund) are kept — their components, routes, APIs, and data are all still fully
+    // intact and reachable by this same state — they're just not currently wired to a visible
+    // tab button, pending a later decision on where they belong in the new structure.
+    const [activeTab, setActiveTab] = useState<'expenses' | 'income' | 'transactions' | 'categories' | 'budgets' | 'reports' | 'funds' | 'advance' | 'providentFund'>('expenses')
     const [funds, setFunds] = useState<{ id: string; name: string }[]>([])
+    const [incomeSearchQuery, setIncomeSearchQuery] = useState('')
     // Bulk-approve pending expenses (Super Admin only)
     const [selectedIds, setSelectedIds] = useState<string[]>([])
     const [bulkApproving, setBulkApproving] = useState(false)
@@ -353,9 +359,12 @@ export default function ExpensesPage() {
         finally { setIncomeSaving(false) }
     }
 
+    // 'Monthly_Budget' is a magic source value the Overview page piggybacks a budget cap onto
+    // the income table with — excluded from "real" income totals/the dedicated Income tab's
+    // list, but still feeds the Budget card/Budget Analytics chart below via budgetEntries.
     const regularIncome = incomeEntries.filter(e => e.source !== 'Monthly_Budget')
     const budgetEntries = incomeEntries.filter(e => e.source === 'Monthly_Budget')
-    
+
     const totalRealIncome = regularIncome.reduce((s, e) => s + (Number(e.amount) || 0), 0)
     const totalBudget = budgetEntries.reduce((s, e) => s + (Number(e.amount) || 0), 0)
 
@@ -365,88 +374,174 @@ export default function ExpensesPage() {
     const netBalance = totalRealIncome - committedExpenses
     const remainingBudget = totalBudget - committedExpenses
 
+    // Overview sub-tab cards (restored to the original combined set — Budget/Income/Expense/
+    // Net Balance/Pending together, exactly as the previous single-page Finance Hub showed).
     const statCards = [
         { label: 'Budget', value: `৳${totalBudget.toLocaleString()}`, sub: `Remaining: ৳${remainingBudget.toLocaleString()}`, color: '#3B82F6' },
-        { label: 'Total Income', value: `৳${totalRealIncome.toLocaleString()}`, sub: `${regularIncome.length} entries`, color: '#10B981' },
+        // { label: 'Total Income', value: `৳${totalRealIncome.toLocaleString()}`, sub: `${regularIncome.length} entries`, color: '#10B981' },
         { label: 'Total Expenses', value: `৳${committedExpenses.toLocaleString()}`, sub: `${stats.count} entries`, color: '#DC2626' },
         { label: 'Net Balance', value: `৳${Math.abs(netBalance).toLocaleString()}`, sub: netBalance >= 0 ? 'Profit' : 'Loss', color: netBalance >= 0 ? '#10B981' : '#DC2626' },
         { label: 'Pending', value: `৳${stats.pending.toLocaleString()}`, sub: 'Awaiting approval', color: '#F59E0B' },
     ]
 
+    // Income tab cards — income-only figures, same card styling as Expenses.
+    const incomeStatCards = [
+        { label: 'Total Income', value: `৳${totalRealIncome.toLocaleString()}`, sub: `${regularIncome.length} entries`, color: '#10B981' },
+        { label: 'Income Entries', value: String(regularIncome.length), sub: 'Recorded this period', color: '#10B981' },
+    ]
+
+    const filteredIncome = regularIncome.filter(e => {
+        if (!incomeSearchQuery) return true
+        const q = incomeSearchQuery.toLowerCase()
+        return (e.description || '').toLowerCase().includes(q) || (e.source || '').toLowerCase().includes(q)
+    })
+
+    // The master tab (Expenses | Income | Reports) is derived from activeTab rather than a
+    // separate state — every previous single-level tab id except 'income'/'reports' (i.e.
+    // expenses/transactions/categories/budgets/funds/advance/providentFund) is a sub-tab that
+    // lives under the Expenses master tab, restored below as its own nested nav bar.
+    const masterTab: 'expenses' | 'income' | 'reports' = activeTab === 'income' ? 'income' : activeTab === 'reports' ? 'reports' : 'expenses'
+
+    // The page identity flexes with whichever master tab is active — "Finance Hub" as a whole
+    // concept splits into its three constituent hubs rather than staying one fixed banner.
+    const HUB_META = {
+        expenses: { title: 'Expense Hub', subtitle: 'Track, approve, and manage every company expense.' },
+        income: { title: 'Income Hub', subtitle: 'Record and track all incoming revenue.' },
+        reports: { title: 'Report Hub', subtitle: 'Financial reports and analytics across your business.' },
+    } as const
+    const MASTER_TABS = [
+        {
+            id: 'expenses' as const, label: 'Expenses', gradient: 'linear-gradient(135deg, #2563EB, #1D4ED8)', shadow: 'rgba(37,99,235,0.35)',
+            icon: (<svg width="17" height="17" viewBox="0 0 20 20" fill="currentColor"><path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" /><path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" /></svg>),
+        },
+        {
+            id: 'income' as const, label: 'Income', gradient: 'linear-gradient(135deg, #10B981, #059669)', shadow: 'rgba(16,185,129,0.35)',
+            icon: (<svg width="17" height="17" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z" clipRule="evenodd" /></svg>),
+        },
+        {
+            id: 'reports' as const, label: 'Reports', gradient: 'linear-gradient(135deg, #8B5CF6, #7C3AED)', shadow: 'rgba(139,92,246,0.35)',
+            icon: (<svg width="17" height="17" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1H3a1 1 0 01-1-1v-6zM8 7a1 1 0 011-1h2a1 1 0 011 1v10a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 3a1 1 0 011-1h2a1 1 0 011 1v14a1 1 0 01-1 1h-2a1 1 0 01-1-1V3z" /></svg>),
+        },
+    ]
+
     return (
         <motion.div variants={container} animate="show">
+            {/* Master Tab Navigation — Finance Hub's primary nav: Expenses | Income | Reports,
+                pinned at the very top so it's the first thing seen, above the (dynamic) page
+                header itself. */}
+            <motion.div variants={item} style={{
+                display: 'flex', gap: '6px', padding: '6px', width: 'fit-content', borderRadius: '16px',
+                marginBottom: '20px', background: 'linear-gradient(135deg, rgba(37,99,235,0.06), rgba(16,185,129,0.06), rgba(139,92,246,0.06))',
+                border: '1px solid var(--color-border-light)',
+            }}>
+                {MASTER_TABS.filter(tab => tab.id !== 'income' || isAdmin).map(tab => {
+                    const isActive = masterTab === tab.id
+                    return (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            style={{
+                                position: 'relative', display: 'flex', alignItems: 'center', gap: '8px',
+                                padding: '10px 22px', borderRadius: '12px', border: 'none', cursor: 'pointer',
+                                fontSize: '0.9375rem', fontWeight: 600, zIndex: 1, transition: 'color 0.25s',
+                                color: isActive ? '#fff' : 'var(--color-text-tertiary)',
+                            }}
+                        >
+                            {isActive && (
+                                <motion.div layoutId="activeFinanceMasterTab" transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                                    style={{ position: 'absolute', inset: 0, borderRadius: '12px', background: tab.gradient, boxShadow: `0 6px 16px -2px ${tab.shadow}`, zIndex: -1 }} />
+                            )}
+                            {tab.icon}
+                            {tab.label}
+                        </button>
+                    )
+                })}
+            </motion.div>
+
             <motion.div className="page-header" variants={item}>
                 <div>
-                    <h1 className="page-title">Finance Hub</h1>
-                    <p className="page-subtitle">All-in-one financial management, budgets, and reporting.</p>
+                    <h1 className="page-title">{HUB_META[masterTab].title}</h1>
+                    <p className="page-subtitle">{HUB_META[masterTab].subtitle}</p>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => {
-                            const now = new Date()
-                            const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-                            const link = document.createElement('a')
-                            link.href = `/api/export?type=expenses&month=${month}`
-                            link.download = `expenses-${month}.csv`
-                            link.click()
-                        }}
-                        title="Export this month's expenses"
-                    >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
-                        </svg>
-                        Export
-                    </button>
-                    {isAdmin && (
+                    {masterTab === 'expenses' && (
                         <>
-                            <button className="btn btn-sm" style={{ background: '#3B82F6', color: '#fff', border: 'none' }} onClick={() => { setBudgetAmount(''); setShowBudgetModal(true) }}>
-                                <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
-                                Add Budget
+                            <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => {
+                                    const now = new Date()
+                                    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+                                    const link = document.createElement('a')
+                                    link.href = `/api/export?type=expenses&month=${month}`
+                                    link.download = `expenses-${month}.csv`
+                                    link.click()
+                                }}
+                                title="Export this month's expenses"
+                            >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                                Export
                             </button>
-                            <button className="btn btn-sm" style={{ background: '#10B981', color: '#fff', border: 'none' }} onClick={() => { setIncomeForm(emptyIncomeForm); setShowIncomeModal(true) }}>
+                            {isAdmin && (
+                                <>
+                                    <button className="btn btn-sm" style={{ background: '#3B82F6', color: '#fff', border: 'none' }} onClick={() => { setBudgetAmount(''); setShowBudgetModal(true) }}>
+                                        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                                        Add Budget
+                                    </button>
+                                    {/* <button className="btn btn-sm" style={{ background: '#10B981', color: '#fff', border: 'none' }} onClick={() => { setIncomeForm(emptyIncomeForm); setShowIncomeModal(true) }}>
+                                        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                                        Add Income
+                                    </button> */}
+                                </>
+                            )}
+                            <button className="btn btn-primary btn-sm" onClick={openAddModal}>
                                 <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
-                                Add Income
+                                Add Expense
                             </button>
                         </>
                     )}
-                    <button className="btn btn-primary btn-sm" onClick={openAddModal}>
-                        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
-                        Add Expense
-                    </button>
+                    {masterTab === 'income' && isAdmin && (
+                        <button className="btn btn-sm" style={{ background: '#10B981', color: '#fff', border: 'none' }} onClick={() => { setIncomeForm(emptyIncomeForm); setShowIncomeModal(true) }}>
+                            <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                            Add Income
+                        </button>
+                    )}
                 </div>
             </motion.div>
 
-            {/* Tab Navigation */}
-            <motion.div variants={item} style={{ display: 'flex', gap: '24px', borderBottom: '1px solid var(--color-border-light)', marginBottom: '24px', paddingBottom: '0' }}>
-                {[
-                    { id: 'overview', label: 'Overview' },
-                    // { id: 'transactions', label: 'Transactions' },
-                    // { id: 'categories', label: 'Categories' },
-                    { id: 'budgets', label: 'Budgets' },
-                    { id: 'reports', label: 'Reports' },
-                    { id: 'funds', label: 'Funds' },
-                    ...(isAdmin ? [{ id: 'advance', label: 'Salary Advance & EMI' }] : []),
-                    ...(isAdmin ? [{ id: 'providentFund', label: 'Provident Fund' }] : []),
-                     { id: 'categories', label: 'Categories' },
-                ].map(tab => (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id as any)}
-                        style={{
-                            background: 'none', border: 'none', padding: '0 0 12px 0',
-                            fontSize: '0.9375rem', fontWeight: activeTab === tab.id ? 600 : 500,
-                            color: activeTab === tab.id ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
-                            cursor: 'pointer', position: 'relative'
-                        }}
-                    >
-                        {tab.label}
-                        {activeTab === tab.id && (
-                            <motion.div layoutId="activeFinanceTab" style={{ position: 'absolute', bottom: '-1px', left: 0, right: 0, height: '2px', background: '#0070f3', borderRadius: '2px' }} />
-                        )}
-                    </button>
-                ))}
-            </motion.div>
+            {/* Expenses sub-nav — the previous single-level Finance Hub tab bar, now nested
+                under the Expenses master tab (Reports moved out to its own master tab; the
+                rest — Overview/Budgets/Funds/Salary Advance & EMI/Provident Fund/Categories —
+                are unchanged from before). */}
+            {masterTab === 'expenses' && (
+                <motion.div variants={item} style={{ display: 'flex', gap: '24px', borderBottom: '1px solid var(--color-border-light)', marginBottom: '24px', paddingTop: '12px', paddingBottom: '0' }}>
+                    {[
+                        { id: 'expenses' as const, label: 'Overview' },
+                        { id: 'budgets' as const, label: 'Budgets' },
+                        { id: 'funds' as const, label: 'Funds' },
+                        ...(isAdmin ? [{ id: 'advance' as const, label: 'Salary Advance & EMI' }] : []),
+                        ...(isAdmin ? [{ id: 'providentFund' as const, label: 'Provident Fund' }] : []),
+                        { id: 'categories' as const, label: 'Categories' },
+                    ].map(tab => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            style={{
+                                background: 'none', border: 'none', padding: '0 0 10px 0',
+                                fontSize: '0.8125rem', fontWeight: activeTab === tab.id ? 600 : 500,
+                                color: activeTab === tab.id ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
+                                cursor: 'pointer', position: 'relative'
+                            }}
+                        >
+                            {tab.label}
+                            {activeTab === tab.id && (
+                                <motion.div layoutId="activeExpenseSubTab" style={{ position: 'absolute', bottom: '-1px', left: 0, right: 0, height: '2px', background: '#0070f3', borderRadius: '2px' }} />
+                            )}
+                        </button>
+                    ))}
+                </motion.div>
+            )}
 
             {activeTab === 'transactions' && <TransactionsList />}
             {activeTab === 'categories' && <CategoriesManager />}
@@ -455,7 +550,7 @@ export default function ExpensesPage() {
             {activeTab === 'providentFund' && isAdmin && <ProvidentFundManager />}
             {activeTab === 'reports' && <ReportsView />}
 
-            {activeTab === 'overview' && (
+            {activeTab === 'expenses' && (
                 <>
             {/* Stats */}
             <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '24px' }}>
@@ -601,7 +696,7 @@ export default function ExpensesPage() {
                                             {/* Background track */}
                                             <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`} fill="none" stroke="rgba(118,118,128,0.15)" strokeWidth={stroke} strokeLinecap="round" />
                                             {/* Foreground track */}
-                                            <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`} fill="none" stroke={statusColor} strokeWidth={stroke} strokeLinecap="round" 
+                                            <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`} fill="none" stroke={statusColor} strokeWidth={stroke} strokeLinecap="round"
                                                 strokeDasharray={circumference}
                                                 strokeDashoffset={dashOffset}
                                                 style={{ transition: 'stroke-dashoffset 1s ease-out' }}
@@ -985,7 +1080,217 @@ export default function ExpensesPage() {
                 )}
             </AnimatePresence>
 
-            {/* Add Income Modal */}
+            {/* Add Budget Modal */}
+            <AnimatePresence>
+                {showBudgetModal && (
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowBudgetModal(false)}>
+                        <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                            onClick={e => e.stopPropagation()} style={{ maxWidth: '400px', width: '100%' }}>
+                            <div className="modal-header">
+                                <h2 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <svg width="20" height="20" viewBox="0 0 20 20" fill="#3B82F6"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" /></svg>
+                                    Set Monthly Budget
+                                </h2>
+                                <button className="btn btn-ghost btn-sm" onClick={() => setShowBudgetModal(false)}>
+                                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                                </button>
+                            </div>
+                            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                                <div className="form-group">
+                                    <label className="form-label">Budget Amount (৳) *</label>
+                                    <input className="form-input" type="number" value={budgetAmount} onChange={e => setBudgetAmount(e.target.value)} placeholder="Enter budget for this period" />
+                                </div>
+                                <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', lineHeight: 1.5 }}>
+                                    This will add a budget entry to the current period. To adjust the budget, you can add another entry or delete the existing one from the Income Entries table below.
+                                </p>
+                            </div>
+                            <div className="modal-footer">
+                                <button className="btn btn-secondary btn-sm" onClick={() => setShowBudgetModal(false)}>Cancel</button>
+                                <button className="btn btn-sm" style={{ background: '#3B82F6', color: '#fff', border: 'none' }} onClick={handleBudgetSave} disabled={incomeSaving || !budgetAmount}>
+                                    {incomeSaving ? 'Saving...' : 'Set Budget'}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Income Entries (Admin only) — restored on the Overview sub-tab exactly as
+                before; the dedicated Income tab's own table (with search) is separate and
+                additive, not a replacement for this at-a-glance widget. */}
+            {isAdmin && incomeEntries.length > 0 && (
+                <motion.div variants={item} style={{ marginTop: '24px' }}>
+                    <h3 style={{ fontSize: '0.9375rem', fontWeight: 600, marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <svg width="16" height="16" viewBox="0 0 20 20" fill="#10B981"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" /></svg>
+                        Income Entries
+                    </h3>
+                    <div className="card" style={{ overflow: 'hidden', padding: 0 }}>
+                        <div style={{ overflowX: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
+                                <thead>
+                                    <tr style={{ borderBottom: '1px solid var(--color-border-light)' }}>
+                                        <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Date</th>
+                                        <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Description</th>
+                                        <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Source</th>
+                                        <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Amount</th>
+                                        <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {incomeEntries.map((inc, idx) => (
+                                        <tr key={inc.id} style={{ borderBottom: idx < incomeEntries.length - 1 ? '1px solid var(--color-border-light)' : 'none' }}>
+                                            <td style={{ padding: '10px 16px', color: 'var(--color-text-secondary)' }}>{new Date(inc.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
+                                            <td style={{ padding: '10px 16px' }}>{inc.description || '-'}</td>
+                                            <td style={{ padding: '10px 16px', color: 'var(--color-text-tertiary)' }}>{inc.source || '-'}</td>
+                                            <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: '#10B981', fontFamily: 'monospace' }}>+৳{Number(inc.amount).toLocaleString()}</td>
+                                            <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                                                <button className="btn btn-ghost btn-sm" onClick={() => handleIncomeDelete(inc.id)} style={{ padding: '4px', color: '#DC2626' }}>
+                                                    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </motion.div>
+            )}
+            </>
+            )}
+
+            {/* Income tab — mirrors the Expenses tab's structure (cards → date filter →
+                search → table), per its own clean foundation: no expense-specific logic
+                copied in, just the same visual pattern applied to the existing income data/
+                handlers that already lived on this page. */}
+            {activeTab === 'income' && isAdmin && (
+                <>
+                    <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+                        {incomeStatCards.map(s => (
+                            <div key={s.label} className="card" style={{ padding: '16px 20px' }}>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginBottom: '4px' }}>{s.label}</div>
+                                <div style={{ fontSize: '1.375rem', fontWeight: 700, color: s.color, lineHeight: 1.2 }}>{s.value}</div>
+                                <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginTop: '2px' }}>{s.sub}</div>
+                            </div>
+                        ))}
+                    </motion.div>
+
+                    {/* Date Range Filter — shares dateRange/refDate/customStart/customEnd with
+                        the Expenses tab: fetchExpenses() already pulls both expenses and
+                        income for the same window in one pass, so this stays one filter, not
+                        two independent ones that could drift apart. */}
+                    <motion.div variants={item} style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', position: 'relative', background: 'rgba(118,118,128,0.08)', borderRadius: '10px', padding: '2px' }}>
+                            {([{ key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' }, { key: 'month', label: 'This Month' }, { key: 'custom', label: 'Custom' }] as const).map(opt => (
+                                <button key={opt.key} onClick={() => setDateRange(opt.key)}
+                                    style={{ position: 'relative', padding: '6px 14px', borderRadius: '8px', border: 'none', fontSize: '0.8125rem', fontWeight: 500, background: 'transparent', color: dateRange === opt.key ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)', cursor: 'pointer', transition: 'color 0.2s', zIndex: 1 }}>
+                                    {dateRange === opt.key && (
+                                        <motion.div layoutId="incDateTab" style={{ position: 'absolute', inset: 0, background: 'var(--color-bg-primary)', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
+                                    )}
+                                    <span style={{ position: 'relative', zIndex: 1 }}>{opt.label}</span>
+                                </button>
+                            ))}
+                        </div>
+                        {(dateRange === 'today' || dateRange === 'week' || dateRange === 'month') && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', borderRadius: '10px', padding: '4px' }}>
+                                <button className="btn btn-ghost btn-icon" onClick={() => {
+                                    const d = new Date(refDate); d.setDate(d.getDate() - (dateRange === 'week' ? 7 : dateRange === 'month' ? 30 : 1)); setRefDate(getLocalDateString(d))
+                                }} style={{ borderRadius: '8px' }}>
+                                    <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                                </button>
+                                <div style={{ width: '160px' }}>
+                                    <ModernDatePicker value={refDate} onChange={setRefDate} />
+                                </div>
+                                <button className="btn btn-ghost btn-icon" onClick={() => {
+                                    const d = new Date(refDate); d.setDate(d.getDate() + (dateRange === 'week' ? 7 : dateRange === 'month' ? 30 : 1)); setRefDate(getLocalDateString(d))
+                                }} style={{ borderRadius: '8px' }}>
+                                    <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
+                                </button>
+                            </div>
+                        )}
+                        {dateRange === 'custom' && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div style={{ width: '150px' }}><ModernDatePicker value={customStart} onChange={setCustomStart} placeholder="Start Date" /></div>
+                                <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8125rem' }}>to</span>
+                                <div style={{ width: '150px' }}><ModernDatePicker value={customEnd} onChange={setCustomEnd} placeholder="End Date" /></div>
+                            </div>
+                        )}
+                    </motion.div>
+
+                    {/* Search */}
+                    <motion.div variants={item} style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: '200px', maxWidth: '300px' }}>
+                            <div style={{ position: 'relative' }}>
+                                <svg width="15" height="15" viewBox="0 0 20 20" fill="var(--color-text-tertiary)" style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }}>
+                                    <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+                                </svg>
+                                <input className="form-input" type="text" placeholder="Search income..."
+                                    value={incomeSearchQuery} onChange={e => setIncomeSearchQuery(e.target.value)}
+                                    style={{ paddingLeft: '34px', height: '36px', fontSize: '0.8125rem', background: 'rgba(118,118,128,0.08)', border: 'none', borderRadius: '10px' }}
+                                />
+                            </div>
+                        </div>
+                    </motion.div>
+
+                    {/* Income Table */}
+                    {loading ? (
+                        <motion.div variants={item} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {[1, 2, 3].map(i => (
+                                <div key={i} className="card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                    <div className="skeleton" style={{ width: 36, height: 36, borderRadius: '10px', flexShrink: 0 }} />
+                                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        <div className="skeleton" style={{ width: '55%', height: 14 }} />
+                                        <div className="skeleton" style={{ width: '35%', height: 10 }} />
+                                    </div>
+                                    <div className="skeleton" style={{ width: 70, height: 14 }} />
+                                </div>
+                            ))}
+                        </motion.div>
+                    ) : filteredIncome.length === 0 ? (
+                        <motion.div variants={item} className="card" style={{ textAlign: 'center', padding: '60px 24px' }}>
+                            <svg width="48" height="48" viewBox="0 0 20 20" fill="#10B981" style={{ margin: '0 auto 16px', opacity: 0.5 }}><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" /></svg>
+                            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '8px' }}>No income yet</h3>
+                            <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>Click &quot;Add Income&quot; to record one.</p>
+                        </motion.div>
+                    ) : (
+                        <motion.div variants={item} className="card" style={{ overflow: 'hidden', padding: 0 }}>
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
+                                    <thead>
+                                        <tr style={{ borderBottom: '1px solid var(--color-border-light)' }}>
+                                            <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Date</th>
+                                            <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Description</th>
+                                            <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Source</th>
+                                            <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Amount</th>
+                                            <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredIncome.map((inc, idx) => (
+                                            <tr key={inc.id} style={{ borderBottom: idx < filteredIncome.length - 1 ? '1px solid var(--color-border-light)' : 'none' }}>
+                                                <td style={{ padding: '10px 16px', color: 'var(--color-text-secondary)' }}>{new Date(inc.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
+                                                <td style={{ padding: '10px 16px' }}>{inc.description || '-'}</td>
+                                                <td style={{ padding: '10px 16px', color: 'var(--color-text-tertiary)' }}>{inc.source || '-'}</td>
+                                                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: '#10B981', fontFamily: 'monospace' }}>+৳{Number(inc.amount).toLocaleString()}</td>
+                                                <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                                                    <button className="btn btn-ghost btn-sm" onClick={() => handleIncomeDelete(inc.id)} style={{ padding: '4px', color: '#DC2626' }}>
+                                                        <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </motion.div>
+                    )}
+
+                </>
+            )}
+
+            {/* Add Income Modal — page-level (not nested in either tab's fragment) since it's
+                triggered from the "Add Income" button on both the Overview sub-tab and the
+                Income tab, sharing the one showIncomeModal/incomeForm state either way. */}
             <AnimatePresence>
                 {showIncomeModal && (
                     <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowIncomeModal(false)}>
@@ -1056,83 +1361,6 @@ export default function ExpensesPage() {
                     </motion.div>
                 )}
             </AnimatePresence>
-
-            {/* Add Budget Modal */}
-            <AnimatePresence>
-                {showBudgetModal && (
-                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowBudgetModal(false)}>
-                        <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                            onClick={e => e.stopPropagation()} style={{ maxWidth: '400px', width: '100%' }}>
-                            <div className="modal-header">
-                                <h2 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <svg width="20" height="20" viewBox="0 0 20 20" fill="#3B82F6"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" /></svg>
-                                    Set Monthly Budget
-                                </h2>
-                                <button className="btn btn-ghost btn-sm" onClick={() => setShowBudgetModal(false)}>
-                                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-                                </button>
-                            </div>
-                            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                                <div className="form-group">
-                                    <label className="form-label">Budget Amount (৳) *</label>
-                                    <input className="form-input" type="number" value={budgetAmount} onChange={e => setBudgetAmount(e.target.value)} placeholder="Enter budget for this period" />
-                                </div>
-                                <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', lineHeight: 1.5 }}>
-                                    This will add a budget entry to the current period. To adjust the budget, you can add another entry or delete the existing one from the Income Entries table below.
-                                </p>
-                            </div>
-                            <div className="modal-footer">
-                                <button className="btn btn-secondary btn-sm" onClick={() => setShowBudgetModal(false)}>Cancel</button>
-                                <button className="btn btn-sm" style={{ background: '#3B82F6', color: '#fff', border: 'none' }} onClick={handleBudgetSave} disabled={incomeSaving || !budgetAmount}>
-                                    {incomeSaving ? 'Saving...' : 'Set Budget'}
-                                </button>
-                            </div>
-                        </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-
-            {/* Income Entries (Admin only) */}
-            {isAdmin && incomeEntries.length > 0 && (
-                <motion.div variants={item} style={{ marginTop: '24px' }}>
-                    <h3 style={{ fontSize: '0.9375rem', fontWeight: 600, marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <svg width="16" height="16" viewBox="0 0 20 20" fill="#10B981"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" /></svg>
-                        Income Entries
-                    </h3>
-                    <div className="card" style={{ overflow: 'hidden', padding: 0 }}>
-                        <div style={{ overflowX: 'auto' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
-                                <thead>
-                                    <tr style={{ borderBottom: '1px solid var(--color-border-light)' }}>
-                                        <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Date</th>
-                                        <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Description</th>
-                                        <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Source</th>
-                                        <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Amount</th>
-                                        <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {incomeEntries.map((inc, idx) => (
-                                        <tr key={inc.id} style={{ borderBottom: idx < incomeEntries.length - 1 ? '1px solid var(--color-border-light)' : 'none' }}>
-                                            <td style={{ padding: '10px 16px', color: 'var(--color-text-secondary)' }}>{new Date(inc.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
-                                            <td style={{ padding: '10px 16px' }}>{inc.description || '-'}</td>
-                                            <td style={{ padding: '10px 16px', color: 'var(--color-text-tertiary)' }}>{inc.source || '-'}</td>
-                                            <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: '#10B981', fontFamily: 'monospace' }}>+৳{Number(inc.amount).toLocaleString()}</td>
-                                            <td style={{ padding: '10px 16px', textAlign: 'right' }}>
-                                                <button className="btn btn-ghost btn-sm" onClick={() => handleIncomeDelete(inc.id)} style={{ padding: '4px', color: '#DC2626' }}>
-                                                    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </motion.div>
-            )}
-            </>
-            )}
 
             {activeTab === 'funds' && (
                 <FundsManager />
