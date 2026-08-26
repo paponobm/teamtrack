@@ -117,13 +117,33 @@ export async function PUT(request: Request) {
             // from Advance, so it's settled independently here. Product Buy no longer links
             // into Finance Hub Expenses (see src/lib/productBuys.ts), so this only updates the
             // product_buys row's own status, not a mirrored expense.
-            await supabase
+            const { data: settledProductBuys } = await supabase
                 .from('product_buys')
                 .update({ payment_status: 'Paid' })
                 .eq('employee_id', data.employee_id)
                 .eq('payment_status', 'Unpaid')
                 .gte('purchase_date', start)
                 .lte('purchase_date', end)
+                .select('id, item, amount')
+
+            // Recovering a Product Buy's cost through payroll is, from the company's side,
+            // revenue from having sold that product to the employee — mirrored into Finance
+            // Hub's Income Hub (source 'Product Sell') the same "linked record" way verified
+            // Work Log advances mirror into income too (see
+            // src/app/api/work-log/[id]/verify-advance/route.ts). product_buy_id (unique, see
+            // migration 069_income_product_buy_link.sql) means a given Product Buy can never
+            // be mirrored twice, and .eq('payment_status', 'Unpaid') above already guarantees
+            // settledProductBuys only ever contains buys settled for the first time.
+            if (settledProductBuys && settledProductBuys.length > 0) {
+                await supabase.from('income').insert(settledProductBuys.map(pb => ({
+                    date: data.payment_date || end,
+                    description: `Product sale — ${pb.item || 'Product'}`,
+                    amount: pb.amount,
+                    source: 'Product Sell',
+                    product_buy_id: pb.id,
+                    added_by: auth.employee.id,
+                })))
+            }
 
             // Same again for Fines — Active, still-Unpaid fines count as "recovered through this
             // payout" (an Appealed or already-Waived fine isn't part of what

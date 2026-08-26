@@ -50,16 +50,18 @@ export async function POST(
         id
     )
 
-    // Mirrors the now-verified advance into Finance Hub's Income Hub (source 'Advance'), same
-    // "linked record" pattern EMI/Advance/Product Buy already use to mirror into Expenses —
-    // best-effort: a failed mirror doesn't block verification itself, since work_entries is
-    // the record of truth for advance verification. work_entry_id (unique, see migration
+    // Mirrors the now-verified advance into Finance Hub's Income Hub (source 'Order Advance' —
+    // named to stay distinct from Finance Hub's own separate "Salary Advance" concept, see
+    // migration 070_income_order_advance_source_rename.sql), same "linked record" pattern
+    // EMI/Advance/Product Buy already use to mirror into Expenses — best-effort: a failed
+    // mirror doesn't block verification itself, since work_entries is the record of truth for
+    // advance verification. work_entry_id (unique, see migration
     // 067_income_work_entry_link.sql) means this can never double-insert for the same order.
     await auth.supabase.from('income').insert({
         date: entryRow.date,
         description: `Advance payment — Order ${orderLabel}`,
         amount: entryRow.advance,
-        source: 'Advance',
+        source: 'Order Advance',
         note: entryRow.payment_gateway ? `Paid via ${entryRow.payment_gateway}` : null,
         business_name: entryRow.business_name || null,
         work_entry_id: id,

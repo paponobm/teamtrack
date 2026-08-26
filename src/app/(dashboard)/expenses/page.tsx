@@ -385,17 +385,23 @@ export default function ExpensesPage() {
     ]
 
     // Verified advance payments from Work Log orders (POST /api/work-log/[id]/verify-advance
-    // mirrors each one into `income` with source: 'Advance' — see migration
+    // mirrors each one into `income` with source: 'Order Advance' — see migration
     // 067_income_work_entry_link.sql) — same figure Work Log's own "Verified Advance Payment"
     // card shows, surfaced here too since it's now real income.
-    const verifiedAdvanceIncome = regularIncome.filter(e => e.source === 'Advance')
+    const verifiedAdvanceIncome = regularIncome.filter(e => e.source === 'Order Advance')
     const totalVerifiedAdvance = verifiedAdvanceIncome.reduce((s, e) => s + (Number(e.amount) || 0), 0)
+
+    // Settled Product Buys mirrored into `income` with source: 'Product Sell' (see
+    // PUT /api/payroll/salary-entries and migration 069_income_product_buy_link.sql) — same
+    // recovered-cost-as-revenue figure, surfaced here as its own card.
+    const productSellIncome = regularIncome.filter(e => e.source === 'Product Sell')
+    const totalProductSell = productSellIncome.reduce((s, e) => s + (Number(e.amount) || 0), 0)
 
     // Income tab cards — income-only figures, same card styling as Expenses.
     const incomeStatCards = [
         { label: 'Total Income', value: `৳${totalRealIncome.toLocaleString()}`, sub: `${regularIncome.length} entries`, color: '#10B981' },
         { label: 'Verified Advance', value: `৳${totalVerifiedAdvance.toLocaleString()}`, sub: `${verifiedAdvanceIncome.length} order(s)`, color: '#0EA5E9' },
-        { label: 'Income Entries', value: String(regularIncome.length), sub: 'Recorded this period', color: '#10B981' },
+        { label: 'Product Sale', value: `৳${totalProductSell.toLocaleString()}`, sub: `${productSellIncome.length} sale(s)`, color: '#8B5CF6' },
     ]
 
     const filteredIncome = regularIncome.filter(e => {
@@ -1201,8 +1207,8 @@ export default function ExpensesPage() {
 
                     {/* Donut Chart: By Source — same visual pattern as the Expenses tab's "By
                         Category" chart, grouping by income's own `source` field (verified
-                        advances land here as 'Advance', manually added income keeps whatever
-                        source it was given). */}
+                        advances land here as 'Order Advance', manually added income keeps
+                        whatever source it was given). */}
                     {regularIncome.length > 0 && (
                         <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', marginBottom: '24px' }}>
                             {(() => {
