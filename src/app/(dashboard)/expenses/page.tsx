@@ -380,13 +380,21 @@ export default function ExpensesPage() {
         { label: 'Budget', value: `৳${totalBudget.toLocaleString()}`, sub: `Remaining: ৳${remainingBudget.toLocaleString()}`, color: '#3B82F6' },
         // { label: 'Total Income', value: `৳${totalRealIncome.toLocaleString()}`, sub: `${regularIncome.length} entries`, color: '#10B981' },
         { label: 'Total Expenses', value: `৳${committedExpenses.toLocaleString()}`, sub: `${stats.count} entries`, color: '#DC2626' },
-        { label: 'Net Balance', value: `৳${Math.abs(netBalance).toLocaleString()}`, sub: netBalance >= 0 ? 'Profit' : 'Loss', color: netBalance >= 0 ? '#10B981' : '#DC2626' },
+        // { label: 'Net Balance', value: `৳${Math.abs(netBalance).toLocaleString()}`, sub: netBalance >= 0 ? 'Profit' : 'Loss', color: netBalance >= 0 ? '#10B981' : '#DC2626' },
         { label: 'Pending', value: `৳${stats.pending.toLocaleString()}`, sub: 'Awaiting approval', color: '#F59E0B' },
     ]
+
+    // Verified advance payments from Work Log orders (POST /api/work-log/[id]/verify-advance
+    // mirrors each one into `income` with source: 'Advance' — see migration
+    // 067_income_work_entry_link.sql) — same figure Work Log's own "Verified Advance Payment"
+    // card shows, surfaced here too since it's now real income.
+    const verifiedAdvanceIncome = regularIncome.filter(e => e.source === 'Advance')
+    const totalVerifiedAdvance = verifiedAdvanceIncome.reduce((s, e) => s + (Number(e.amount) || 0), 0)
 
     // Income tab cards — income-only figures, same card styling as Expenses.
     const incomeStatCards = [
         { label: 'Total Income', value: `৳${totalRealIncome.toLocaleString()}`, sub: `${regularIncome.length} entries`, color: '#10B981' },
+        { label: 'Verified Advance', value: `৳${totalVerifiedAdvance.toLocaleString()}`, sub: `${verifiedAdvanceIncome.length} order(s)`, color: '#0EA5E9' },
         { label: 'Income Entries', value: String(regularIncome.length), sub: 'Recorded this period', color: '#10B981' },
     ]
 
@@ -1115,47 +1123,6 @@ export default function ExpensesPage() {
                 )}
             </AnimatePresence>
 
-            {/* Income Entries (Admin only) — restored on the Overview sub-tab exactly as
-                before; the dedicated Income tab's own table (with search) is separate and
-                additive, not a replacement for this at-a-glance widget. */}
-            {isAdmin && incomeEntries.length > 0 && (
-                <motion.div variants={item} style={{ marginTop: '24px' }}>
-                    <h3 style={{ fontSize: '0.9375rem', fontWeight: 600, marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <svg width="16" height="16" viewBox="0 0 20 20" fill="#10B981"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" /></svg>
-                        Income Entries
-                    </h3>
-                    <div className="card" style={{ overflow: 'hidden', padding: 0 }}>
-                        <div style={{ overflowX: 'auto' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
-                                <thead>
-                                    <tr style={{ borderBottom: '1px solid var(--color-border-light)' }}>
-                                        <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Date</th>
-                                        <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Description</th>
-                                        <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Source</th>
-                                        <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Amount</th>
-                                        <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: 'var(--color-text-tertiary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {incomeEntries.map((inc, idx) => (
-                                        <tr key={inc.id} style={{ borderBottom: idx < incomeEntries.length - 1 ? '1px solid var(--color-border-light)' : 'none' }}>
-                                            <td style={{ padding: '10px 16px', color: 'var(--color-text-secondary)' }}>{new Date(inc.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
-                                            <td style={{ padding: '10px 16px' }}>{inc.description || '-'}</td>
-                                            <td style={{ padding: '10px 16px', color: 'var(--color-text-tertiary)' }}>{inc.source || '-'}</td>
-                                            <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: '#10B981', fontFamily: 'monospace' }}>+৳{Number(inc.amount).toLocaleString()}</td>
-                                            <td style={{ padding: '10px 16px', textAlign: 'right' }}>
-                                                <button className="btn btn-ghost btn-sm" onClick={() => handleIncomeDelete(inc.id)} style={{ padding: '4px', color: '#DC2626' }}>
-                                                    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </motion.div>
-            )}
             </>
             )}
 
@@ -1231,6 +1198,68 @@ export default function ExpensesPage() {
                             </div>
                         </div>
                     </motion.div>
+
+                    {/* Donut Chart: By Source — same visual pattern as the Expenses tab's "By
+                        Category" chart, grouping by income's own `source` field (verified
+                        advances land here as 'Advance', manually added income keeps whatever
+                        source it was given). */}
+                    {regularIncome.length > 0 && (
+                        <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+                            {(() => {
+                                const sourceBreakdown: Record<string, number> = {}
+                                regularIncome.forEach(e => {
+                                    const src = e.source || 'Other'
+                                    sourceBreakdown[src] = (sourceBreakdown[src] || 0) + (Number(e.amount) || 0)
+                                })
+                                const sorted = Object.entries(sourceBreakdown).sort((a, b) => b[1] - a[1])
+                                const total = sorted.reduce((s, [, v]) => s + v, 0)
+                                const chartColors = ['#10B981', '#0EA5E9', '#2563EB', '#F59E0B', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16']
+                                const r = 70, cx = 90, cy = 90, stroke = 28
+                                const circumference = 2 * Math.PI * r
+                                let offset = 0
+                                return (
+                                    <div className="card" style={{ padding: '20px' }}>
+                                        <div style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '16px', color: 'var(--color-text-primary)' }}>Income by Source</div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+                                            <div style={{ position: 'relative', flexShrink: 0 }}>
+                                                <svg width="180" height="180" viewBox="0 0 180 180">
+                                                    {sorted.map(([src, amount], i) => {
+                                                        const pct = total > 0 ? amount / total : 0
+                                                        const dashLen = pct * circumference
+                                                        const dashOffset = -offset
+                                                        offset += dashLen
+                                                        return (
+                                                            <circle key={src} cx={cx} cy={cy} r={r} fill="none"
+                                                                stroke={chartColors[i % chartColors.length]}
+                                                                strokeWidth={stroke}
+                                                                strokeDasharray={`${dashLen} ${circumference - dashLen}`}
+                                                                strokeDashoffset={dashOffset}
+                                                                transform={`rotate(-90 ${cx} ${cy})`}
+                                                                style={{ transition: 'stroke-dasharray 0.5s ease, stroke-dashoffset 0.5s ease' }}
+                                                            />
+                                                        )
+                                                    })}
+                                                </svg>
+                                                <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '0.625rem', color: 'var(--color-text-tertiary)' }}>Total</div>
+                                                    <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>৳{total.toLocaleString()}</div>
+                                                </div>
+                                            </div>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, maxHeight: '180px', overflowY: 'auto' }}>
+                                                {sorted.map(([src, amount], i) => (
+                                                    <div key={src} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem' }}>
+                                                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: chartColors[i % chartColors.length], flexShrink: 0 }} />
+                                                        <span style={{ flex: 1, color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{src} ({regularIncome.filter(e => (e.source || 'Other') === src).length})</span>
+                                                        <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'nowrap' }}>৳{amount.toLocaleString()}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )
+                            })()}
+                        </motion.div>
+                    )}
 
                     {/* Income Table */}
                     {loading ? (
