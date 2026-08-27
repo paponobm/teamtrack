@@ -196,6 +196,11 @@ export interface EmiPaidSummary {
     paid_installments: number
     total_installments: number
     remaining_installments: number
+    // Interest recovered so far, spread evenly across every installment (total loan interest ÷
+    // term months, × installments paid) — a flat per-installment average, not the reducing-
+    // balance schedule's own front-loaded month-by-month split (see getEmiPaidSummaries below
+    // for why). Distinct from `paid`, which also includes the principal being paid back.
+    interest_paid: number
 }
 
 interface EmiForSummary {
@@ -268,6 +273,14 @@ export async function getEmiPaidSummaries(supabase: SupabaseClient, emiRecords: 
         // Total Payable is the exact formula result, not installment × term — that would
         // re-introduce rounding drift since monthly_installment is stored rounded to 2 decimals.
         const totalPayable = computeTotalPayable(Number(r.amount) || 0, Number(r.interest_rate) || 0, Number(r.term_months) || 0)
+        // interest_paid deliberately uses the loan's total interest spread evenly across every
+        // installment (not the reducing-balance schedule's own front-loaded month-by-month
+        // split, even though that schedule is what actually produces `installment` and
+        // `totalPayable` above) — a product decision confirmed directly with the user, who
+        // wants "EMI Interest Income" to read as a flat per-installment average rather than
+        // the true (higher-early, lower-late) interest recognized each month.
+        const totalInterest = totalPayable - (Number(r.amount) || 0)
+        const interestPerInstallment = r.term_months > 0 ? totalInterest / r.term_months : 0
         const paidSet = paidMonthsByEmployee[r.employee_id] || new Set<string>()
 
         let paid = 0
@@ -278,6 +291,7 @@ export async function getEmiPaidSummaries(supabase: SupabaseClient, emiRecords: 
                 paidInstallments++
             }
         }
+        const interestPaid = round2(interestPerInstallment * paidInstallments)
 
         summaries[r.id] = {
             total_payable: totalPayable,
@@ -286,6 +300,7 @@ export async function getEmiPaidSummaries(supabase: SupabaseClient, emiRecords: 
             paid_installments: paidInstallments,
             total_installments: r.term_months,
             remaining_installments: r.term_months - paidInstallments,
+            interest_paid: interestPaid,
         }
     })
 

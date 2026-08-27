@@ -133,6 +133,7 @@ export async function POST(request: Request) {
             paid_installments: 0,
             total_installments: numTerm,
             remaining_installments: numTerm,
+            interest_paid: 0,
         },
     }, { status: 201 })
 }

@@ -6,7 +6,7 @@ import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString, getWeekRange, getMonthRange } from '@/lib/dateRange'
 import {
     IconWallet, IconUsers, IconPlus, IconX, IconBanknote, IconCheckCircle, IconClock,
-    IconSearch, IconEdit, IconTrash, IconChevronLeft, IconChevronRight, IconCalendar, IconPrinter,
+    IconSearch, IconEdit, IconTrash, IconChevronLeft, IconChevronRight, IconCalendar, IconPrinter, IconTrendingUp,
 } from '@/components/icons/Icons'
 
 interface Advance {
@@ -38,6 +38,7 @@ interface Emi {
     paid_installments: number
     total_installments: number
     remaining_installments: number
+    interest_paid: number
 }
 
 interface EmployeeOption {
@@ -187,10 +188,22 @@ export default function AdvanceManager() {
             acc.totalEmi += row.amount
             acc.totalEmiPaid += row.paid
             acc.totalEmiDue += row.due
+            // EMI Interest Income — the interest portion actually recovered so far (see
+            // interest_paid in src/lib/emis.ts, computed off the reducing-balance amortization
+            // schedule), distinct from totalEmiPaid above which also includes the principal
+            // being paid back. Collects every distinct rate in view too, shown under the card.
+            if (row.emi) {
+                acc.totalEmiInterestPaid += row.emi.interest_paid
+                if (row.emi.amount > 0) acc.emiInterestRates.add(row.emi.interest_rate)
+            }
         }
         acc.employeeIds.add(row.employee_id)
         return acc
-    }, { totalAdvance: 0, totalEmi: 0, totalAdvancePaid: 0, totalAdvanceDue: 0, totalEmiPaid: 0, totalEmiDue: 0, employeeIds: new Set<string>() })
+    }, { totalAdvance: 0, totalEmi: 0, totalAdvancePaid: 0, totalAdvanceDue: 0, totalEmiPaid: 0, totalEmiDue: 0, totalEmiInterestPaid: 0, emiInterestRates: new Set<number>(), employeeIds: new Set<string>() })
+
+    const emiInterestRateLabel = summary.emiInterestRates.size > 0
+        ? [...summary.emiInterestRates].sort((a, b) => a - b).map(r => `${r}%`).join(', ')
+        : 'No EMI loans in view'
 
     const handleDelete = async (row: CombinedRow) => {
         const label = row.record_type === 'Advance' ? 'advance' : 'EMI'
@@ -220,7 +233,7 @@ export default function AdvanceManager() {
                 </button>
             </div>
 
-            <motion.div variants={item} initial="hidden" animate="show" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '20px' }}>
+            <motion.div variants={item} initial="hidden" animate="show" style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '14px', marginBottom: '20px' }}>
                 <div className="stat-card" style={{ cursor: 'pointer', ...(cardFilter === 'advance' ? { boxShadow: '0 0 0 2px #2563EB' } : {}) }}
                     onClick={() => setCardFilter(f => f === 'advance' ? 'all' : 'advance')} title="Show only Advance records">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconWallet size={14} color="var(--color-text-tertiary)" /> Total Advance</span>
@@ -254,6 +267,11 @@ export default function AdvanceManager() {
                     onClick={() => setCardFilter(f => f === 'emiDue' ? 'all' : 'emiDue')} title="Show only EMI records still due">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Total EMI Due</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{summary.totalEmiDue.toLocaleString()}</span>
+                </div>
+                <div className="stat-card" title="Interest actually recovered from paid EMI installments so far">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconTrendingUp size={14} color="var(--color-text-tertiary)" /> EMI Interest Income</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#7C3AED' }}>৳{summary.totalEmiInterestPaid.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                    <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginTop: '2px' }}>{emiInterestRateLabel}</div>
                 </div>
             </motion.div>
 
