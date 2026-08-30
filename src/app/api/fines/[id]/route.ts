@@ -14,7 +14,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
-    const supabase = auth.supabase
+    const db = auth.db
     const body = await request.json()
 
     const update: Record<string, string | null> = {}
@@ -42,18 +42,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         update.reason = body.reason
     }
 
-    if (Object.keys(update).length === 0) {
+    const keys = Object.keys(update)
+    if (keys.length === 0) {
         return NextResponse.json({ error: 'No editable fields provided' }, { status: 400 })
     }
 
-    const { data, error } = await supabase
-        .from('fines')
-        .update(update)
-        .eq('id', id)
-        .select('id')
-        .maybeSingle()
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    const { rows: [data] } = await db.query(
+        `UPDATE fines SET ${setClauses.join(', ')} WHERE id = $1 RETURNING id`,
+        [id, ...keys.map(k => update[k])]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     if (!data) return NextResponse.json({ error: 'Fine not found' }, { status: 404 })
 
     return NextResponse.json({ success: true })
@@ -68,16 +67,15 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
-    const supabase = auth.supabase
+    const db = auth.db
 
-    const { data: fine } = await supabase.from('fines').select('member_id, amount, status').eq('id', id).maybeSingle()
+    const { rows: [fine] } = await db.query(`SELECT member_id, amount, status FROM fines WHERE id = $1`, [id])
     if (!fine) return NextResponse.json({ error: 'Fine not found' }, { status: 404 })
 
-    const { error } = await supabase.from('fines').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await db.query(`DELETE FROM fines WHERE id = $1`, [id])
 
     if (fine.status !== 'Waived') {
-        await awardPoints(supabase, fine.member_id, Math.abs(fine.amount), 'Fine Deleted', id, 'Fine record deleted by admin', auth.employee.id)
+        await awardPoints(db, fine.member_id, Math.abs(fine.amount), 'Fine Deleted', id, 'Fine record deleted by admin', auth.employee.id)
     }
 
     return NextResponse.json({ success: true })

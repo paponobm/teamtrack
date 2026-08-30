@@ -1,6 +1,6 @@
-import { createAdminClient } from './supabase/admin'
+import type { Pool, PoolClient } from 'pg'
 
-type SupabaseClient = ReturnType<typeof createAdminClient>
+type Db = Pool | PoolClient
 
 // Unlike EMI (a loan, where interest is added on top of what's repaid), the employee's
 // Provident Fund contribution — what's deducted from salary month to month (and therefore
@@ -64,20 +64,19 @@ export interface EmployeeProvidentFundDetail {
 // duplicate" pattern as getEmiLoanDetailsForMonth: sums every record's monthly_installment
 // for employees whose term (start_date's month through start_date's month + duration - 1)
 // covers the requested month. Never manually typed once a Provident Fund record exists.
-export async function getProvidentFundDetailsForMonth(supabase: SupabaseClient, employeeIds: string[], month: string): Promise<Record<string, EmployeeProvidentFundDetail>> {
+export async function getProvidentFundDetailsForMonth(db: Db, employeeIds: string[], month: string): Promise<Record<string, EmployeeProvidentFundDetail>> {
     const details: Record<string, EmployeeProvidentFundDetail> = {}
     employeeIds.forEach(id => { details[id] = { total: 0, records: [] } })
     if (employeeIds.length === 0) return details
 
-    const { data } = await supabase
-        .from('provident_funds')
-        .select('id, employee_id, start_date, duration_months, monthly_installment')
-        .in('employee_id', employeeIds)
+    const { rows } = await db.query(
+        `SELECT id, employee_id, start_date, duration_months, monthly_installment FROM provident_funds WHERE employee_id = ANY($1)`,
+        [employeeIds]
+    )
 
     const targetIndex = monthKeyToIndex(month)
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(data || []).forEach((r: any) => {
+    rows.forEach((r: { id: string; employee_id: string; start_date: string; duration_months: number; monthly_installment: number }) => {
         const d = details[r.employee_id]
         if (!d) return
         const startIndex = monthKeyToIndex(String(r.start_date).slice(0, 7))
@@ -115,7 +114,7 @@ interface ProvidentFundForSummary {
 // salary_entries row for that calendar month is marked payment_status = 'Paid' (the same
 // trigger the Mark-as-Paid flow already uses) — no new payment-recording UI, matching the
 // "reuse, don't duplicate" pattern used by Advance/Product Buy/EMI throughout Payroll.
-export async function getProvidentFundPaidSummaries(supabase: SupabaseClient, pfRecords: ProvidentFundForSummary[]): Promise<Record<string, ProvidentFundPaidSummary>> {
+export async function getProvidentFundPaidSummaries(db: Db, pfRecords: ProvidentFundForSummary[]): Promise<Record<string, ProvidentFundPaidSummary>> {
     const summaries: Record<string, ProvidentFundPaidSummary> = {}
     if (pfRecords.length === 0) return summaries
 
@@ -133,28 +132,24 @@ export async function getProvidentFundPaidSummaries(supabase: SupabaseClient, pf
     const startMonth = indexToMonthKey(minIndex)
     const endMonth = indexToMonthKey(maxIndex)
 
-    const { data: sheets } = await supabase
-        .from('salary_sheets')
-        .select('id, month')
-        .gte('month', startMonth)
-        .lte('month', endMonth)
+    const { rows: sheetRows } = await db.query(
+        `SELECT id, month FROM salary_sheets WHERE month >= $1 AND month <= $2`,
+        [startMonth, endMonth]
+    )
 
-    const sheetRows = sheets || []
     const sheetIds = sheetRows.map((s: { id: string }) => s.id)
     const sheetMonthById: Record<string, string> = {}
     sheetRows.forEach((s: { id: string; month: string }) => { sheetMonthById[s.id] = s.month })
 
     const paidMonthsByEmployee: Record<string, Set<string>> = {}
     if (sheetIds.length > 0 && employeeIds.size > 0) {
-        const { data: entries } = await supabase
-            .from('salary_entries')
-            .select('employee_id, salary_sheet_id, payment_status')
-            .in('salary_sheet_id', sheetIds)
-            .in('employee_id', Array.from(employeeIds))
-            .eq('payment_status', 'Paid')
+        const { rows: entries } = await db.query(
+            `SELECT employee_id, salary_sheet_id FROM salary_entries
+             WHERE salary_sheet_id = ANY($1) AND employee_id = ANY($2) AND payment_status = 'Paid'`,
+            [sheetIds, Array.from(employeeIds)]
+        )
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ;(entries || []).forEach((e: any) => {
+        entries.forEach((e: { employee_id: string; salary_sheet_id: string }) => {
             const month = sheetMonthById[e.salary_sheet_id]
             if (!month) return
             if (!paidMonthsByEmployee[e.employee_id]) paidMonthsByEmployee[e.employee_id] = new Set()

@@ -9,16 +9,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
-    const supabase = auth.supabase
+    const db = auth.db
     const body = await request.json()
 
-    const { data: existing, error: fetchError } = await supabase
-        .from('provident_funds')
-        .select('employee_id, principal_amount, duration_months, start_date, interest_rate')
-        .eq('id', id)
-        .maybeSingle()
+    const { rows: [existing] } = await db.query(
+        `SELECT employee_id, principal_amount, duration_months, start_date, interest_rate FROM provident_funds WHERE id = $1`,
+        [id]
+    )
 
-    if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 })
     if (!existing) return NextResponse.json({ error: 'Provident Fund record not found' }, { status: 404 })
 
     const update: Record<string, number | string | null> = {}
@@ -75,8 +73,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         update.monthly_installment = computeMonthlyInstallment(Number(finalPrincipal), Number(finalDuration))
     }
 
-    const { error } = await supabase.from('provident_funds').update(update).eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const keys = Object.keys(update)
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    await db.query(`UPDATE provident_funds SET ${setClauses.join(', ')} WHERE id = $1`, [id, ...keys.map(k => update[k])])
 
     return NextResponse.json({ success: true })
 }
@@ -90,10 +89,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
-    const supabase = auth.supabase
-
-    const { error } = await supabase.from('provident_funds').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await auth.db.query(`DELETE FROM provident_funds WHERE id = $1`, [id])
 
     return NextResponse.json({ success: true })
 }

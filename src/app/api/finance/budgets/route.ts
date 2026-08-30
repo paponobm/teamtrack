@@ -9,17 +9,14 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const period = searchParams.get('period') || new Date().toISOString().slice(0, 7) // YYYY-MM
 
-    const supabase = auth.supabase
-    const { data: budgets, error } = await supabase
-        .from('finance_budgets')
-        .select(`
-            *,
-            category:finance_categories(*)
-        `)
-        .eq('period', period)
+    const { rows } = await auth.db.query(
+        `SELECT b.*, row_to_json(c.*) AS category
+         FROM finance_budgets b LEFT JOIN finance_categories c ON c.id = b.category_id
+         WHERE b.period = $1`,
+        [period]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json(budgets)
+    return NextResponse.json(rows)
 }
 
 // POST /api/finance/budgets
@@ -34,13 +31,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'category_id, period, and amount are required' }, { status: 400 })
     }
 
-    const { data, error } = await auth.supabase
-        .from('finance_budgets')
-        .upsert({ category_id, period, amount }, { onConflict: 'category_id,period' })
-        .select('*')
-        .single()
+    const { rows: [data] } = await auth.db.query(
+        `INSERT INTO finance_budgets (category_id, period, amount)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (category_id, period) DO UPDATE SET amount = EXCLUDED.amount
+         RETURNING *`,
+        [category_id, period, amount]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(data, { status: 201 })
 }
 
@@ -53,7 +51,6 @@ export async function DELETE(request: Request) {
     const id = searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const { error } = await auth.supabase.from('finance_budgets').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await auth.db.query(`DELETE FROM finance_budgets WHERE id = $1`, [id])
     return NextResponse.json({ success: true })
 }

@@ -27,8 +27,8 @@ const MONTH_RE = /^\d{4}-\d{2}$/
 export async function GET(request: Request) {
     const auth = await requireAuth(2) // Super Admin only — salary data
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const from = searchParams.get('from')
     const to = searchParams.get('to')
@@ -39,13 +39,10 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'from must not be after to' }, { status: 400 })
     }
 
-    const { data: sheets } = await supabase
-        .from('salary_sheets')
-        .select('id, month')
-        .gte('month', from)
-        .lte('month', to)
-        .order('month', { ascending: true })
-    const sheetRows: { id: string; month: string }[] = sheets || []
+    const { rows: sheetRows } = await db.query(
+        `SELECT id, month FROM salary_sheets WHERE month >= $1 AND month <= $2 ORDER BY month ASC`,
+        [from, to]
+    )
     const distinctEmployeeIds = new Set<string>()
 
     let totalSalaryExpense = 0
@@ -78,20 +75,20 @@ export async function GET(request: Request) {
     let totalFine = 0
 
     for (const sheet of sheetRows) {
-        const { data: entries } = await supabase
-            .from('salary_entries')
-            .select(`
-                employee_id, basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus, other_deduction, payment_status,
-                employee:employees!employee_id(basic_salary_effective_month)
-            `)
-            .eq('salary_sheet_id', sheet.id)
+        const { rows: entries } = await db.query(
+            `SELECT se.employee_id, se.basic_salary, se.extra_duty, se.transportation_bill, se.snacks_bill,
+                se.performance_bonus, se.festival_bonus, se.other_deduction, se.payment_status,
+                json_build_object('basic_salary_effective_month', e.basic_salary_effective_month) AS employee
+             FROM salary_entries se LEFT JOIN employees e ON e.id = se.employee_id
+             WHERE se.salary_sheet_id = $1`,
+            [sheet.id]
+        )
 
         // Same visibility rule as the Salary Sheet itself (see buildSheetResponse in
         // src/app/api/payroll/salary-sheets/route.ts): an employee whose Basic Salary Starting
         // Month isn't configured yet, or hasn't been reached by this sheet's month, doesn't
         // count here either.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rows = (entries || []).filter((r: any) => {
+        const rows = entries.filter(r => {
             const startMonth: string | null = r.employee?.basic_salary_effective_month || null
             return !!startMonth && sheet.month >= startMonth
         })
@@ -101,11 +98,11 @@ export async function GET(request: Request) {
         employeeIds.forEach((id: string) => distinctEmployeeIds.add(id))
 
         const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails] = await Promise.all([
-            getFineTotalsForMonth(supabase, employeeIds, sheet.month),
-            getAdvanceDetailsForMonth(supabase, employeeIds, sheet.month),
-            getProductBuyDetailsForMonth(supabase, employeeIds, sheet.month),
-            getEmiLoanDetailsForMonth(supabase, employeeIds, sheet.month),
-            getProvidentFundDetailsForMonth(supabase, employeeIds, sheet.month),
+            getFineTotalsForMonth(db, employeeIds, sheet.month),
+            getAdvanceDetailsForMonth(db, employeeIds, sheet.month),
+            getProductBuyDetailsForMonth(db, employeeIds, sheet.month),
+            getEmiLoanDetailsForMonth(db, employeeIds, sheet.month),
+            getProvidentFundDetailsForMonth(db, employeeIds, sheet.month),
         ])
 
         rows.forEach((r) => {

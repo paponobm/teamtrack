@@ -6,26 +6,27 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const isAdmin = auth.employee.roleLevel <= 3
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
 
-    let query = supabase
-        .from('requisitions')
-        .select(`*, requester:employees!requested_by(id, name, employee_id)`)
-        .order('created_at', { ascending: false })
+    const conditions: string[] = []
+    const params: unknown[] = []
+    if (!isAdmin) { params.push(auth.employee.id); conditions.push(`r.requested_by = $${params.length}`) }
+    if (startDate) { params.push(startDate); conditions.push(`r.date >= $${params.length}`) }
+    if (endDate) { params.push(endDate); conditions.push(`r.date <= $${params.length}`) }
 
-    if (!isAdmin) query = query.eq('requested_by', auth.employee.id)
-    if (startDate) query = query.gte('date', startDate)
-    if (endDate) query = query.lte('date', endDate)
+    const { rows: reqs } = await db.query(
+        `SELECT r.*, json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id) AS requester
+         FROM requisitions r LEFT JOIN employees e ON e.id = r.requested_by
+         ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+         ORDER BY r.created_at DESC`,
+        params
+    )
 
-    const { data, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    const reqs = data || []
     const stats = {
         total: reqs.length,
         pending: reqs.filter(r => r.manager_approval === 'pending').length,
@@ -40,31 +41,22 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const body = await request.json()
 
-    const { data, error } = await auth.supabase
-        .from('requisitions')
-        .insert({
-            date: body.date || new Date().toISOString().split('T')[0],
-            requested_by: auth.employee.id,
-            item_description: body.item_description,
-            quantity: body.quantity || 1,
-            reason: body.reason || null,
-            priority: body.priority || 'medium',
-            manager_approval: 'pending',
-            management_approval: 'pending',
-            remarks: body.remarks || null,
-            business_name: body.business_name || null,
-            payment_gateway: body.payment_gateway || null,
-        })
-        .select('*')
-        .single()
+    const { rows: [data] } = await db.query(
+        `INSERT INTO requisitions (date, requested_by, item_description, quantity, reason, priority, manager_approval, management_approval, remarks, business_name, payment_gateway)
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending', 'pending', $7, $8, $9) RETURNING *`,
+        [
+            body.date || new Date().toISOString().split('T')[0], auth.employee.id, body.item_description,
+            body.quantity || 1, body.reason || null, body.priority || 'medium',
+            body.remarks || null, body.business_name || null, body.payment_gateway || null,
+        ]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    
     await logAudit(auth.employee.id, 'Created requisition', 'requisitions', data.id)
-    
+
     return NextResponse.json(data, { status: 201 })
 }
 
@@ -77,6 +69,7 @@ const WORKFLOW_FIELDS = ['manager_approval', 'management_approval', 'purchase_st
 export async function PUT(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const body = await request.json()
     const { id } = body
@@ -95,11 +88,10 @@ export async function PUT(request: Request) {
         return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
     }
 
-    const { data: existing } = await auth.supabase
-        .from('requisitions')
-        .select('requested_by, manager_approval, management_approval')
-        .eq('id', id)
-        .single()
+    const { rows: [existing] } = await db.query(
+        `SELECT requested_by, manager_approval, management_approval FROM requisitions WHERE id = $1`,
+        [id]
+    )
     if (!existing) return NextResponse.json({ error: 'Requisition not found' }, { status: 404 })
 
     const isAdmin = auth.employee.roleLevel <= 3
@@ -127,14 +119,13 @@ export async function PUT(request: Request) {
         if ('quantity' in editUpdates) editUpdates.quantity = Number(editUpdates.quantity) || 1
     }
 
-    const { data, error } = await auth.supabase
-        .from('requisitions')
-        .update({ ...editUpdates, ...workflowUpdates })
-        .eq('id', id)
-        .select('*')
-        .single()
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const merged = { ...editUpdates, ...workflowUpdates }
+    const keys = Object.keys(merged)
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    const { rows: [data] } = await db.query(
+        `UPDATE requisitions SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *`,
+        [id, ...keys.map(k => merged[k])]
+    )
 
     await logAudit(auth.employee.id, Object.keys(workflowUpdates).length > 0 ? 'Updated requisition status' : 'Edited requisition', 'requisitions', id)
 
@@ -150,7 +141,6 @@ export async function DELETE(request: Request) {
     const id = searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const { error } = await auth.supabase.from('requisitions').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await auth.db.query(`DELETE FROM requisitions WHERE id = $1`, [id])
     return NextResponse.json({ success: true })
 }

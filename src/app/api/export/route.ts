@@ -7,8 +7,8 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
     const auth = await requireAuth(3) // Admin+ only
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const type = searchParams.get('type')
     const date = searchParams.get('date')
@@ -36,93 +36,96 @@ export async function GET(request: Request) {
     let csvContent = ''
 
     if (type === 'work-log') {
-        let query = supabase
-            .from('work_entries')
-            .select('date, sl, customer_phone, invoice_no, courier_id, source, amount, advance, note, order_type, delivery_status, employee:employees!employee_id(name)')
-            .order('date', { ascending: false })
+        const conditions: string[] = []
+        const params: unknown[] = []
+        if (date) { params.push(date); conditions.push(`w.date = $${params.length}`) }
+        if (month) { params.push(`${month}-01`); conditions.push(`w.date >= $${params.length}`); params.push(monthEnd(month)); conditions.push(`w.date <= $${params.length}`) }
 
-        if (date) query = query.eq('date', date)
-        if (month) query = query.gte('date', `${month}-01`).lte('date', monthEnd(month))
-
-        const { data } = await query
+        const { rows: data } = await db.query(
+            `SELECT w.date, w.sl, w.customer_phone, w.invoice_no, w.courier_id, w.source, w.amount, w.advance, w.note, w.order_type, w.delivery_status,
+                json_build_object('name', e.name) AS employee
+             FROM work_entries w LEFT JOIN employees e ON e.id = w.employee_id
+             ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+             ORDER BY w.date DESC`,
+            params
+        )
         csvContent = 'Date,SL,Customer Phone,Invoice,Courier ID,Source,Amount,Advance,Note,Order Type,Status,Employee\n'
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ; (data || []).forEach((e: any) => {
-                const empName = Array.isArray(e.employee) ? e.employee[0]?.name : e.employee?.name
-                csvContent += row([e.date, e.sl, e.customer_phone, e.invoice_no, e.courier_id, e.source, e.amount, e.advance || 0, e.note, e.order_type, e.delivery_status, empName])
-            })
+        data.forEach(e => {
+            csvContent += row([e.date, e.sl, e.customer_phone, e.invoice_no, e.courier_id, e.source, e.amount, e.advance || 0, e.note, e.order_type, e.delivery_status, e.employee?.name])
+        })
     } else if (type === 'attendance') {
         // The Attendance Report tab uses start_date/end_date (+ optional employee_id/status) and
         // wants Employee ID/Department columns too — kept as a separate branch so the original
         // date/month single-export (used by the Daily Attendance tab today) is untouched.
         const isRangeExport = !!(startDate && endDate)
 
-        let query = supabase
-            .from('attendance')
-            .select(
-                isRangeExport
-                    ? 'date, status, clock_in, clock_out, notes, employee:employees!employee_id(name, employee_id, department:departments(name))'
-                    : 'date, status, clock_in, clock_out, notes, employee:employees!employee_id(name)'
-            )
-            .order('date', { ascending: false })
-
+        const conditions: string[] = []
+        const params: unknown[] = []
         if (isRangeExport) {
-            query = query.gte('date', startDate!).lte('date', endDate!)
-            if (employeeId) query = query.eq('employee_id', employeeId)
-            if (status) query = query.eq('status', status)
+            params.push(startDate); conditions.push(`a.date >= $${params.length}`)
+            params.push(endDate); conditions.push(`a.date <= $${params.length}`)
+            if (employeeId) { params.push(employeeId); conditions.push(`a.employee_id = $${params.length}`) }
+            if (status) { params.push(status); conditions.push(`a.status = $${params.length}`) }
         } else {
-            if (date) query = query.eq('date', date)
-            if (month) query = query.gte('date', `${month}-01`).lte('date', monthEnd(month))
+            if (date) { params.push(date); conditions.push(`a.date = $${params.length}`) }
+            if (month) { params.push(`${month}-01`); conditions.push(`a.date >= $${params.length}`); params.push(monthEnd(month)); conditions.push(`a.date <= $${params.length}`) }
         }
 
-        const { data } = await query
+        const { rows: data } = await db.query(
+            `SELECT a.date, a.status, a.clock_in, a.clock_out, a.notes,
+                json_build_object('name', e.name, 'employee_id', e.employee_id, 'department', json_build_object('name', d.name)) AS employee
+             FROM attendance a LEFT JOIN employees e ON e.id = a.employee_id LEFT JOIN departments d ON d.id = e.department_id
+             ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+             ORDER BY a.date DESC`,
+            params
+        )
         if (isRangeExport) {
             csvContent = 'Date,Employee,Employee ID,Department,Status,Clock In,Clock Out,Notes\n'
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                ; (data || []).forEach((e: any) => {
-                    const emp = Array.isArray(e.employee) ? e.employee[0] : e.employee
-                    csvContent += row([e.date, emp?.name, emp?.employee_id, emp?.department?.name, e.status, e.clock_in || '', e.clock_out || '', e.notes])
-                })
+            data.forEach(e => {
+                csvContent += row([e.date, e.employee?.name, e.employee?.employee_id, e.employee?.department?.name, e.status, e.clock_in || '', e.clock_out || '', e.notes])
+            })
         } else {
             csvContent = 'Date,Employee,Status,Clock In,Clock Out,Notes\n'
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                ; (data || []).forEach((e: any) => {
-                    const empName = Array.isArray(e.employee) ? e.employee[0]?.name : e.employee?.name
-                    csvContent += row([e.date, empName, e.status, e.clock_in || '', e.clock_out || '', e.notes])
-                })
+            data.forEach(e => {
+                csvContent += row([e.date, e.employee?.name, e.status, e.clock_in || '', e.clock_out || '', e.notes])
+            })
         }
     } else if (type === 'work-reports') {
-        let query = supabase
-            .from('work_reports')
-            .select('date, project, description, hours, progress, status, notes, employee:employees!employee_id(name, employee_id, department:departments(name))')
-            .order('date', { ascending: false })
+        const conditions: string[] = []
+        const params: unknown[] = []
+        if (startDate && endDate) { params.push(startDate); conditions.push(`wr.date >= $${params.length}`); params.push(endDate); conditions.push(`wr.date <= $${params.length}`) }
+        if (employeeId) { params.push(employeeId); conditions.push(`wr.employee_id = $${params.length}`) }
+        if (status) { params.push(status); conditions.push(`wr.status = $${params.length}`) }
 
-        if (startDate && endDate) query = query.gte('date', startDate).lte('date', endDate)
-        if (employeeId) query = query.eq('employee_id', employeeId)
-        if (status) query = query.eq('status', status)
-
-        const { data } = await query
+        const { rows: data } = await db.query(
+            `SELECT wr.date, wr.project, wr.description, wr.hours, wr.progress, wr.status, wr.notes,
+                json_build_object('name', e.name, 'employee_id', e.employee_id, 'department', json_build_object('name', d.name)) AS employee
+             FROM work_reports wr LEFT JOIN employees e ON e.id = wr.employee_id LEFT JOIN departments d ON d.id = e.department_id
+             ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+             ORDER BY wr.date DESC`,
+            params
+        )
         csvContent = 'Date,Employee,Employee ID,Department,Project,Hours,Progress %,Status,Notes\n'
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ; (data || []).forEach((e: any) => {
-                const emp = Array.isArray(e.employee) ? e.employee[0] : e.employee
-                csvContent += row([e.date, emp?.name, emp?.employee_id, emp?.department?.name, e.project, e.hours, e.progress, e.status, e.notes])
-            })
+        data.forEach(e => {
+            csvContent += row([e.date, e.employee?.name, e.employee?.employee_id, e.employee?.department?.name, e.project, e.hours, e.progress, e.status, e.notes])
+        })
     } else if (type === 'expenses') {
-        let query = supabase
-            .from('expenses')
-            .select('date, category, description, amount, payment_method, payment_status, note, business_name, invoice_id, submitter:employees!submitted_by(name)')
-            .order('date', { ascending: false })
+        const conditions: string[] = []
+        const params: unknown[] = []
+        if (month) { params.push(`${month}-01`); conditions.push(`ex.date >= $${params.length}`); params.push(monthEnd(month)); conditions.push(`ex.date <= $${params.length}`) }
 
-        if (month) query = query.gte('date', `${month}-01`).lte('date', monthEnd(month))
-
-        const { data } = await query
+        const { rows: data } = await db.query(
+            `SELECT ex.date, ex.category, ex.description, ex.amount, ex.payment_method, ex.payment_status, ex.note, ex.business_name, ex.invoice_id,
+                json_build_object('name', s.name) AS submitter
+             FROM expenses ex LEFT JOIN employees s ON s.id = ex.submitted_by
+             ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+             ORDER BY ex.date DESC`,
+            params
+        )
         csvContent = 'Date,Category,Description,Amount,Payment Method,Status,Note,Business,Invoice ID,Submitted By\n'
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ; (data || []).forEach((e: any) => {
-                const empName = Array.isArray(e.submitter) ? e.submitter[0]?.name : e.submitter?.name
-                csvContent += row([e.date, e.category, e.description, e.amount, e.payment_method, e.payment_status, e.note, e.business_name, e.invoice_id, empName])
-            })
+        data.forEach(e => {
+            csvContent += row([e.date, e.category, e.description, e.amount, e.payment_method, e.payment_status, e.note, e.business_name, e.invoice_id, e.submitter?.name])
+        })
     } else {
         return NextResponse.json({ error: `Unknown export type: ${type}` }, { status: 400 })
     }

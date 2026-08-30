@@ -50,3 +50,6 @@ next-env.d.ts
 # Environment
 .env.local
 .env*.local
+
+# Locally-stored uploaded files (see UPLOAD_DIR in .env)
+/uploads/

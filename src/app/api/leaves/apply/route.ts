@@ -5,7 +5,6 @@ export async function POST(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
 
-    const supabase = auth.supabase
     const body = await request.json()
     const { startDate, endDate, reason } = body
 
@@ -15,7 +14,7 @@ export async function POST(request: Request) {
 
     const start = new Date(startDate)
     const end = new Date(endDate)
-    
+
     // Calculate difference in days (inclusive)
     const diffTime = Math.abs(end.getTime() - start.getTime())
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1
@@ -28,59 +27,42 @@ export async function POST(request: Request) {
     }
 
     // Generate array of dates
-    const dates = []
+    const dates: string[] = []
     for (let i = 0; i < diffDays; i++) {
         const d = new Date(start)
         d.setDate(d.getDate() + i)
         dates.push(d.toISOString().split('T')[0])
     }
 
-    // Insert into leave_records
-    const insertData = dates.map(date => ({
-        employee_id: auth.employee.id,
-        leave_date: date,
-        reason: reason,
-        status: 'pending'
-    }))
-
-    const { error } = await supabase
-        .from('leave_records')
-        .upsert(insertData, { onConflict: 'employee_id,leave_date' })
-
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    await auth.db.query(
+        `INSERT INTO leave_records (employee_id, leave_date, reason, status)
+         SELECT $1, d, $2, 'pending' FROM UNNEST($3::date[]) AS d
+         ON CONFLICT (employee_id, leave_date) DO UPDATE SET reason = EXCLUDED.reason, status = EXCLUDED.status`,
+        [auth.employee.id, reason, dates]
+    )
 
     return NextResponse.json({ success: true, count: dates.length })
 }
 
-export async function GET(request: Request) {
+export async function GET() {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
 
-    const supabase = auth.supabase
-    
-    const { data, error } = await supabase
-        .from('leave_records')
-        .select('*')
-        .eq('employee_id', auth.employee.id)
-        .order('leave_date', { ascending: false })
+    const { rows } = await auth.db.query(
+        `SELECT * FROM leave_records WHERE employee_id = $1 ORDER BY leave_date DESC`,
+        [auth.employee.id]
+    )
 
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    return NextResponse.json({ records: data || [] })
+    return NextResponse.json({ records: rows })
 }
 
 export async function DELETE(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const idsStr = searchParams.get('ids')
-    
+
     if (!idsStr) {
         return NextResponse.json({ error: 'ids parameter is required' }, { status: 400 })
     }
@@ -88,16 +70,10 @@ export async function DELETE(request: Request) {
     const ids = idsStr.split(',')
 
     // Make sure we only delete our own pending records
-    const { error } = await supabase
-        .from('leave_records')
-        .delete()
-        .in('id', ids)
-        .eq('employee_id', auth.employee.id)
-        .eq('status', 'pending')
-
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    await auth.db.query(
+        `DELETE FROM leave_records WHERE id = ANY($1) AND employee_id = $2 AND status = 'pending'`,
+        [ids, auth.employee.id]
+    )
 
     return NextResponse.json({ success: true })
 }

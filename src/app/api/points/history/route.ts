@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const { searchParams } = new URL(request.url)
     const employeeId = searchParams.get('employee_id')
@@ -11,30 +12,34 @@ export async function GET(request: Request) {
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
 
-    let query = auth.supabase.from('point_transactions')
-        .select(`
-            *,
-            employee:employees!point_transactions_employee_id_fkey(id, name, avatar_url),
-            granted_by_user:employees!point_transactions_awarded_by_fkey(id, name)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(limit)
+    const conditions: string[] = []
+    const params: unknown[] = []
 
-    if (startDate) query = query.gte('created_at', startDate + 'T00:00:00.000Z')
-    if (endDate) query = query.lte('created_at', endDate + 'T23:59:59.999Z')
+    if (startDate) { params.push(startDate + 'T00:00:00.000Z'); conditions.push(`pt.created_at >= $${params.length}`) }
+    if (endDate) { params.push(endDate + 'T23:59:59.999Z'); conditions.push(`pt.created_at <= $${params.length}`) }
 
     // Admin can see anyone's or everyone's history
     if (auth.employee.roleLevel <= 3) {
-        if (employeeId) {
-            query = query.eq('employee_id', employeeId)
-        }
+        if (employeeId) { params.push(employeeId); conditions.push(`pt.employee_id = $${params.length}`) }
     } else {
         // Members can only see their own
-        query = query.eq('employee_id', auth.employee.id)
+        params.push(auth.employee.id); conditions.push(`pt.employee_id = $${params.length}`)
     }
 
-    const { data, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    params.push(limit)
 
-    return NextResponse.json({ transactions: data })
+    const { rows } = await db.query(
+        `SELECT pt.*,
+            json_build_object('id', e.id, 'name', e.name, 'avatar_url', e.avatar_url) AS employee,
+            json_build_object('id', aw.id, 'name', aw.name) AS granted_by_user
+         FROM point_transactions pt
+         LEFT JOIN employees e ON e.id = pt.employee_id
+         LEFT JOIN employees aw ON aw.id = pt.awarded_by
+         ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+         ORDER BY pt.created_at DESC
+         LIMIT $${params.length}`,
+        params
+    )
+
+    return NextResponse.json({ transactions: rows })
 }

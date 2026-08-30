@@ -23,7 +23,7 @@ export async function POST(request: Request) {
         }
 
         await awardPoints(
-            auth.supabase,
+            auth.db,
             employee_id,
             amount,
             'manual',

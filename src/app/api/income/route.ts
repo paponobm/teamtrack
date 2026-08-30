@@ -5,29 +5,30 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
     const auth = await requireAuth(3) // Admin+ only
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
 
-    let query = supabase
-        .from('income')
-        .select(`*, adder:employees!added_by(id, name)`)
-        .order('created_at', { ascending: false })
-
     // Income privacy: Super Admins (Owner/Super Admin, level <= 2) see ALL income.
     // A regular Admin only sees the income entries they personally added.
     const isSuperAdmin = auth.employee.roleLevel <= 2
-    if (!isSuperAdmin) query = query.eq('added_by', auth.employee.id)
 
-    if (startDate) query = query.gte('date', startDate)
-    if (endDate) query = query.lte('date', endDate)
+    const conditions: string[] = []
+    const params: unknown[] = []
+    if (!isSuperAdmin) { params.push(auth.employee.id); conditions.push(`i.added_by = $${params.length}`) }
+    if (startDate) { params.push(startDate); conditions.push(`i.date >= $${params.length}`) }
+    if (endDate) { params.push(endDate); conditions.push(`i.date <= $${params.length}`) }
 
-    const { data, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { rows: entries } = await db.query(
+        `SELECT i.*, json_build_object('id', e.id, 'name', e.name) AS adder
+         FROM income i LEFT JOIN employees e ON e.id = i.added_by
+         ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+         ORDER BY i.created_at DESC`,
+        params
+    )
 
-    const entries = data || []
     const totalIncome = entries.reduce((s, e) => s + (Number(e.amount) || 0), 0)
 
     return NextResponse.json({ entries, totalIncome })
@@ -38,26 +39,23 @@ export async function POST(request: Request) {
     const auth = await requireAuth(3) // Admin+
     if (!isAuthed(auth)) return auth
 
-    const supabase = auth.supabase
-
     const body = await request.json()
 
-    const { data, error } = await supabase
-        .from('income')
-        .insert({
-            date: body.date || new Date().toISOString().split('T')[0],
-            description: body.description || null,
-            amount: body.amount || 0,
-            source: body.source || null,
-            fund_id: body.fund_id || null,
-            note: body.note || null,
-            business_name: body.business_name || null,
-            added_by: auth.employee.id,
-        })
-        .select('*')
-        .single()
+    const { rows: [data] } = await auth.db.query(
+        `INSERT INTO income (date, description, amount, source, fund_id, note, business_name, added_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [
+            body.date || new Date().toISOString().split('T')[0],
+            body.description || null,
+            body.amount || 0,
+            body.source || null,
+            body.fund_id || null,
+            body.note || null,
+            body.business_name || null,
+            auth.employee.id,
+        ]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(data, { status: 201 })
 }
 
@@ -65,8 +63,8 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
     const auth = await requireAuth(3) // Admin+
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const body = await request.json()
     const { id, ...updates } = body
 
@@ -86,20 +84,20 @@ export async function PATCH(request: Request) {
     // A regular Admin may only edit income they added; Super Admins may edit any.
     const isSuperAdmin = auth.employee.roleLevel <= 2
     if (!isSuperAdmin) {
-        const { data: existing } = await supabase.from('income').select('added_by').eq('id', id).single()
+        const { rows: [existing] } = await db.query(`SELECT added_by FROM income WHERE id = $1`, [id])
         if (existing && existing.added_by !== auth.employee.id) {
             return NextResponse.json({ error: 'You can only edit income you added' }, { status: 403 })
         }
     }
 
-    const { data, error } = await supabase
-        .from('income')
-        .update(safeUpdates)
-        .eq('id', id)
-        .select('*')
-        .single()
+    const keys = Object.keys(safeUpdates)
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    const { rows: [data] } = await db.query(
+        `UPDATE income SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *`,
+        [id, ...keys.map(k => safeUpdates[k])]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!data) return NextResponse.json({ error: 'Income entry not found' }, { status: 404 })
     return NextResponse.json(data)
 }
 
@@ -107,8 +105,7 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
     const auth = await requireAuth(3) // Admin+
     if (!isAuthed(auth)) return auth
-
-    const supabase = auth.supabase
+    const db = auth.db
 
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
@@ -117,13 +114,12 @@ export async function DELETE(request: Request) {
     // A regular Admin may only delete income they added; Super Admins may delete any.
     const isSuperAdmin = auth.employee.roleLevel <= 2
     if (!isSuperAdmin) {
-        const { data: existing } = await supabase.from('income').select('added_by').eq('id', id).single()
+        const { rows: [existing] } = await db.query(`SELECT added_by FROM income WHERE id = $1`, [id])
         if (existing && existing.added_by !== auth.employee.id) {
             return NextResponse.json({ error: 'You can only delete income you added' }, { status: 403 })
         }
     }
 
-    const { error } = await supabase.from('income').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await db.query(`DELETE FROM income WHERE id = $1`, [id])
     return NextResponse.json({ success: true })
 }

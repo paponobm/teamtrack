@@ -6,15 +6,6 @@ export async function GET() {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
 
-    const supabase = auth.supabase
-    const { data, error } = await supabase
-        .from('point_categories')
-        .select('*')
-        .order('sort_order')
-
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    return NextResponse.json(data)
+    const { rows } = await auth.db.query(`SELECT * FROM point_categories ORDER BY sort_order`)
+    return NextResponse.json(rows)
 }

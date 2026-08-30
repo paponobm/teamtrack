@@ -15,18 +15,18 @@ interface PendingExpense {
 export async function POST(request: Request) {
     const auth = await requireAuth(2) // Super Admin only
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const body = await request.json()
     const ids: string[] = Array.isArray(body.ids) ? body.ids : []
     if (ids.length === 0) return NextResponse.json({ error: 'No expenses selected' }, { status: 400 })
 
-    const { data: expenses, error } = await auth.supabase
-        .from('expenses')
-        .select('id, submitted_by, amount, payment_status, created_at')
-        .in('id', ids)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { rows: expenses } = await db.query<PendingExpense>(
+        `SELECT id, submitted_by, amount, payment_status, created_at FROM expenses WHERE id = ANY($1)`,
+        [ids]
+    )
 
-    const pending = ((expenses || []) as PendingExpense[]).filter(e => e.payment_status === 'pending')
+    const pending = expenses.filter(e => e.payment_status === 'pending')
     if (pending.length === 0) return NextResponse.json({ approved: 0, skipped: [] })
 
     // Group by submitter so each submitter's fund is checked cumulatively across the whole
@@ -48,16 +48,19 @@ export async function POST(request: Request) {
             continue
         }
 
-        const { data: allocs } = await auth.supabase.from('fund_allocations').select('amount').eq('employee_id', submittedBy)
-        if (!allocs || allocs.length === 0) {
+        const { rows: allocs } = await db.query(`SELECT amount FROM fund_allocations WHERE employee_id = $1`, [submittedBy])
+        if (allocs.length === 0) {
             // Not a fund holder — unlimited, same rule as the single-approve endpoint.
             approvedIds.push(...group.map(e => e.id))
             continue
         }
 
         const allocated = allocs.reduce((s, a) => s + Number(a.amount || 0), 0)
-        const { data: paidExp } = await auth.supabase.from('expenses').select('amount').eq('submitted_by', submittedBy).eq('payment_status', 'paid')
-        let remaining = allocated - (paidExp || []).reduce((s, e) => s + Number(e.amount || 0), 0)
+        const { rows: paidExp } = await db.query(
+            `SELECT amount FROM expenses WHERE submitted_by = $1 AND payment_status = 'paid'`,
+            [submittedBy]
+        )
+        let remaining = allocated - paidExp.reduce((s, e) => s + Number(e.amount || 0), 0)
 
         // Deterministic order (oldest first) so which ones get skipped is predictable.
         const ordered = [...group].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
@@ -73,11 +76,10 @@ export async function POST(request: Request) {
     }
 
     if (approvedIds.length > 0) {
-        const { error: updateError } = await auth.supabase
-            .from('expenses')
-            .update({ payment_status: 'paid', approved_by: auth.employee.id })
-            .in('id', approvedIds)
-        if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 })
+        await db.query(
+            `UPDATE expenses SET payment_status = 'paid', approved_by = $1 WHERE id = ANY($2)`,
+            [auth.employee.id, approvedIds]
+        )
     }
 
     return NextResponse.json({ approved: approvedIds.length, skipped })

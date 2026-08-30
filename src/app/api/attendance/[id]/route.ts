@@ -1,5 +1,3 @@
-import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { NextResponse } from 'next/server'
 
@@ -10,67 +8,62 @@ export async function PATCH(
 ) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { id } = await params
     const body = await request.json()
 
     // Get old record for logging
-    const { data: oldRecord } = await supabase
-        .from('attendance')
-        .select('clock_in, clock_out, status, notes')
-        .eq('id', id)
-        .single()
+    const { rows: [oldRecord] } = await db.query(
+        `SELECT clock_in, clock_out, status, notes FROM attendance WHERE id = $1`,
+        [id]
+    )
 
     const updateFields: Record<string, unknown> = {}
-
     if (body.clock_out !== undefined) updateFields.clock_out = body.clock_out
     if (body.clock_in !== undefined) updateFields.clock_in = body.clock_in
     if (body.status !== undefined) updateFields.status = body.status
     if (body.notes !== undefined) updateFields.notes = body.notes
 
-    const { data, error } = await supabase
-        .from('attendance')
-        .update(updateFields)
-        .eq('id', id)
-        .select(`
-            *,
-            employee:employees(id, name, employee_id, designation, department:departments(id, name))
-        `)
-        .single()
+    const keys = Object.keys(updateFields)
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    const { rows: [data] } = await db.query(
+        `WITH upd AS (
+            UPDATE attendance SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *
+         )
+         SELECT a.*,
+            json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'designation', e.designation,
+                'department', json_build_object('id', d.id, 'name', d.name)) AS employee
+         FROM upd a LEFT JOIN employees e ON e.id = a.employee_id LEFT JOIN departments d ON d.id = e.department_id`,
+        [id, ...keys.map(k => updateFields[k])]
+    )
 
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    if (!data) return NextResponse.json({ error: 'Attendance record not found' }, { status: 404 })
 
     // Log changes
-    {
-        const actor = auth.employee
+    const actor = auth.employee
+    const changes: string[] = []
+    if (body.clock_out !== undefined && body.clock_out !== oldRecord?.clock_out) {
+        changes.push(`clock_out: ${oldRecord?.clock_out || 'none'} → ${body.clock_out}`)
+    }
+    if (body.clock_in !== undefined && body.clock_in !== oldRecord?.clock_in) {
+        changes.push(`clock_in: ${oldRecord?.clock_in || 'none'} → ${body.clock_in}`)
+    }
+    if (body.status !== undefined && body.status !== oldRecord?.status) {
+        changes.push(`status: ${oldRecord?.status || 'none'} → ${body.status}`)
+    }
 
-        if (actor) {
-            const changes: string[] = []
-            if (body.clock_out !== undefined && body.clock_out !== oldRecord?.clock_out) {
-                changes.push(`clock_out: ${oldRecord?.clock_out || 'none'} → ${body.clock_out}`)
-            }
-            if (body.clock_in !== undefined && body.clock_in !== oldRecord?.clock_in) {
-                changes.push(`clock_in: ${oldRecord?.clock_in || 'none'} → ${body.clock_in}`)
-            }
-            if (body.status !== undefined && body.status !== oldRecord?.status) {
-                changes.push(`status: ${oldRecord?.status || 'none'} → ${body.status}`)
-            }
-
-            if (changes.length > 0) {
-                await supabase.from('audit_log').insert({
-                    actor_id: actor.id,
-                    module: 'attendance',
-                    action: 'update',
-                    target_id: id,
-                    old_value: JSON.stringify({ clock_out: oldRecord?.clock_out, status: oldRecord?.status }),
-                    new_value: JSON.stringify(updateFields),
-                    details: { actor_name: actor.name, changes },
-                }).then(() => { })
-            }
-        }
+    if (changes.length > 0) {
+        await db.query(
+            `INSERT INTO audit_log (actor_id, module, action, target_id, old_value, new_value, details)
+             VALUES ($1, 'attendance', 'update', $2, $3, $4, $5)`,
+            [
+                actor.id, id,
+                JSON.stringify({ clock_out: oldRecord?.clock_out, status: oldRecord?.status }),
+                JSON.stringify(updateFields),
+                JSON.stringify({ actor_name: actor.name, changes }),
+            ]
+        )
     }
 
     return NextResponse.json(data)
@@ -81,35 +74,18 @@ export async function DELETE(
     request: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const adminClient = createAdminClient()
-    const serverClient = await createClient()
-    const { data: { user } } = await serverClient.auth.getUser()
-    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-
-    const { data: actor } = await adminClient.from('employees')
-        .select('id, name, role:roles(level)')
-        .eq('user_id', user.id)
-        .single()
-
-    const roleLevel = (actor?.role as unknown as { level: number })?.level ?? 99
-    if (roleLevel > 2) {
-        return NextResponse.json({ error: 'Super Admin only' }, { status: 403 })
-    }
+    const auth = await requireAuth(2) // Super Admin only
+    if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const { id } = await params
-    const { error } = await adminClient.from('attendance').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await db.query(`DELETE FROM attendance WHERE id = $1`, [id])
 
-    // Audit log
-    if (actor) {
-        await adminClient.from('audit_log').insert({
-            actor_id: actor.id,
-            module: 'attendance',
-            action: 'delete',
-            target_id: id,
-            details: { actor_name: actor.name },
-        }).then(() => {})
-    }
+    await db.query(
+        `INSERT INTO audit_log (actor_id, module, action, target_id, details)
+         VALUES ($1, 'attendance', 'delete', $2, $3)`,
+        [auth.employee.id, id, JSON.stringify({ actor_name: auth.employee.name })]
+    )
 
     return NextResponse.json({ message: 'Attendance record deleted' })
 }

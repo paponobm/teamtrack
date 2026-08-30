@@ -5,8 +5,8 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     // Only Super Admin sees every admin's transactions; a plain Admin (level 3) only sees
     // their own, same as a Member — matches the scoping already used by /api/expenses and /api/income.
@@ -16,55 +16,57 @@ export async function GET(request: Request) {
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
 
-    // Fetch expenses
-    let expenseQuery = supabase
-        .from('expenses')
-        .select(`
-            id, date, category, description, amount, payment_method, payment_status, note, created_at,
-            submitter:employees!submitted_by(id, name)
-        `)
-    
-    // Fetch income
-    let incomeQuery = supabase
-        .from('income')
-        .select(`
-            id, date, source, description, amount, payment_method, created_at,
-            adder:employees!added_by(id, name)
-        `)
-
-    if (!isSuperAdmin) {
-        expenseQuery = expenseQuery.eq('submitted_by', auth.employee.id)
-        incomeQuery = incomeQuery.eq('added_by', auth.employee.id)
-    }
-
-    if (startDate) {
-        expenseQuery = expenseQuery.gte('date', startDate)
-        incomeQuery = incomeQuery.gte('date', startDate)
-    }
-    if (endDate) {
-        expenseQuery = expenseQuery.lte('date', endDate)
-        incomeQuery = incomeQuery.lte('date', endDate)
-    }
+    let start: string | null = startDate
+    let end: string | null = endDate
     if (month && !startDate && !endDate) {
         const [y, m] = month.split('-').map(Number)
-        const monthEnd = new Date(y, m, 0).toISOString().split('T')[0]
-        expenseQuery = expenseQuery.gte('date', `${month}-01`).lte('date', monthEnd)
-        incomeQuery = incomeQuery.gte('date', `${month}-01`).lte('date', monthEnd)
+        start = `${month}-01`
+        end = new Date(y, m, 0).toISOString().split('T')[0]
     }
 
-    const [expenseRes, incomeRes] = await Promise.all([expenseQuery, incomeQuery])
+    const expenseConditions: string[] = []
+    const expenseParams: unknown[] = []
+    const incomeConditions: string[] = []
+    const incomeParams: unknown[] = []
 
-    if (expenseRes.error) return NextResponse.json({ error: expenseRes.error.message }, { status: 500 })
-    if (incomeRes.error) return NextResponse.json({ error: incomeRes.error.message }, { status: 500 })
+    if (!isSuperAdmin) {
+        expenseParams.push(auth.employee.id); expenseConditions.push(`e.submitted_by = $${expenseParams.length}`)
+        incomeParams.push(auth.employee.id); incomeConditions.push(`i.added_by = $${incomeParams.length}`)
+    }
+    if (start) {
+        expenseParams.push(start); expenseConditions.push(`e.date >= $${expenseParams.length}`)
+        incomeParams.push(start); incomeConditions.push(`i.date >= $${incomeParams.length}`)
+    }
+    if (end) {
+        expenseParams.push(end); expenseConditions.push(`e.date <= $${expenseParams.length}`)
+        incomeParams.push(end); incomeConditions.push(`i.date <= $${incomeParams.length}`)
+    }
 
-    const expenses = (expenseRes.data || []).map(e => ({
+    const [{ rows: expenseRows }, { rows: incomeRows }] = await Promise.all([
+        db.query(
+            `SELECT e.id, e.date, e.category, e.description, e.amount, e.payment_method, e.payment_status, e.created_at,
+                json_build_object('id', s.id, 'name', s.name) AS submitter
+             FROM expenses e LEFT JOIN employees s ON s.id = e.submitted_by
+             ${expenseConditions.length ? 'WHERE ' + expenseConditions.join(' AND ') : ''}`,
+            expenseParams
+        ),
+        db.query(
+            `SELECT i.id, i.date, i.source, i.description, i.amount, i.created_at,
+                json_build_object('id', a.id, 'name', a.name) AS adder
+             FROM income i LEFT JOIN employees a ON a.id = i.added_by
+             ${incomeConditions.length ? 'WHERE ' + incomeConditions.join(' AND ') : ''}`,
+            incomeParams
+        ),
+    ])
+
+    const expenses = expenseRows.map(e => ({
         ...e,
         type: 'expense',
         category_name: e.category || 'Uncategorized',
         user: e.submitter
     }))
 
-    const incomes = (incomeRes.data || []).map(i => ({
+    const incomes = incomeRows.map(i => ({
         ...i,
         type: 'income',
         category_name: i.source || 'Sales Revenue',

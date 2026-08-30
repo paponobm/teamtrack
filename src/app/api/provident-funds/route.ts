@@ -2,6 +2,12 @@ import { requireAuth, isAuthed } from '@/lib/auth'
 import { computeMonthlyInstallment, computeMaturityAmount, getProvidentFundPaidSummaries } from '@/lib/providentFunds'
 import { NextResponse } from 'next/server'
 
+const PF_SELECT = `f.id, f.employee_id, f.principal_amount, f.duration_months, f.interest_rate, f.monthly_installment, f.start_date, f.note, f.created_at,
+    json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url,
+        'department', json_build_object('id', d.id, 'name', d.name)) AS employee,
+    json_build_object('id', c.id, 'name', c.name) AS created_by_employee`
+const PF_JOINS = `LEFT JOIN employees e ON e.id = f.employee_id LEFT JOIN departments d ON d.id = e.department_id LEFT JOIN employees c ON c.id = f.created_by`
+
 // GET /api/provident-funds?start_date=&end_date= — list Provident Fund records, optionally
 // filtered by start_date falling within the range (Admin+), each enriched with a live
 // Paid/Due summary (see getProvidentFundPaidSummaries — derived from the Salary Sheet's own
@@ -9,35 +15,29 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
 
-    let query = supabase
-        .from('provident_funds')
-        .select(`
-            id, employee_id, principal_amount, duration_months, interest_rate, monthly_installment, start_date, note, created_at,
-            employee:employees!employee_id(id, name, employee_id, avatar_url, department:departments(id, name)),
-            created_by_employee:employees!created_by(id, name)
-        `)
-        .order('start_date', { ascending: false })
+    const conditions: string[] = []
+    const params: unknown[] = []
+    if (startDate) { params.push(startDate); conditions.push(`f.start_date >= $${params.length}`) }
+    if (endDate) { params.push(endDate); conditions.push(`f.start_date <= $${params.length}`) }
 
-    if (startDate) query = query.gte('start_date', startDate)
-    if (endDate) query = query.lte('start_date', endDate)
+    const { rows } = await db.query(
+        `SELECT ${PF_SELECT} FROM provident_funds f ${PF_JOINS}
+         ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+         ORDER BY f.start_date DESC`,
+        params
+    )
 
-    const { data, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    const rows = data || []
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const summaries = await getProvidentFundPaidSummaries(supabase, rows.map((r: any) => ({
+    const summaries = await getProvidentFundPaidSummaries(db, rows.map(r => ({
         id: r.id, employee_id: r.employee_id, start_date: r.start_date, duration_months: r.duration_months, principal_amount: r.principal_amount, interest_rate: r.interest_rate, monthly_installment: r.monthly_installment,
     })))
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const providentFunds = rows.map((r: any) => ({ ...r, ...summaries[r.id] }))
+    const providentFunds = rows.map(r => ({ ...r, ...summaries[r.id] }))
 
     return NextResponse.json({ provident_funds: providentFunds })
 }
@@ -52,8 +52,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const body = await request.json()
     const { employee_id, principal_amount, duration_months, start_date, interest_rate, note } = body
 
@@ -83,26 +83,16 @@ export async function POST(request: Request) {
     // own principal, split evenly across the duration.
     const monthlyInstallment = computeMonthlyInstallment(numPrincipal, numDuration)
 
-    const { data, error } = await supabase
-        .from('provident_funds')
-        .insert({
-            employee_id,
-            principal_amount: numPrincipal,
-            duration_months: numDuration,
-            start_date,
-            interest_rate: numRate,
-            monthly_installment: monthlyInstallment,
-            note: note || null,
-            created_by: auth.employee.id,
-        })
-        .select(`
-            id, employee_id, principal_amount, duration_months, interest_rate, monthly_installment, start_date, note, created_at,
-            employee:employees!employee_id(id, name, employee_id, avatar_url, department:departments(id, name)),
-            created_by_employee:employees!created_by(id, name)
-        `)
-        .single()
+    const { rows: [inserted] } = await db.query(
+        `INSERT INTO provident_funds (employee_id, principal_amount, duration_months, start_date, interest_rate, monthly_installment, note, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [employee_id, numPrincipal, numDuration, start_date, numRate, monthlyInstallment, note || null, auth.employee.id]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { rows: [data] } = await db.query(
+        `SELECT ${PF_SELECT} FROM provident_funds f ${PF_JOINS} WHERE f.id = $1`,
+        [inserted.id]
+    )
 
     // A brand-new record has no salary sheets touching it yet, so Paid is always 0 here.
     // Total Payable is the exact principal, not installment × duration (which would carry the

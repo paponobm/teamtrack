@@ -1,4 +1,3 @@
-import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { NextResponse } from 'next/server'
 
@@ -6,9 +5,7 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
     const auth = await requireAuth(3) // Admin+ only
     if (!isAuthed(auth)) return auth
-
-    const supabase = auth.supabase
-    const adminSupabase = createAdminClient()
+    const db = auth.db
 
     // Optional ?date=YYYY-MM-DD lets admins view a specific day (Today / Yesterday / custom).
     const dateParam = new URL(request.url).searchParams.get('date')
@@ -30,22 +27,36 @@ export async function GET(request: Request) {
         expensesRes,
         requisitionsRes,
     ] = await Promise.all([
-        supabase.from('employees').select('id', { count: 'exact' }).eq('is_active', true),
-        supabase.from('work_entries').select('id, amount, suggested_amount, employee_id, source, created_at, employee:employees!employee_id(name, avatar_url)', { count: 'exact' }).eq('date', today),
-        supabase.from('work_entries').select('employee_id, amount, suggested_amount').gte('date', monthStart).lte('date', monthEnd),
-        supabase.from('problems').select('id, status', { count: 'exact' }).in('status', ['open', 'in_progress', 'resolved', 'escalated']),
-        supabase.from('attendance').select('id, status').eq('date', today),
-        // Top Performers: admin client bypasses any RLS so all employees' points are visible.
-        adminSupabase.from('point_transactions').select('employee_id, points, employee:employees!employee_id(name, avatar_url)').gte('created_at', monthStart + 'T00:00:00').lte('created_at', monthEnd + 'T23:59:59'),
-        supabase.from('courier_issues').select('id, problem_status, fraud_note'),
-        supabase.from('expenses').select('id, amount, payment_status'),
-        supabase.from('requisitions').select('id, manager_approval, management_approval'),
+        db.query(`SELECT COUNT(*)::int AS count FROM employees WHERE is_active = true`),
+        db.query(
+            `SELECT w.id, w.amount, w.suggested_amount, w.employee_id, w.source, w.created_at,
+                json_build_object('name', e.name, 'avatar_url', e.avatar_url) AS employee
+             FROM work_entries w LEFT JOIN employees e ON e.id = w.employee_id
+             WHERE w.date = $1`,
+            [today]
+        ),
+        db.query(
+            `SELECT employee_id, amount, suggested_amount FROM work_entries WHERE date >= $1 AND date <= $2`,
+            [monthStart, monthEnd]
+        ),
+        db.query(`SELECT id, status FROM problems WHERE status = ANY($1)`, [['open', 'in_progress', 'resolved', 'escalated']]),
+        db.query(`SELECT id, status FROM attendance WHERE date = $1`, [today]),
+        db.query(
+            `SELECT pt.employee_id, pt.points,
+                json_build_object('name', e.name, 'avatar_url', e.avatar_url) AS employee
+             FROM point_transactions pt LEFT JOIN employees e ON e.id = pt.employee_id
+             WHERE pt.created_at >= $1 AND pt.created_at <= $2`,
+            [monthStart + 'T00:00:00', monthEnd + 'T23:59:59']
+        ),
+        db.query(`SELECT id, problem_status, fraud_note FROM courier_issues`),
+        db.query(`SELECT id, amount, payment_status FROM expenses`),
+        db.query(`SELECT id, manager_approval, management_approval FROM requisitions`),
     ])
 
-    const totalMembers = membersRes.count || 0
+    const totalMembers = membersRes.rows[0]?.count || 0
 
     // Attendance breakdown
-    const allAttendance = allAttendanceRes.data || []
+    const allAttendance = allAttendanceRes.rows
     const attPresent = allAttendance.filter((a: { status: string }) => a.status === 'present').length
     const attLate = allAttendance.filter((a: { status: string }) => a.status === 'late').length
     const attAbsent = allAttendance.filter((a: { status: string }) => a.status === 'absent').length
@@ -53,65 +64,57 @@ export async function GET(request: Request) {
     const activeToday = attPresent + attLate
 
     // Today's work stats
-    const todayEntries = todayWorkRes.data || []
-    const todayOrders = todayWorkRes.count || 0
+    const todayEntries = todayWorkRes.rows
+    const todayOrders = todayEntries.length
     const todayAmount = todayEntries.reduce((s: number, e: { amount: number; suggested_amount?: number }) => s + (Number(e.amount) || 0) + (Number(e.suggested_amount) || 0), 0)
 
     // Monthly work stats
-    const monthEntries = monthWorkRes.data || []
+    const monthEntries = monthWorkRes.rows
     const monthOrders = monthEntries.length
     const monthAmount = monthEntries.reduce((s: number, e: { amount: number; suggested_amount?: number }) => s + (Number(e.amount) || 0) + (Number(e.suggested_amount) || 0), 0)
 
     // Problems stats
-    const allProblems = problemsRes.data || []
+    const allProblems = problemsRes.rows
     const openProblems = allProblems.filter((p: { status: string }) => p.status === 'open').length
     const inProgressProblems = allProblems.filter((p: { status: string }) => p.status === 'in_progress').length
     const resolvedProblems = allProblems.filter((p: { status: string }) => p.status === 'resolved').length
 
     // Courier stats
-    const allCourier = courierRes.data || []
+    const allCourier = courierRes.rows
     const courierTotal = allCourier.length
     const courierPending = allCourier.filter((i: { problem_status: string }) => i.problem_status === 'pending').length
     const courierResolved = allCourier.filter((i: { problem_status: string }) => i.problem_status === 'resolved').length
     const courierFraud = allCourier.filter((i: { fraud_note: boolean }) => i.fraud_note).length
 
     // Expenses stats
-    const allExpenses = expensesRes.data || []
+    const allExpenses = expensesRes.rows
     const expensesTotal = allExpenses.reduce((s: number, e: { amount: number }) => s + (Number(e.amount) || 0), 0)
     const expensesPending = allExpenses.filter((e: { payment_status: string }) => e.payment_status === 'pending').reduce((s: number, e: { amount: number }) => s + (Number(e.amount) || 0), 0)
     const expensesPaid = allExpenses.filter((e: { payment_status: string }) => e.payment_status === 'paid').reduce((s: number, e: { amount: number }) => s + (Number(e.amount) || 0), 0)
     const expensesRejected = allExpenses.filter((e: { payment_status: string }) => e.payment_status === 'rejected').reduce((s: number, e: { amount: number }) => s + (Number(e.amount) || 0), 0)
 
     // Requisitions stats
-    const allReqs = requisitionsRes.data || []
+    const allReqs = requisitionsRes.rows
     const reqsTotal = allReqs.length
     const reqsPending = allReqs.filter((r: { manager_approval: string }) => r.manager_approval === 'pending').length
     const reqsApproved = allReqs.filter((r: { manager_approval: string; management_approval: string }) => r.manager_approval === 'approved' && r.management_approval === 'approved').length
     const reqsRejected = allReqs.filter((r: { manager_approval: string; management_approval: string }) => r.manager_approval === 'rejected' || r.management_approval === 'rejected').length
 
     // Recent activity (last 5 work entries today)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const recentActivity = todayEntries.slice(0, 5).map((e: any) => {
-        const empName = Array.isArray(e.employee) ? e.employee[0]?.name : e.employee?.name
-        const empAvatar = Array.isArray(e.employee) ? e.employee[0]?.avatar_url : e.employee?.avatar_url
-        return {
-            name: empName || 'Unknown',
-            action: `submitted ৳${Number(e.amount).toLocaleString()} order via ${e.source}`,
-            time: e.created_at,
-            type: 'work',
-            avatar_url: empAvatar || null,
-        }
-    })
+    const recentActivity = todayEntries.slice(0, 5).map((e: { employee?: { name?: string; avatar_url?: string | null }; amount: number; source: string; created_at: string }) => ({
+        name: e.employee?.name || 'Unknown',
+        action: `submitted ৳${Number(e.amount).toLocaleString()} order via ${e.source}`,
+        time: e.created_at,
+        type: 'work',
+        avatar_url: e.employee?.avatar_url || null,
+    }))
 
     // Top performers this month (aggregate points)
-    const perfData = performanceRes.data || []
+    const perfData = performanceRes.rows
     const perfMap: Record<string, { name: string; points: number; avatar_url: string | null }> = {}
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    perfData.forEach((s: any) => {
-        const empName = Array.isArray(s.employee) ? s.employee[0]?.name : s.employee?.name
-        const empAvatar = Array.isArray(s.employee) ? s.employee[0]?.avatar_url : s.employee?.avatar_url
+    perfData.forEach((s: { employee_id: string; points: number; employee?: { name?: string; avatar_url?: string | null } }) => {
         if (!perfMap[s.employee_id]) {
-            perfMap[s.employee_id] = { name: empName || 'Unknown', points: 0, avatar_url: empAvatar || null }
+            perfMap[s.employee_id] = { name: s.employee?.name || 'Unknown', points: 0, avatar_url: s.employee?.avatar_url || null }
         }
         perfMap[s.employee_id].points += (s.points || 0)
     })

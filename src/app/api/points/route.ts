@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const { searchParams } = new URL(request.url)
     const isAdmin = auth.employee.roleLevel <= 3
@@ -12,28 +13,34 @@ export async function GET(request: Request) {
     const source = searchParams.get('source')
     const limit = parseInt(searchParams.get('limit') || '50')
 
-    let query = auth.supabase
-        .from('point_transactions')
-        .select(`
-            *,
-            employee:employees!employee_id(id, name, employee_id),
-            awarder:employees!awarded_by(id, name)
-        `)
-        .order('created_at', { ascending: false })
-        .limit(limit)
+    const conditions: string[] = []
+    const params: unknown[] = []
 
     // Members only see their own
     if (!isAdmin) {
-        query = query.eq('employee_id', auth.employee.id)
+        params.push(auth.employee.id); conditions.push(`pt.employee_id = $${params.length}`)
     } else if (employeeId) {
-        query = query.eq('employee_id', employeeId)
+        params.push(employeeId); conditions.push(`pt.employee_id = $${params.length}`)
     }
 
-    if (source) query = query.eq('source', source)
+    if (source) { params.push(source); conditions.push(`pt.source = $${params.length}`) }
 
-    const { data, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json(data || [])
+    params.push(limit)
+
+    const { rows } = await db.query(
+        `SELECT pt.*,
+            json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id) AS employee,
+            json_build_object('id', aw.id, 'name', aw.name) AS awarder
+         FROM point_transactions pt
+         LEFT JOIN employees e ON e.id = pt.employee_id
+         LEFT JOIN employees aw ON aw.id = pt.awarded_by
+         ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+         ORDER BY pt.created_at DESC
+         LIMIT $${params.length}`,
+        params
+    )
+
+    return NextResponse.json(rows)
 }
 
 // POST /api/points - award points (admin only for manual)
@@ -54,7 +61,7 @@ export async function POST(request: Request) {
     }
 
     await awardPoints(
-        auth.supabase,
+        auth.db,
         employee_id,
         points,
         source,

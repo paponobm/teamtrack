@@ -16,8 +16,8 @@ function getWeekStart(d: Date) {
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const isAdmin = auth.employee.roleLevel <= 3
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get('start_date')
@@ -33,32 +33,31 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'start_date and end_date are required' }, { status: 400 })
     }
 
-    let query = supabase
-        .from('work_reports')
-        .select(`
-            id, date, project, description, hours, progress, status, attachment_url, notes, created_at,
-            employee:employees(id, name, employee_id, avatar_url, department:departments(id, name))
-        `)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .order('date', { ascending: false })
-        .order('created_at', { ascending: false })
+    const conditions = [`wr.date >= $1`, `wr.date <= $2`]
+    const params: unknown[] = [startDate, endDate]
 
     if (isAdmin) {
-        if (employeeId) query = query.eq('employee_id', employeeId)
+        if (employeeId) { params.push(employeeId); conditions.push(`wr.employee_id = $${params.length}`) }
     } else {
-        query = query.eq('employee_id', auth.employee.id)
+        params.push(auth.employee.id); conditions.push(`wr.employee_id = $${params.length}`)
     }
-    if (status) query = query.eq('status', status)
+    if (status) { params.push(status); conditions.push(`wr.status = $${params.length}`) }
 
-    const { data, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { rows: data } = await db.query(
+        `SELECT wr.id, wr.date, wr.project, wr.description, wr.hours, wr.progress, wr.status, wr.attachment_url, wr.notes, wr.created_at,
+            json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url,
+                'department', json_build_object('id', d.id, 'name', d.name)) AS employee
+         FROM work_reports wr
+         LEFT JOIN employees e ON e.id = wr.employee_id
+         LEFT JOIN departments d ON d.id = e.department_id
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY wr.date DESC, wr.created_at DESC`,
+        params
+    )
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let rows = (data || []) as any[]
+    let rows = data
 
-    // Filtering a joined column (employee.department_id) isn't reliable via PostgREST without
-    // an !inner join, so apply the department filter in JS instead.
+    // Filtering a joined column (employee.department_id) is done in JS to keep the SQL simple.
     if (isAdmin && departmentId) {
         rows = rows.filter(r => r.employee?.department?.id === departmentId)
     }
@@ -80,18 +79,20 @@ export async function GET(request: Request) {
     const reportIds = pageRows.map(r => r.id)
     const evaluationByReport: Record<string, { points: number; note: string | null; evaluated_at: string }> = {}
     if (reportIds.length > 0) {
-        const { data: evalItems } = await supabase
-            .from('work_evaluation_items')
-            .select('work_report_id, points, created_at, evaluation:work_evaluations(note, evaluated_at)')
-            .in('work_report_id', reportIds)
-            .order('created_at', { ascending: false })
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ; (evalItems || []).forEach((it: any) => {
+        const { rows: evalItems } = await db.query(
+            `SELECT wei.work_report_id, wei.points, wei.created_at, we.note, we.evaluated_at
+             FROM work_evaluation_items wei
+             LEFT JOIN work_evaluations we ON we.id = wei.evaluation_id
+             WHERE wei.work_report_id = ANY($1)
+             ORDER BY wei.created_at DESC`,
+            [reportIds]
+        )
+        evalItems.forEach(it => {
             if (!evaluationByReport[it.work_report_id]) {
                 evaluationByReport[it.work_report_id] = {
                     points: it.points,
-                    note: it.evaluation?.note || null,
-                    evaluated_at: it.evaluation?.evaluated_at || it.created_at,
+                    note: it.note || null,
+                    evaluated_at: it.evaluated_at || it.created_at,
                 }
             }
         })
@@ -127,12 +128,12 @@ export async function GET(request: Request) {
 
     let summary: Record<string, number>
     if (isAdmin) {
-        const [{ count: reportsToday }, { data: todayRows }, { count: activeEmployees }] = await Promise.all([
-            supabase.from('work_reports').select('*', { count: 'exact', head: true }).eq('date', today),
-            supabase.from('work_reports').select('employee_id').eq('date', today),
-            supabase.from('employees').select('*', { count: 'exact', head: true }).eq('is_active', true),
+        const [{ rows: [{ count: reportsToday }] }, { rows: todayRows }, { rows: [{ count: activeEmployees }] }] = await Promise.all([
+            db.query(`SELECT COUNT(*)::int AS count FROM work_reports WHERE date = $1`, [today]),
+            db.query(`SELECT employee_id FROM work_reports WHERE date = $1`, [today]),
+            db.query(`SELECT COUNT(*)::int AS count FROM employees WHERE is_active = true`),
         ])
-        const submittedToday = new Set((todayRows || []).map(r => r.employee_id)).size
+        const submittedToday = new Set(todayRows.map(r => r.employee_id)).size
         summary = {
             totalReports: total,
             reportsToday: reportsToday || 0,
@@ -141,11 +142,11 @@ export async function GET(request: Request) {
         }
     } else {
         const empId = auth.employee.id
-        const [{ count: todayCount }, { count: weekCount }, { count: monthCount }, { count: totalCount }] = await Promise.all([
-            supabase.from('work_reports').select('*', { count: 'exact', head: true }).eq('employee_id', empId).eq('date', today),
-            supabase.from('work_reports').select('*', { count: 'exact', head: true }).eq('employee_id', empId).gte('date', weekStart),
-            supabase.from('work_reports').select('*', { count: 'exact', head: true }).eq('employee_id', empId).gte('date', monthStart),
-            supabase.from('work_reports').select('*', { count: 'exact', head: true }).eq('employee_id', empId),
+        const [{ rows: [{ count: todayCount }] }, { rows: [{ count: weekCount }] }, { rows: [{ count: monthCount }] }, { rows: [{ count: totalCount }] }] = await Promise.all([
+            db.query(`SELECT COUNT(*)::int AS count FROM work_reports WHERE employee_id = $1 AND date = $2`, [empId, today]),
+            db.query(`SELECT COUNT(*)::int AS count FROM work_reports WHERE employee_id = $1 AND date >= $2`, [empId, weekStart]),
+            db.query(`SELECT COUNT(*)::int AS count FROM work_reports WHERE employee_id = $1 AND date >= $2`, [empId, monthStart]),
+            db.query(`SELECT COUNT(*)::int AS count FROM work_reports WHERE employee_id = $1`, [empId]),
         ])
         summary = {
             todayReports: todayCount || 0,
@@ -162,6 +163,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const body = await request.json().catch(() => ({}))
     const { date, project, description, hours, progress, status, attachment_url, notes } = body
@@ -170,26 +172,22 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Project/Task is required' }, { status: 400 })
     }
 
-    const { data, error } = await auth.supabase
-        .from('work_reports')
-        .insert({
-            employee_id: auth.employee.id,
-            date: date || new Date().toISOString().split('T')[0],
-            project: project.trim(),
-            description: description || null,
-            hours: typeof hours === 'number' ? hours : 0,
-            progress: typeof progress === 'number' ? progress : 0,
-            status: status || 'in_progress',
-            attachment_url: attachment_url || null,
-            notes: notes || null,
-        })
-        .select(`
-            id, date, project, description, hours, progress, status, attachment_url, notes, created_at,
-            employee:employees(id, name, employee_id, avatar_url, department:departments(id, name))
-        `)
-        .single()
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { rows: [data] } = await db.query(
+        `WITH ins AS (
+            INSERT INTO work_reports (employee_id, date, project, description, hours, progress, status, attachment_url, notes)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING *
+         )
+         SELECT wr.id, wr.date, wr.project, wr.description, wr.hours, wr.progress, wr.status, wr.attachment_url, wr.notes, wr.created_at,
+            json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url,
+                'department', json_build_object('id', d.id, 'name', d.name)) AS employee
+         FROM ins wr LEFT JOIN employees e ON e.id = wr.employee_id LEFT JOIN departments d ON d.id = e.department_id`,
+        [
+            auth.employee.id, date || new Date().toISOString().split('T')[0], project.trim(),
+            description || null, typeof hours === 'number' ? hours : 0, typeof progress === 'number' ? progress : 0,
+            status || 'in_progress', attachment_url || null, notes || null,
+        ]
+    )
 
     await logAudit(auth.employee.id, `Submitted a daily work report for ${data.project}`, 'work_reports', data.id)
 

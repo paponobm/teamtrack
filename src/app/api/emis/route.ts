@@ -4,6 +4,11 @@ import { NextResponse } from 'next/server'
 
 const TERM_OPTIONS = [3, 6, 12, 24] as const
 
+const EMI_SELECT = `m.id, m.employee_id, m.amount, m.term_months, m.start_date, m.interest_rate, m.monthly_installment, m.expense_id, m.created_at,
+    json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url) AS employee,
+    json_build_object('id', c.id, 'name', c.name) AS created_by_employee`
+const EMI_JOINS = `LEFT JOIN employees e ON e.id = m.employee_id LEFT JOIN employees c ON c.id = m.created_by`
+
 // GET /api/emis?start_date=&end_date= — list EMI records, optionally filtered by
 // start_date falling within the range (Admin+). Combined with Advance records client-side
 // into one "Advance & EMI" list — see src/components/finance/AdvanceManager.tsx. Each record
@@ -13,35 +18,29 @@ const TERM_OPTIONS = [3, 6, 12, 24] as const
 export async function GET(request: Request) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
 
-    let query = supabase
-        .from('emis')
-        .select(`
-            id, employee_id, amount, term_months, start_date, interest_rate, monthly_installment, expense_id, created_at,
-            employee:employees!employee_id(id, name, employee_id, avatar_url),
-            created_by_employee:employees!created_by(id, name)
-        `)
-        .order('start_date', { ascending: false })
+    const conditions: string[] = []
+    const params: unknown[] = []
+    if (startDate) { params.push(startDate); conditions.push(`m.start_date >= $${params.length}`) }
+    if (endDate) { params.push(endDate); conditions.push(`m.start_date <= $${params.length}`) }
 
-    if (startDate) query = query.gte('start_date', startDate)
-    if (endDate) query = query.lte('start_date', endDate)
+    const { rows } = await db.query(
+        `SELECT ${EMI_SELECT} FROM emis m ${EMI_JOINS}
+         ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+         ORDER BY m.start_date DESC`,
+        params
+    )
 
-    const { data, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    const rows = data || []
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const summaries = await getEmiPaidSummaries(supabase, rows.map((r: any) => ({
+    const summaries = await getEmiPaidSummaries(db, rows.map(r => ({
         id: r.id, employee_id: r.employee_id, start_date: r.start_date, term_months: r.term_months, amount: r.amount, interest_rate: r.interest_rate, monthly_installment: r.monthly_installment,
     })))
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const emis = rows.map((r: any) => ({ ...r, ...summaries[r.id] }))
+    const emis = rows.map(r => ({ ...r, ...summaries[r.id] }))
 
     return NextResponse.json({ emis })
 }
@@ -53,8 +52,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const body = await request.json()
     const { employee_id, amount, term_months, start_date, interest_rate } = body
 
@@ -81,46 +80,29 @@ export async function POST(request: Request) {
 
     const monthlyInstallment = computeMonthlyInstallment(numAmount, numRate, numTerm)
 
-    const { data: inserted, error } = await supabase
-        .from('emis')
-        .insert({
-            employee_id,
-            amount: numAmount,
-            term_months: numTerm,
-            start_date,
-            interest_rate: numRate,
-            monthly_installment: monthlyInstallment,
-            created_by: auth.employee.id,
-        })
-        .select('id')
-        .single()
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { rows: [inserted] } = await db.query(
+        `INSERT INTO emis (employee_id, amount, term_months, start_date, interest_rate, monthly_installment, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [employee_id, numAmount, numTerm, start_date, numRate, monthlyInstallment, auth.employee.id]
+    )
 
     // Mirror this EMI into Finance Hub as a real Expense (category "Employee Loan") so Total
     // Expenses/Net Balance reflect the loan principal disbursed — best-effort: a failed link
     // doesn't block the EMI itself, since the EMI is the record of truth for Payroll.
-    const expenseId = await createLinkedExpense(supabase, {
+    const expenseId = await createLinkedExpense(db, {
         employeeId: employee_id,
         amount: numAmount,
         date: start_date,
         submittedBy: auth.employee.id,
     })
     if (expenseId) {
-        await supabase.from('emis').update({ expense_id: expenseId }).eq('id', inserted.id)
+        await db.query(`UPDATE emis SET expense_id = $1 WHERE id = $2`, [expenseId, inserted.id])
     }
 
-    const { data, error: fetchError } = await supabase
-        .from('emis')
-        .select(`
-            id, employee_id, amount, term_months, start_date, interest_rate, monthly_installment, expense_id, created_at,
-            employee:employees!employee_id(id, name, employee_id, avatar_url),
-            created_by_employee:employees!created_by(id, name)
-        `)
-        .eq('id', inserted.id)
-        .single()
-
-    if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 })
+    const { rows: [data] } = await db.query(
+        `SELECT ${EMI_SELECT} FROM emis m ${EMI_JOINS} WHERE m.id = $1`,
+        [inserted.id]
+    )
 
     // A brand-new record has no salary sheets touching it yet, so Paid is always 0 here.
     const totalPayable = computeTotalPayable(numAmount, numRate, numTerm)

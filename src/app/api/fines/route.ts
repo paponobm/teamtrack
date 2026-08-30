@@ -5,33 +5,31 @@ export async function GET(request: Request) {
     const auth = await requireAuth(5) // Level 5 (Member) can view
     if (!isAuthed(auth)) return auth
 
-    const { supabase, employee } = auth
-    const { searchParams } = new URL(request.url)
+    const { db, employee } = auth
 
     try {
-        let query = supabase
-            .from('fines')
-            .select(`
-                *,
-                member:employees!fines_member_id_fkey(id, name, employee_id, avatar_url),
-                issued_by_user:employees!fines_issued_by_fkey(id, name)
-            `)
-            .order('created_at', { ascending: false })
-
+        const conditions: string[] = []
+        const params: unknown[] = []
         // If not an admin, only show their own fines
         if (employee.roleLevel > 3) {
-            query = query.eq('member_id', employee.id)
+            params.push(employee.id)
+            conditions.push(`f.member_id = $${params.length}`)
         }
 
-        const { data, error } = await query
-
-        if (error) {
-            console.error('Error fetching fines:', error)
-            return NextResponse.json({ error: error.message }, { status: 500 })
-        }
+        const { rows: data } = await db.query(
+            `SELECT f.*,
+                json_build_object('id', m.id, 'name', m.name, 'employee_id', m.employee_id, 'avatar_url', m.avatar_url) AS member,
+                json_build_object('id', ib.id, 'name', ib.name) AS issued_by_user
+             FROM fines f
+             LEFT JOIN employees m ON m.id = f.member_id
+             LEFT JOIN employees ib ON ib.id = f.issued_by
+             ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+             ORDER BY f.created_at DESC`,
+            params
+        )
 
         return NextResponse.json({ data })
-    } catch (error) {
+    } catch {
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
     }
 }
@@ -40,7 +38,7 @@ export async function POST(request: Request) {
     const auth = await requireAuth(3) // Only Admin (level <= 3) can issue fines
     if (!isAuthed(auth)) return auth
 
-    const { supabase, employee } = auth
+    const { db, employee } = auth
 
     try {
         const payload = await request.json()
@@ -55,28 +53,15 @@ export async function POST(request: Request) {
         }
 
         // Insert into fines
-        const { data, error } = await supabase
-            .from('fines')
-            .insert({
-                member_id,
-                issued_by: employee.id,
-                amount,
-                category,
-                reason,
-                status: 'Active',
-                payment_status: 'Unpaid'
-            })
-            .select()
-            .single()
-
-        if (error) {
-            console.error('Error creating fine:', error)
-            return NextResponse.json({ error: error.message }, { status: 500 })
-        }
+        const { rows: [data] } = await db.query(
+            `INSERT INTO fines (member_id, issued_by, amount, category, reason, status, payment_status)
+             VALUES ($1, $2, $3, $4, $5, 'Active', 'Unpaid') RETURNING *`,
+            [member_id, employee.id, amount, category, reason]
+        )
 
         // Deduct points from the member
         await awardPoints(
-            supabase,
+            db,
             member_id,
             -Math.abs(amount), // Negative amount for deduction
             'Fine',
@@ -86,7 +71,7 @@ export async function POST(request: Request) {
         )
 
         return NextResponse.json({ data })
-    } catch (error) {
+    } catch {
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
     }
 }

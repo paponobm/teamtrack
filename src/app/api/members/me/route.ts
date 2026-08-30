@@ -6,16 +6,17 @@ export async function GET() {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
 
-    const { data, error } = await auth.supabase
-        .from('employees')
-        .select(`
-            *,
-            role:roles(id, name, level),
-            department:departments(id, name, name_bn)
-        `)
-        .eq('id', auth.employee.id)
-        .single()
+    const { rows: [data] } = await auth.db.query(
+        `SELECT e.*,
+            json_build_object('id', r.id, 'name', r.name, 'level', r.level) AS role,
+            json_build_object('id', d.id, 'name', d.name, 'name_bn', d.name_bn) AS department
+         FROM employees e
+         LEFT JOIN roles r ON r.id = e.role_id
+         LEFT JOIN departments d ON d.id = e.department_id
+         WHERE e.id = $1`,
+        [auth.employee.id]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     return NextResponse.json(data)
 }

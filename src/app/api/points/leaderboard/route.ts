@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get('start_date')
@@ -11,21 +12,15 @@ export async function GET(request: Request) {
 
     if (startDate && endDate) {
         // Aggregate points from point_transactions for the specific date range
-        const { data: txs, error: txError } = await auth.supabase
-            .from('point_transactions')
-            .select('employee_id, points')
-            .gte('created_at', startDate + 'T00:00:00.000Z')
-            .lte('created_at', endDate + 'T23:59:59.999Z')
-
-        if (txError) return NextResponse.json({ error: txError.message }, { status: 500 })
+        const { rows: txs } = await db.query(
+            `SELECT employee_id, points FROM point_transactions WHERE created_at >= $1 AND created_at <= $2`,
+            [startDate + 'T00:00:00.000Z', endDate + 'T23:59:59.999Z']
+        )
 
         // Get employees
-        const { data: emps, error: empError } = await auth.supabase
-            .from('employees')
-            .select('id, name, avatar_url, designation, is_active')
-            .eq('is_active', true)
-
-        if (empError) return NextResponse.json({ error: empError.message }, { status: 500 })
+        const { rows: emps } = await db.query(
+            `SELECT id, name, avatar_url, designation, is_active FROM employees WHERE is_active = true`
+        )
 
         // Calculate points
         const pointsMap: Record<string, number> = {}
@@ -42,13 +37,9 @@ export async function GET(request: Request) {
     }
 
     // Default behavior without dates
-    const { data, error } = await auth.supabase
-        .from('employees')
-        .select('id, name, avatar_url, total_points, designation, is_active')
-        .eq('is_active', true)
-        .order('total_points', { ascending: false })
+    const { rows } = await db.query(
+        `SELECT id, name, avatar_url, total_points, designation, is_active FROM employees WHERE is_active = true ORDER BY total_points DESC`
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    return NextResponse.json({ leaderboard: data })
+    return NextResponse.json({ leaderboard: rows })
 }

@@ -1,6 +1,6 @@
-import { createAdminClient } from './supabase/admin'
+import type { Pool, PoolClient } from 'pg'
 
-type SupabaseClient = ReturnType<typeof createAdminClient>
+type Db = Pool | PoolClient
 
 function round2(n: number): number {
     return Math.round(n * 100) / 100
@@ -85,54 +85,44 @@ function buildEmiDescription(employeeName: string) {
 // shown (see /api/expenses), never by flipping this expense's own payment_status. Returns the
 // new expense id, or null if the insert fails (EMI creation still proceeds — a missing linked
 // expense is recoverable, a blocked EMI is not).
-export async function createLinkedExpense(supabase: SupabaseClient, params: {
+export async function createLinkedExpense(db: Db, params: {
     employeeId: string
     amount: number
     date: string
     submittedBy: string
 }): Promise<string | null> {
-    const { data: employee } = await supabase.from('employees').select('name').eq('id', params.employeeId).maybeSingle()
+    const { rows: [employee] } = await db.query(`SELECT name FROM employees WHERE id = $1`, [params.employeeId])
     const employeeName = employee?.name || 'employee'
 
-    const { data: expense, error } = await supabase
-        .from('expenses')
-        .insert({
-            date: params.date,
-            category: EMI_EXPENSE_CATEGORY,
-            description: buildEmiDescription(employeeName),
-            amount: params.amount,
-            payment_status: 'paid',
-            submitted_by: params.submittedBy,
-            approved_by: params.submittedBy,
-        })
-        .select('id')
-        .single()
-
-    if (error) return null
-    return expense.id
+    try {
+        const { rows: [expense] } = await db.query(
+            `INSERT INTO expenses (date, category, description, amount, payment_status, submitted_by, approved_by)
+             VALUES ($1, $2, $3, $4, 'paid', $5, $5) RETURNING id`,
+            [params.date, EMI_EXPENSE_CATEGORY, buildEmiDescription(employeeName), params.amount, params.submittedBy]
+        )
+        return expense.id
+    } catch {
+        return null
+    }
 }
 
 // Keeps an EMI's linked expense in sync after an edit (amount/date/employee change).
-export async function syncLinkedExpense(supabase: SupabaseClient, expenseId: string, params: {
+export async function syncLinkedExpense(db: Db, expenseId: string, params: {
     employeeId: string
     amount: number
     date: string
 }) {
-    const { data: employee } = await supabase.from('employees').select('name').eq('id', params.employeeId).maybeSingle()
+    const { rows: [employee] } = await db.query(`SELECT name FROM employees WHERE id = $1`, [params.employeeId])
     const employeeName = employee?.name || 'employee'
 
-    await supabase
-        .from('expenses')
-        .update({
-            date: params.date,
-            description: buildEmiDescription(employeeName),
-            amount: params.amount,
-        })
-        .eq('id', expenseId)
+    await db.query(
+        `UPDATE expenses SET date = $1, description = $2, amount = $3 WHERE id = $4`,
+        [params.date, buildEmiDescription(employeeName), params.amount, expenseId]
+    )
 }
 
-export async function deleteLinkedExpense(supabase: SupabaseClient, expenseId: string) {
-    await supabase.from('expenses').delete().eq('id', expenseId)
+export async function deleteLinkedExpense(db: Db, expenseId: string) {
+    await db.query(`DELETE FROM expenses WHERE id = $1`, [expenseId])
 }
 
 export interface EmiRecord {
@@ -163,20 +153,19 @@ function indexToMonthKey(index: number): string {
 // start_date's month + term_months - 1) covers the requested month. Same "reuse, don't
 // duplicate" pattern as getAdvanceDetailsForMonth/getProductBuyDetailsForMonth — the Salary
 // Sheet's Loan column is never manually typed once an EMI exists for that employee/month.
-export async function getEmiLoanDetailsForMonth(supabase: SupabaseClient, employeeIds: string[], month: string): Promise<Record<string, EmployeeEmiDetail>> {
+export async function getEmiLoanDetailsForMonth(db: Db, employeeIds: string[], month: string): Promise<Record<string, EmployeeEmiDetail>> {
     const details: Record<string, EmployeeEmiDetail> = {}
     employeeIds.forEach(id => { details[id] = { total: 0, records: [] } })
     if (employeeIds.length === 0) return details
 
-    const { data } = await supabase
-        .from('emis')
-        .select('id, employee_id, start_date, term_months, monthly_installment')
-        .in('employee_id', employeeIds)
+    const { rows } = await db.query(
+        `SELECT id, employee_id, start_date, term_months, monthly_installment FROM emis WHERE employee_id = ANY($1)`,
+        [employeeIds]
+    )
 
     const targetIndex = monthKeyToIndex(month)
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(data || []).forEach((r: any) => {
+    rows.forEach((r: { id: string; employee_id: string; start_date: string; term_months: number; monthly_installment: number }) => {
         const d = details[r.employee_id]
         if (!d) return
         const startIndex = monthKeyToIndex(String(r.start_date).slice(0, 7))
@@ -220,7 +209,7 @@ interface EmiForSummary {
 // uses), reusing that existing mechanism instead of a separate payment ledger. Unlike
 // Provident Fund, Total Payable here legitimately includes interest — EMI is a loan the
 // employee repays in full via payroll, not a principal-only contribution.
-export async function getEmiPaidSummaries(supabase: SupabaseClient, emiRecords: EmiForSummary[]): Promise<Record<string, EmiPaidSummary>> {
+export async function getEmiPaidSummaries(db: Db, emiRecords: EmiForSummary[]): Promise<Record<string, EmiPaidSummary>> {
     const summaries: Record<string, EmiPaidSummary> = {}
     if (emiRecords.length === 0) return summaries
 
@@ -238,28 +227,24 @@ export async function getEmiPaidSummaries(supabase: SupabaseClient, emiRecords: 
     const startMonth = indexToMonthKey(minIndex)
     const endMonth = indexToMonthKey(maxIndex)
 
-    const { data: sheets } = await supabase
-        .from('salary_sheets')
-        .select('id, month')
-        .gte('month', startMonth)
-        .lte('month', endMonth)
+    const { rows: sheetRows } = await db.query(
+        `SELECT id, month FROM salary_sheets WHERE month >= $1 AND month <= $2`,
+        [startMonth, endMonth]
+    )
 
-    const sheetRows = sheets || []
     const sheetIds = sheetRows.map((s: { id: string }) => s.id)
     const sheetMonthById: Record<string, string> = {}
     sheetRows.forEach((s: { id: string; month: string }) => { sheetMonthById[s.id] = s.month })
 
     const paidMonthsByEmployee: Record<string, Set<string>> = {}
     if (sheetIds.length > 0 && employeeIds.size > 0) {
-        const { data: entries } = await supabase
-            .from('salary_entries')
-            .select('employee_id, salary_sheet_id, payment_status')
-            .in('salary_sheet_id', sheetIds)
-            .in('employee_id', Array.from(employeeIds))
-            .eq('payment_status', 'Paid')
+        const { rows: entries } = await db.query(
+            `SELECT employee_id, salary_sheet_id FROM salary_entries
+             WHERE salary_sheet_id = ANY($1) AND employee_id = ANY($2) AND payment_status = 'Paid'`,
+            [sheetIds, Array.from(employeeIds)]
+        )
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ;(entries || []).forEach((e: any) => {
+        entries.forEach((e: { employee_id: string; salary_sheet_id: string }) => {
             const month = sheetMonthById[e.salary_sheet_id]
             if (!month) return
             if (!paidMonthsByEmployee[e.employee_id]) paidMonthsByEmployee[e.employee_id] = new Set()

@@ -5,8 +5,8 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const period = searchParams.get('period') || 'monthly' // 'weekly' | 'monthly'
 
@@ -29,19 +29,14 @@ export async function GET(request: Request) {
 
     const endDate = now.toISOString().split('T')[0]
 
-    const { data: entries, error } = await supabase
-        .from('work_entries')
-        .select('employee_id, amount, suggested_amount, order_type')
-        .gte('date', startDate)
-        .lte('date', endDate)
-
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    const { rows: entries } = await db.query(
+        `SELECT employee_id, amount, suggested_amount, order_type FROM work_entries WHERE date >= $1 AND date <= $2`,
+        [startDate, endDate]
+    )
 
     // Aggregate per employee
     const empMap: Record<string, { totalOrders: number; totalAmount: number; orders2000Plus: number }> = {}
-    for (const e of entries || []) {
+    for (const e of entries) {
         if (!e.employee_id) continue
         if (!empMap[e.employee_id]) {
             empMap[e.employee_id] = { totalOrders: 0, totalAmount: 0, orders2000Plus: 0 }
@@ -57,13 +52,10 @@ export async function GET(request: Request) {
         return NextResponse.json({ ranking: [], period, startDate, endDate })
     }
 
-    const { data: employees } = await supabase
-        .from('employees')
-        .select('id, name, employee_id')
-        .in('id', empIds)
+    const { rows: employees } = await db.query(`SELECT id, name, employee_id FROM employees WHERE id = ANY($1)`, [empIds])
 
     const empNameMap: Record<string, { name: string; employee_id: string }> = {}
-    for (const emp of employees || []) {
+    for (const emp of employees) {
         empNameMap[emp.id] = { name: emp.name, employee_id: emp.employee_id }
     }
 

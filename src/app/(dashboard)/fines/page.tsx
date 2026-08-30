@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
 import { usePermissions } from '@/lib/PermissionsContext'
 import { useToast } from '@/lib/ToastContext'
@@ -256,7 +255,6 @@ function EmployeeFilterSelect({ value, onChange, options }: { value: string, onC
 }
 
 export default function FinesPage() {
-    const supabase = createClient()
     const toast = useToast()
     const { data: permData } = usePermissions()
     const isAdmin = permData.is_admin || permData.is_super
@@ -314,8 +312,9 @@ export default function FinesPage() {
     }
 
     const fetchEmployees = async () => {
-        const { data } = await supabase.from('employees').select('id, name, avatar_url').eq('is_active', true).order('name')
-        if (data) setEmployees(data)
+        const res = await fetch('/api/members?status=active')
+        const data = await res.json()
+        if (Array.isArray(data)) setEmployees(data)
     }
 
     const handleAddFine = async (e: React.FormEvent) => {

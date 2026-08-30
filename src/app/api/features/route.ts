@@ -6,20 +6,15 @@ export async function GET() {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
 
-    const { data, error } = await auth.supabase
-        .from('features')
-        .select('*')
-        .order('category')
-        .order('sort_order')
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json(data)
+    const { rows } = await auth.db.query(`SELECT * FROM features ORDER BY category, sort_order`)
+    return NextResponse.json(rows)
 }
 
 // POST /api/features - create a new feature (admin only)
 export async function POST(request: Request) {
     const auth = await requireAuth(3) // Admin+
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const body = await request.json()
 
@@ -28,29 +23,23 @@ export async function POST(request: Request) {
     }
 
     const slug = body.slug?.trim() || body.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+    const category = body.category || 'General'
 
-    const { data: existing } = await auth.supabase
-        .from('features')
-        .select('sort_order')
-        .eq('category', body.category || 'General')
-        .order('sort_order', { ascending: false })
-        .limit(1)
+    const { rows: [existing] } = await db.query(
+        `SELECT sort_order FROM features WHERE category = $1 ORDER BY sort_order DESC LIMIT 1`,
+        [category]
+    )
 
-    const nextOrder = (existing?.[0]?.sort_order || 0) + 1
+    const nextOrder = (existing?.sort_order || 0) + 1
 
-    const { data, error } = await auth.supabase
-        .from('features')
-        .upsert({
-            name: body.name.trim(),
-            name_bn: body.name_bn || body.name.trim(),
-            category: body.category || 'General',
-            slug,
-            sort_order: nextOrder,
-        }, { onConflict: 'slug' })
-        .select()
-        .single()
+    const { rows: [data] } = await db.query(
+        `INSERT INTO features (name, name_bn, category, slug, sort_order)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name, name_bn = EXCLUDED.name_bn, category = EXCLUDED.category, sort_order = EXCLUDED.sort_order
+         RETURNING *`,
+        [body.name.trim(), body.name_bn || body.name.trim(), category, slug, nextOrder]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(data, { status: 201 })
 }
 
@@ -58,13 +47,13 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
     const auth = await requireAuth(2) // SuperAdmin+
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'Missing feature id' }, { status: 400 })
 
-    await auth.supabase.from('employee_permissions').delete().eq('feature_id', id)
-    const { error } = await auth.supabase.from('features').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await db.query(`DELETE FROM employee_permissions WHERE feature_id = $1`, [id])
+    await db.query(`DELETE FROM features WHERE id = $1`, [id])
     return NextResponse.json({ success: true })
 }

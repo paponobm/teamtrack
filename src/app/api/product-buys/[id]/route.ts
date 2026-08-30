@@ -9,16 +9,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
-    const supabase = auth.supabase
+    const db = auth.db
     const body = await request.json()
 
-    const { data: existing, error: fetchError } = await supabase
-        .from('product_buys')
-        .select('product_price, discount_price, amount')
-        .eq('id', id)
-        .maybeSingle()
+    const { rows: [existing] } = await db.query(
+        `SELECT product_price, discount_price, amount FROM product_buys WHERE id = $1`,
+        [id]
+    )
 
-    if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 })
     if (!existing) return NextResponse.json({ error: 'Product buy record not found' }, { status: 404 })
 
     const update: Record<string, number | string | null> = {}
@@ -70,18 +68,17 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         update.payment_status = body.payment_status
     }
 
-    if (Object.keys(update).length === 0) {
+    const keys = Object.keys(update)
+    if (keys.length === 0) {
         return NextResponse.json({ error: 'No editable fields provided' }, { status: 400 })
     }
 
-    const { data, error } = await supabase
-        .from('product_buys')
-        .update(update)
-        .eq('id', id)
-        .select('id')
-        .maybeSingle()
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    const { rows: [data] } = await db.query(
+        `UPDATE product_buys SET ${setClauses.join(', ')} WHERE id = $1 RETURNING id`,
+        [id, ...keys.map(k => update[k])]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     if (!data) return NextResponse.json({ error: 'Product buy record not found' }, { status: 404 })
 
     return NextResponse.json({ success: true })
@@ -93,10 +90,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
-    const supabase = auth.supabase
-
-    const { error } = await supabase.from('product_buys').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await auth.db.query(`DELETE FROM product_buys WHERE id = $1`, [id])
 
     return NextResponse.json({ success: true })
 }

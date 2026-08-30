@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 export async function POST(request: Request) {
     const auth = await requireAuth(3) // 3=Admin
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     try {
         const { id, action } = await request.json()
@@ -12,43 +13,32 @@ export async function POST(request: Request) {
         }
 
         // Get withdrawal request
-        const { data: req, error: reqError } = await auth.supabase
-            .from('point_withdrawals')
-            .select('*')
-            .eq('id', id)
-            .single()
+        const { rows: [reqRow] } = await db.query(`SELECT * FROM point_withdrawals WHERE id = $1`, [id])
 
-        if (reqError || !req) return NextResponse.json({ error: 'Request not found' }, { status: 404 })
-        if (req.status !== 'pending') return NextResponse.json({ error: 'Request already processed' }, { status: 400 })
+        if (!reqRow) return NextResponse.json({ error: 'Request not found' }, { status: 404 })
+        if (reqRow.status !== 'pending') return NextResponse.json({ error: 'Request already processed' }, { status: 400 })
 
         const newStatus = action === 'approve' ? 'approved' : 'rejected'
 
         // On approve, ensure the member still has enough points (never drive the balance negative).
         if (action === 'approve') {
-            const { data: emp } = await auth.supabase
-                .from('employees')
-                .select('total_points')
-                .eq('id', req.employee_id)
-                .single()
-            if (!emp || (emp.total_points || 0) < req.amount) {
+            const { rows: [emp] } = await db.query(`SELECT total_points FROM employees WHERE id = $1`, [reqRow.employee_id])
+            if (!emp || (emp.total_points || 0) < reqRow.amount) {
                 return NextResponse.json({ error: 'Member no longer has enough points to cover this withdrawal.' }, { status: 400 })
             }
         }
 
         // Atomically claim the request: flip pending -> new status only if still pending.
         // This guarantees only one processing wins, preventing double-deduct / double-pay.
-        const { data: claimed, error: claimError } = await auth.supabase
-            .from('point_withdrawals')
-            .update({
-                status: newStatus,
-                processed_at: new Date().toISOString(),
-                processed_by: auth.employee.id,
-            })
-            .eq('id', id)
-            .eq('status', 'pending')
-            .select('id')
-
-        if (claimError) {
+        let claimed
+        try {
+            const { rows } = await db.query(
+                `UPDATE point_withdrawals SET status = $1, processed_at = NOW(), processed_by = $2
+                 WHERE id = $3 AND status = 'pending' RETURNING id`,
+                [newStatus, auth.employee.id, id]
+            )
+            claimed = rows
+        } catch (claimError) {
             console.error('Update withdrawal error:', claimError)
             return NextResponse.json({ error: 'Failed to update withdrawal status' }, { status: 500 })
         }
@@ -60,9 +50,9 @@ export async function POST(request: Request) {
         if (action === 'approve') {
             try {
                 await awardPoints(
-                    auth.supabase,
-                    req.employee_id,
-                    -Math.abs(req.amount), // Deduct
+                    db,
+                    reqRow.employee_id,
+                    -Math.abs(reqRow.amount), // Deduct
                     'withdrawal',
                     null,
                     'Points converted to BDT',
@@ -70,7 +60,7 @@ export async function POST(request: Request) {
                 )
             } catch (deductError) {
                 // Roll the request back to pending so the points stay consistent with the ledger.
-                await auth.supabase.from('point_withdrawals').update({ status: 'pending', processed_at: null, processed_by: null }).eq('id', id)
+                await db.query(`UPDATE point_withdrawals SET status = 'pending', processed_at = NULL, processed_by = NULL WHERE id = $1`, [id])
                 console.error('Failed to deduct points:', deductError)
                 return NextResponse.json({ error: 'Failed to deduct points' }, { status: 500 })
             }

@@ -1,5 +1,4 @@
-import { createAdminClient } from '@/lib/supabase/admin'
-import { requireAuth, isAuthed } from '@/lib/auth'
+import { requireAuth, isAuthed, awardPoints } from '@/lib/auth'
 import { NextResponse } from 'next/server'
 
 // Points map for order types
@@ -14,28 +13,12 @@ const ORDER_POINTS: Record<string, number> = {
     retargeting: 15,
 }
 
-// Helper: award points and log transaction
-async function awardPoints(
-    supabase: ReturnType<typeof createAdminClient>,
-    employeeId: string, points: number, source: string,
-    sourceId: string | null, description: string
-) {
-    await supabase.from('point_transactions').insert({
-        employee_id: employeeId, points, source, source_id: sourceId,
-        description, awarded_by: null,
-    })
-    const { data: emp } = await supabase.from('employees').select('total_points').eq('id', employeeId).single()
-    if (emp) {
-        await supabase.from('employees').update({ total_points: (emp.total_points || 0) + points }).eq('id', employeeId)
-    }
-}
-
 // PUT /api/work-log/status - change delivery status and log it (+auto-points on delivered)
 export async function PUT(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const body = await request.json()
     const { entry_id, delivery_status } = body
 
@@ -47,11 +30,10 @@ export async function PUT(request: Request) {
     const actorName: string = auth.employee.name
 
     // Get old entry (status + order_type + employee_id)
-    const { data: oldEntry } = await supabase
-        .from('work_entries')
-        .select('delivery_status, order_type, employee_id')
-        .eq('id', entry_id)
-        .single()
+    const { rows: [oldEntry] } = await db.query(
+        `SELECT delivery_status, order_type, employee_id FROM work_entries WHERE id = $1`,
+        [entry_id]
+    )
 
     if (!oldEntry) {
         return NextResponse.json({ error: 'Work entry not found' }, { status: 404 })
@@ -65,41 +47,30 @@ export async function PUT(request: Request) {
     const oldStatus = oldEntry?.delivery_status || 'unknown'
 
     // Update status
-    const { data, error } = await supabase
-        .from('work_entries')
-        .update({ delivery_status })
-        .eq('id', entry_id)
-        .select('*')
-        .single()
-
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
-    }
+    const { rows: [data] } = await db.query(
+        `UPDATE work_entries SET delivery_status = $1 WHERE id = $2 RETURNING *`,
+        [delivery_status, entry_id]
+    )
 
     // Log the change
-    if (actorId) {
-        await supabase.from('audit_log').insert({
-            actor_id: actorId,
-            module: 'work_log',
-            action: 'status_change',
-            target_id: entry_id,
-            old_value: oldStatus,
-            new_value: delivery_status,
-            details: { actor_name: actorName },
-        }).then(() => { })
-    }
+    await db.query(
+        `INSERT INTO audit_log (actor_id, module, action, target_id, old_value, new_value, details)
+         VALUES ($1, 'work_log', 'status_change', $2, $3, $4, $5)`,
+        [actorId, entry_id, oldStatus, delivery_status, JSON.stringify({ actor_name: actorName })]
+    )
 
     // Award auto-points when delivered
     if (delivery_status === 'delivered' && oldStatus !== 'delivered' && oldEntry?.employee_id) {
         const orderType = oldEntry.order_type || 'normal'
         const points = ORDER_POINTS[orderType] || 5
         await awardPoints(
-            supabase,
+            db,
             oldEntry.employee_id,
             points,
             'order',
             entry_id,
-            `Order delivered (${orderType}) - ${points} pts`
+            `Order delivered (${orderType}) - ${points} pts`,
+            null
         )
     }
 

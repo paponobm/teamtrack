@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { createClient } from '@/lib/supabase/client'
 import { IconX, IconUser, IconPhone, IconClipboard, IconStar, IconUsers } from '@/components/icons/Icons'
 import { useToast } from '@/lib/ToastContext'
 
@@ -16,7 +15,6 @@ type Influencer = {
 }
 
 export default function InfluencerDrawer({ influencerId, onClose }: { influencerId: string, onClose: () => void }) {
-    const supabase = createClient()
     const toast = useToast()
     const [influencer, setInfluencer] = useState<Influencer | null>(null)
     const [loading, setLoading] = useState(true)
@@ -29,15 +27,11 @@ export default function InfluencerDrawer({ influencerId, onClose }: { influencer
 
     const fetchInfluencer = async () => {
         setLoading(true)
-        const { data, error } = await supabase
-            .from('influencers')
-            .select('*')
-            .eq('id', influencerId)
-            .single()
-
-        if (error) {
+        const res = await fetch(`/api/influencers?id=${influencerId}`)
+        if (!res.ok) {
             toast.error('Failed to load influencer details')
         } else {
+            const { data } = await res.json()
             setInfluencer(data)
         }
         setLoading(false)

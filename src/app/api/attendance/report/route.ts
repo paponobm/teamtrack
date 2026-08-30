@@ -10,8 +10,8 @@ const STANDARD_SHIFT_MS = 8 * 60 * 60 * 1000
 export async function GET(request: Request) {
     const auth = await requireAuth(3) // Admin+ only — this reports on all employees
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
@@ -25,25 +25,24 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'start_date and end_date are required' }, { status: 400 })
     }
 
-    let query = supabase
-        .from('attendance')
-        .select(`
-            id, date, clock_in, clock_out, status,
-            employee:employees(id, name, employee_id, avatar_url, duty_start_time, department:departments(id, name))
-        `)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .order('date', { ascending: false })
-        .order('clock_in', { ascending: true, nullsFirst: false })
+    const conditions = [`a.date >= $1`, `a.date <= $2`]
+    const params: unknown[] = [startDate, endDate]
+    if (employeeId) { params.push(employeeId); conditions.push(`a.employee_id = $${params.length}`) }
+    if (status) { params.push(status); conditions.push(`a.status = $${params.length}`) }
 
-    if (employeeId) query = query.eq('employee_id', employeeId)
-    if (status) query = query.eq('status', status)
+    const { rows: data } = await db.query(
+        `SELECT a.id, a.date, a.clock_in, a.clock_out, a.status,
+            json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url,
+                'duty_start_time', e.duty_start_time, 'department', json_build_object('id', d.id, 'name', d.name)) AS employee
+         FROM attendance a
+         LEFT JOIN employees e ON e.id = a.employee_id
+         LEFT JOIN departments d ON d.id = e.department_id
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY a.date DESC, a.clock_in ASC NULLS LAST`,
+        params
+    )
 
-    const { data, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let rows = (data || []) as any[]
+    let rows = data
 
     if (search) {
         rows = rows.filter(r =>
@@ -71,12 +70,11 @@ export async function GET(request: Request) {
     const attendanceIds = pageRows.map(r => r.id)
     const breaksByAttendance: Record<string, number> = {}
     if (attendanceIds.length > 0) {
-        const { data: breaks } = await supabase
-            .from('attendance_breaks')
-            .select('attendance_id, start_time, end_time')
-            .in('attendance_id', attendanceIds)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ; (breaks || []).forEach((b: any) => {
+        const { rows: breaks } = await db.query(
+            `SELECT attendance_id, start_time, end_time FROM attendance_breaks WHERE attendance_id = ANY($1)`,
+            [attendanceIds]
+        )
+        breaks.forEach(b => {
             const start = new Date(b.start_time).getTime()
             const end = b.end_time ? new Date(b.end_time).getTime() : Date.now()
             breaksByAttendance[b.attendance_id] = (breaksByAttendance[b.attendance_id] || 0) + Math.max(0, end - start)

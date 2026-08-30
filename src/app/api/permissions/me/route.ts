@@ -1,46 +1,24 @@
-import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAuth, isAuthed } from '@/lib/auth'
 import { NextResponse } from 'next/server'
 
 // GET /api/permissions/me - get current user's permissions
 export async function GET() {
-    const supabase = await createClient()
+    const auth = await requireAuth(0)
+    if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    // Get current auth user
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-        return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-    }
-
-    const adminClient = createAdminClient()
-
-    // Find employee record for this user
-    const { data: employee } = await adminClient
-        .from('employees')
-        .select('id, role_id, role:roles(name, level)')
-        .eq('user_id', user.id)
-        .single()
-
-    if (!employee) {
-        return NextResponse.json({ error: 'No employee record' }, { status: 404 })
-    }
+    const roleLevel = auth.employee.roleLevel
 
     // Check if user is Owner, Super Admin, or Admin (level 1–3) - they get full access
-    const roleLevel = (employee.role as unknown as { name: string; level: number } | null)?.level
     if (roleLevel && roleLevel <= 3) {
-        // Return all features as admin
-        const { data: features } = await adminClient
-            .from('features')
-            .select('id, slug')
+        const { rows: features } = await db.query(`SELECT id, slug FROM features`)
 
         const allAdmin: Record<string, string> = {}
-        features?.forEach(f => {
-            allAdmin[f.slug] = 'admin'
-        })
+        features.forEach(f => { allAdmin[f.slug] = 'admin' })
 
         return NextResponse.json({
-            employee_id: employee.id,
-            role: (employee.role as unknown as { name: string; level: number } | null)?.name,
+            employee_id: auth.employee.id,
+            role: auth.employee.roleName,
             permissions: allAdmin,
             is_super: roleLevel <= 2,
             is_admin: true,
@@ -48,23 +26,19 @@ export async function GET() {
     }
 
     // For regular users, get their specific permissions
-    const { data: perms } = await adminClient
-        .from('employee_permissions')
-        .select('access_level, feature:features(slug)')
-        .eq('employee_id', employee.id)
+    const { rows: perms } = await db.query(
+        `SELECT ep.access_level, f.slug
+         FROM employee_permissions ep LEFT JOIN features f ON f.id = ep.feature_id
+         WHERE ep.employee_id = $1`,
+        [auth.employee.id]
+    )
 
     const permMap: Record<string, string> = {}
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    perms?.forEach((p: any) => {
-        const slug = Array.isArray(p.feature) ? p.feature[0]?.slug : p.feature?.slug
-        if (slug) {
-            permMap[slug] = p.access_level
-        }
-    })
+    perms.forEach(p => { if (p.slug) permMap[p.slug] = p.access_level })
 
     return NextResponse.json({
-        employee_id: employee.id,
-        role: (employee.role as unknown as { name: string; level: number } | null)?.name,
+        employee_id: auth.employee.id,
+        role: auth.employee.roleName,
         permissions: permMap,
         is_super: false,
         is_admin: false,

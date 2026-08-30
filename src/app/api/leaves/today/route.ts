@@ -4,33 +4,16 @@ import { NextResponse } from 'next/server'
 // GET /api/leaves/today - list currently active approved leaves
 export async function GET() {
     const auth = await requireAuth(0) // All authenticated users
+
     if (!isAuthed(auth)) return auth
 
-    const supabase = auth.supabase
-    const todayStr = new Date().toISOString().split('T')[0]
+    const { rows } = await auth.db.query(
+        `SELECT lr.id, lr.reason,
+            json_build_object('id', e.id, 'name', e.name, 'avatar_url', e.avatar_url, 'designation', e.designation) AS employee
+         FROM leave_records lr
+         LEFT JOIN employees e ON e.id = lr.employee_id
+         WHERE lr.leave_date = CURRENT_DATE AND lr.status = 'approved'`
+    )
 
-    const { data, error } = await supabase
-        .from('leave_records')
-        .select(`
-            id,
-            leave_date,
-            reason,
-            status,
-            employee:employees!employee_id(id, name, avatar_url, designation)
-        `)
-        .eq('leave_date', todayStr)
-        .eq('status', 'approved')
-
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    // Extract clean list of employees on leave
-    const activeLeaves = (data || []).map(record => ({
-        id: record.id,
-        reason: record.reason,
-        employee: record.employee
-    }))
-
-    return NextResponse.json(activeLeaves)
+    return NextResponse.json(rows)
 }

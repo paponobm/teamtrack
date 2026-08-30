@@ -6,7 +6,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const auth = await requireAuth(5) // Members can appeal
     if (!isAuthed(auth)) return auth
 
-    const { supabase, employee } = auth
+    const { db, employee } = auth
 
     try {
         const payload = await request.json()
@@ -17,13 +17,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         }
 
         // Verify the fine exists, belongs to the user, is Active, and within 3 days
-        const { data: fine, error: fetchError } = await supabase
-            .from('fines')
-            .select('*')
-            .eq('id', id)
-            .single()
+        const { rows: [fine] } = await db.query(`SELECT * FROM fines WHERE id = $1`, [id])
 
-        if (fetchError || !fine) {
+        if (!fine) {
             return NextResponse.json({ error: 'Fine not found' }, { status: 404 })
         }
 
@@ -44,24 +40,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         }
 
         // Update the fine
-        const { data, error } = await supabase
-            .from('fines')
-            .update({
-                status: 'Appealed',
-                appeal_reason,
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', id)
-            .select()
-            .single()
-
-        if (error) {
-            console.error('Error appealing fine:', error)
-            return NextResponse.json({ error: error.message }, { status: 500 })
-        }
+        const { rows: [data] } = await db.query(
+            `UPDATE fines SET status = 'Appealed', appeal_reason = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+            [appeal_reason, id]
+        )
 
         return NextResponse.json({ data })
-    } catch (error) {
+    } catch {
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
     }
 }

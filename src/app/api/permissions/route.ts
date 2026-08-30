@@ -1,4 +1,3 @@
-import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 import { requireAuth, isAuthed } from '@/lib/auth'
 
@@ -6,38 +5,31 @@ import { requireAuth, isAuthed } from '@/lib/auth'
 export async function GET(request: Request) {
     const auth = await requireAuth(3) // Admin+
     if (!isAuthed(auth)) return auth
-    
-    const supabase = auth.supabase
+    const db = auth.db
+
     const { searchParams } = new URL(request.url)
     const employeeId = searchParams.get('employee_id')
 
-    let query = supabase
-        .from('employee_permissions')
-        .select(`
-            *,
-            employee:employees(id, name, employee_id),
-            feature:features(id, name, name_bn, category, slug, sort_order)
-        `)
+    const { rows } = await db.query(
+        `SELECT ep.*,
+            json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id) AS employee,
+            json_build_object('id', f.id, 'name', f.name, 'name_bn', f.name_bn, 'category', f.category, 'slug', f.slug, 'sort_order', f.sort_order) AS feature
+         FROM employee_permissions ep
+         LEFT JOIN employees e ON e.id = ep.employee_id
+         LEFT JOIN features f ON f.id = ep.feature_id
+         ${employeeId ? 'WHERE ep.employee_id = $1' : ''}`,
+        employeeId ? [employeeId] : []
+    )
 
-    if (employeeId) {
-        query = query.eq('employee_id', employeeId)
-    }
-
-    const { data, error } = await query
-
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    return NextResponse.json(data)
+    return NextResponse.json(rows)
 }
 
 // POST /api/permissions - bulk upsert permissions
 export async function POST(request: Request) {
     const auth = await requireAuth(3) // Admin+
     if (!isAuthed(auth)) return auth
-    
-    const supabase = auth.supabase
+    const db = auth.db
+
     const body = await request.json()
 
     // body is an array: [{ employee_id, feature_id, access_level }]
@@ -54,28 +46,26 @@ export async function POST(request: Request) {
     // Safety guard: Admins cannot modify permissions of Super Admins
     const isSuperAdmin = auth.employee.roleLevel <= 2
     if (!isSuperAdmin) {
-        // Extract unique employee IDs being modified
         const employeeIds = [...new Set(permissions.map(p => p.employee_id))]
         if (employeeIds.length > 0) {
-            const { data: targets } = await supabase.from('employees').select('role:roles(level)').in('id', employeeIds)
-            const attemptingSuperAdminMod = targets?.some(t => {
-                const targetLevel = (t?.role as unknown as { level: number })?.level || 99
-                return targetLevel <= 2
-            })
+            const { rows: targets } = await db.query(
+                `SELECT r.level FROM employees e LEFT JOIN roles r ON r.id = e.role_id WHERE e.id = ANY($1)`,
+                [employeeIds]
+            )
+            const attemptingSuperAdminMod = targets.some(t => (t.level ?? 99) <= 2)
             if (attemptingSuperAdminMod) {
                 return NextResponse.json({ error: 'Admins cannot modify permissions of Super Admins' }, { status: 403 })
             }
         }
     }
 
-    const { data, error } = await supabase
-        .from('employee_permissions')
-        .upsert(permissions, { onConflict: 'employee_id,feature_id' })
-        .select()
+    const { rows } = await db.query(
+        `INSERT INTO employee_permissions (employee_id, feature_id, access_level)
+         SELECT * FROM UNNEST($1::uuid[], $2::uuid[], $3::text[])
+         ON CONFLICT (employee_id, feature_id) DO UPDATE SET access_level = EXCLUDED.access_level
+         RETURNING *`,
+        [permissions.map(p => p.employee_id), permissions.map(p => p.feature_id), permissions.map(p => p.access_level)]
+    )
 
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    return NextResponse.json({ message: 'Permissions updated', count: data?.length })
+    return NextResponse.json({ message: 'Permissions updated', count: rows.length })
 }

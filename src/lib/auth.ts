@@ -1,11 +1,13 @@
-import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
+import type { Pool, PoolClient } from 'pg'
+import { pool } from '@/lib/db'
+import { SESSION_COOKIE, verifySession } from '@/lib/session'
 
 export interface AuthContext {
     user: { id: string; email?: string }
     employee: { id: string; name: string; roleLevel: number; roleName: string }
-    supabase: ReturnType<typeof createAdminClient>
+    db: Pool
 }
 
 /**
@@ -17,19 +19,23 @@ export interface AuthContext {
  * @returns AuthContext on success, or a NextResponse error to return immediately.
  */
 export async function requireAuth(minLevel: number = 5): Promise<AuthContext | NextResponse> {
-    const serverClient = await createClient()
-    const { data: { user } } = await serverClient.auth.getUser()
+    const cookieStore = await cookies()
+    const token = cookieStore.get(SESSION_COOKIE)?.value
+    const session = token ? await verifySession(token) : null
 
-    if (!user) {
+    if (!session) {
         return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
 
-    const supabase = createAdminClient()
-    const { data: emp } = await supabase
-        .from('employees')
-        .select('id, name, is_active, role:roles(name, level)')
-        .eq('user_id', user.id)
-        .single()
+    // Always re-fetched (never trusted from the JWT) so a deactivated account or role change
+    // takes effect immediately instead of waiting for the token to expire.
+    const { rows: [emp] } = await pool.query(
+        `SELECT e.id, e.name, e.is_active, r.name AS role_name, r.level AS role_level
+         FROM employees e
+         LEFT JOIN roles r ON r.id = e.role_id
+         WHERE e.user_id = $1`,
+        [session.userId]
+    )
 
     if (!emp) {
         return NextResponse.json({ error: 'No employee profile found' }, { status: 403 })
@@ -39,9 +45,8 @@ export async function requireAuth(minLevel: number = 5): Promise<AuthContext | N
         return NextResponse.json({ error: 'Account has been deactivated. Contact your administrator.' }, { status: 403 })
     }
 
-    const role = emp.role as unknown as { name: string; level: number } | null
-    const roleLevel = role?.level ?? 99
-    const roleName = role?.name ?? 'Unknown'
+    const roleLevel = emp.role_level ?? 99
+    const roleName = emp.role_name ?? 'Unknown'
 
     if (minLevel > 0 && roleLevel > minLevel) {
         return NextResponse.json(
@@ -51,9 +56,9 @@ export async function requireAuth(minLevel: number = 5): Promise<AuthContext | N
     }
 
     return {
-        user: { id: user.id, email: user.email },
+        user: { id: session.userId, email: session.email },
         employee: { id: emp.id, name: emp.name, roleLevel, roleName },
-        supabase,
+        db: pool,
     }
 }
 
@@ -63,11 +68,11 @@ export function isAuthed(result: AuthContext | NextResponse): result is AuthCont
 }
 
 /**
- * Centralized helper to award points to an employee using atomic SQL increment.
+ * Centralized helper to award points to an employee using an atomic SQL increment.
  * Also logs the transaction to point_transactions table.
  */
 export async function awardPoints(
-    supabase: ReturnType<typeof createAdminClient>,
+    db: Pool | PoolClient,
     employeeId: string,
     points: number,
     source: string,
@@ -75,33 +80,17 @@ export async function awardPoints(
     description: string,
     awardedBy: string | null
 ) {
-    // Log the transaction
-    await supabase.from('point_transactions').insert({
-        employee_id: employeeId,
-        points,
-        source,
-        source_id: sourceId,
-        description,
-        awarded_by: awardedBy,
-    })
+    await db.query(
+        `INSERT INTO point_transactions (employee_id, points, source, source_id, description, awarded_by)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [employeeId, points, source, sourceId, description, awardedBy]
+    )
 
-    // Atomic increment - prevents race conditions
-    const { error: rpcErr } = await supabase.rpc('increment_points', { emp_id: employeeId, pts: points })
-    if (rpcErr) {
-        // Fallback: use raw SQL-style atomic update via Supabase
-        // This is still better than read-then-write since we use a single update
-        const { data: empData } = await supabase
-            .from('employees')
-            .select('total_points')
-            .eq('id', employeeId)
-            .single()
-        if (empData) {
-            await supabase
-                .from('employees')
-                .update({ total_points: (empData.total_points || 0) + points })
-                .eq('id', employeeId)
-        }
-    }
+    // Atomic increment - a single UPDATE avoids the race condition a read-then-write would have.
+    await db.query(
+        `UPDATE employees SET total_points = COALESCE(total_points, 0) + $1 WHERE id = $2`,
+        [points, employeeId]
+    )
 }
 
 /**

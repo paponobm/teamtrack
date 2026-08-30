@@ -10,7 +10,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
-    const supabase = auth.supabase
+    const db = auth.db
     const body = await request.json()
 
     const update: Record<string, number | string | null> = {}
@@ -44,22 +44,22 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         update.payment_status = body.payment_status
     }
 
-    if (Object.keys(update).length === 0) {
+    const keys = Object.keys(update)
+    if (keys.length === 0) {
         return NextResponse.json({ error: 'No editable fields provided' }, { status: 400 })
     }
 
-    const { data, error } = await supabase
-        .from('advances')
-        .update(update)
-        .eq('id', id)
-        .select('id, employee_id, amount, advance_date, note, payment_status, expense_id')
-        .maybeSingle()
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    const { rows: [data] } = await db.query(
+        `UPDATE advances SET ${setClauses.join(', ')} WHERE id = $1
+         RETURNING id, employee_id, amount, advance_date, note, payment_status, expense_id`,
+        [id, ...keys.map(k => update[k])]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     if (!data) return NextResponse.json({ error: 'Advance record not found' }, { status: 404 })
 
     if (data.expense_id) {
-        await syncLinkedExpense(supabase, data.expense_id, {
+        await syncLinkedExpense(db, data.expense_id, {
             employeeId: data.employee_id,
             amount: Number(data.amount),
             date: data.advance_date,
@@ -77,15 +77,14 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
-    const supabase = auth.supabase
+    const db = auth.db
 
-    const { data: existing } = await supabase.from('advances').select('expense_id').eq('id', id).maybeSingle()
+    const { rows: [existing] } = await db.query(`SELECT expense_id FROM advances WHERE id = $1`, [id])
 
-    const { error } = await supabase.from('advances').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await db.query(`DELETE FROM advances WHERE id = $1`, [id])
 
     if (existing?.expense_id) {
-        await deleteLinkedExpense(supabase, existing.expense_id)
+        await deleteLinkedExpense(db, existing.expense_id)
     }
 
     return NextResponse.json({ success: true })

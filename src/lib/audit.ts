@@ -1,9 +1,9 @@
-import { createAdminClient } from '@/lib/supabase/admin'
+import { pool } from '@/lib/db'
 
 /**
  * Centralized Audit Logger
- * Logs actions securely to the `audit_log` table using the service role client.
- * 
+ * Logs actions securely to the `audit_log` table.
+ *
  * @param actorId - UUID of the employee performing the action
  * @param action - Human readable action (e.g., "Created task", "Deleted work log entry")
  * @param module - Module identifier (e.g., "tasks", "work_log", "problems", "content")
@@ -20,21 +20,14 @@ export async function logAudit(
 ) {
     if (!actorId) return
 
-    const supabase = createAdminClient()
-    
     // Insert audit log and get the ID
     let auditLogId: string | null = null
     try {
-        const { data, error } = await supabase.from('audit_log').insert({
-            actor_id: actorId,
-            action,
-            module,
-            target_id: targetId || null,
-            details: details || {}
-        }).select('id').single()
-        
-        if (error) console.error('[Audit Log Error]', error.message)
-        else if (data) auditLogId = data.id
+        const { rows: [row] } = await pool.query(
+            `INSERT INTO audit_log (actor_id, action, module, target_id, details) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+            [actorId, action, module, targetId || null, JSON.stringify(details || {})]
+        )
+        auditLogId = row?.id || null
     } catch (e) {
         console.error('[Audit Log Catch Error]', e)
     }
@@ -42,41 +35,34 @@ export async function logAudit(
     // Async notification logic
     ;(async () => {
         try {
-            const { data: actor } = await supabase
-                .from('employees')
-                .select('id, name, role:roles(level)')
-                .eq('id', actorId)
-                .single()
+            const { rows: [actor] } = await pool.query(
+                `SELECT e.id, e.name, r.level FROM employees e LEFT JOIN roles r ON r.id = e.role_id WHERE e.id = $1`,
+                [actorId]
+            )
 
             // Only notify if actor is a regular member (level > 3)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const roleLevel = (actor?.role as any)?.level
+            const roleLevel = actor?.level
             if (!roleLevel || roleLevel <= 3) return
 
             // Get all admins (level <= 3)
-            const { data: adminRoles } = await supabase.from('roles').select('id').lte('level', 3)
-            if (!adminRoles?.length) return
-            
-            const { data: admins } = await supabase
-                .from('employees')
-                .select('id')
-                .in('role_id', adminRoles.map(r => r.id))
-
-            if (!admins?.length) return
+            const { rows: admins } = await pool.query(
+                `SELECT e.id FROM employees e LEFT JOIN roles r ON r.id = e.role_id WHERE r.level <= 3`
+            )
+            if (!admins.length) return
 
             const moduleName = module.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())
-            
-            const notifications = admins.map(admin => ({
-                recipient_id: admin.id,
-                title: `Activity: ${moduleName}`,
-                message: `${actor?.name || 'A member'} ${action.toLowerCase()}`,
-                type: 'member_activity',
-                related_entity_type: 'audit_log',
-                related_entity_id: auditLogId,
-                is_read: false
-            }))
 
-            await supabase.from('notifications').insert(notifications)
+            await pool.query(
+                `INSERT INTO notifications (recipient_id, title, message, type, related_entity_type, related_entity_id, is_read)
+                 SELECT recipient_id, $2, $3, 'member_activity', 'audit_log', $4, false
+                 FROM UNNEST($1::uuid[]) AS recipient_id`,
+                [
+                    admins.map(a => a.id),
+                    `Activity: ${moduleName}`,
+                    `${actor?.name || 'A member'} ${action.toLowerCase()}`,
+                    auditLogId,
+                ]
+            )
         } catch (err) {
             console.error('[Audit Notification Error]', err)
         }

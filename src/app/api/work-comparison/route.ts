@@ -25,8 +25,8 @@ function parseTaskDescription(description: string | null): { items: { text: stri
 export async function GET(request: Request) {
     const auth = await requireAuth(3) // Admin+ only
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const employeeId = searchParams.get('employee_id')
     const startDate = searchParams.get('start_date')
@@ -37,27 +37,21 @@ export async function GET(request: Request) {
     }
 
     // 1. Tasks assigned to this employee, due within the period.
-    const { data: assignments, error: assignErr } = await supabase
-        .from('task_assignments')
-        .select('task_id')
-        .eq('employee_id', employeeId)
-    if (assignErr) return NextResponse.json({ error: assignErr.message }, { status: 500 })
+    const { rows: assignments } = await db.query(`SELECT task_id FROM task_assignments WHERE employee_id = $1`, [employeeId])
 
-    const taskIds = (assignments || []).map(a => a.task_id)
+    const taskIds = assignments.map(a => a.task_id)
     let tasks: { id: string; title: string; task_no: string | null; description: string | null; status: string; priority: string; due_date: string | null }[] = []
     if (taskIds.length > 0) {
         // Match on created_at (when the task was actually assigned) rather than due_date —
         // due_date is optional and commonly left unset, which would silently exclude most
         // tasks from every period if used as the filter.
-        const { data, error } = await supabase
-            .from('tasks')
-            .select('id, title, task_no, description, status, priority, due_date')
-            .in('id', taskIds)
-            .gte('created_at', `${startDate}T00:00:00`)
-            .lte('created_at', `${endDate}T23:59:59`)
-            .order('created_at', { ascending: true })
-        if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-        tasks = data || []
+        const { rows } = await db.query(
+            `SELECT id, title, task_no, description, status, priority, due_date FROM tasks
+             WHERE id = ANY($1) AND created_at >= $2 AND created_at <= $3
+             ORDER BY created_at ASC`,
+            [taskIds, `${startDate}T00:00:00`, `${endDate}T23:59:59`]
+        )
+        tasks = rows
     }
 
     let totalAssignedPoints = 0
@@ -78,33 +72,31 @@ export async function GET(request: Request) {
     })
 
     // 2. Daily work reports submitted by this employee in the same period.
-    const { data: reports, error: reportsErr } = await supabase
-        .from('work_reports')
-        .select('id, date, project, description, hours, progress, status, attachment_url, notes, created_at')
-        .eq('employee_id', employeeId)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .order('date', { ascending: false })
-    if (reportsErr) return NextResponse.json({ error: reportsErr.message }, { status: 500 })
+    const { rows: reports } = await db.query(
+        `SELECT id, date, project, description, hours, progress, status, attachment_url, notes, created_at
+         FROM work_reports WHERE employee_id = $1 AND date >= $2 AND date <= $3
+         ORDER BY date DESC`,
+        [employeeId, startDate, endDate]
+    )
 
     // 3. Most recent prior score (if any) already given to each report, so the admin
     // sees what was previously awarded instead of a blank input.
-    const reportIds = (reports || []).map(r => r.id)
+    const reportIds = reports.map(r => r.id)
     const existingPointsByReport: Record<string, number> = {}
     if (reportIds.length > 0) {
-        const { data: items } = await supabase
-            .from('work_evaluation_items')
-            .select('work_report_id, points, created_at')
-            .in('work_report_id', reportIds)
-            .order('created_at', { ascending: false })
-        ; (items || []).forEach(it => {
+        const { rows: items } = await db.query(
+            `SELECT work_report_id, points, created_at FROM work_evaluation_items
+             WHERE work_report_id = ANY($1) ORDER BY created_at DESC`,
+            [reportIds]
+        )
+        items.forEach(it => {
             if (existingPointsByReport[it.work_report_id] === undefined) {
                 existingPointsByReport[it.work_report_id] = it.points
             }
         })
     }
 
-    const workReports = (reports || []).map(r => ({
+    const workReports = reports.map(r => ({
         ...r,
         existingPoints: existingPointsByReport[r.id] ?? null,
     }))

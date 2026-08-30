@@ -35,33 +35,35 @@ function computeStats(prs: PrEntryRow[]) {
 export async function GET(request: Request) {
     const auth = await requireAuth(0) // any authenticated employee can view
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 
     if (id) {
-        const { data: influencer, error } = await supabase
-            .from('influencers')
-            .select(`*, pr_entries:pr_management(id, customer_name, customer_phone, send_date, address, parcel_details, source, delivery_status, video_status, payment_status, total_amount, advance_amount, due_amount, payment_method, transaction_id, video_link, video_links, view_note, created_at)`)
-            .eq('id', id)
-            .single()
+        const { rows: [influencer] } = await db.query(`SELECT * FROM influencers WHERE id = $1`, [id])
+        if (!influencer) return NextResponse.json({ error: 'Influencer not found' }, { status: 404 })
 
-        if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        const { rows: prEntries } = await db.query(
+            `SELECT id, customer_name, customer_phone, send_date, address, parcel_details, source, delivery_status,
+                video_status, payment_status, total_amount, advance_amount, due_amount, payment_method,
+                transaction_id, video_link, video_links, view_note, created_at
+             FROM pr_management WHERE influencer_id = $1`,
+            [id]
+        )
 
-        const prs = (influencer.pr_entries || []) as PrEntryRow[]
+        const prs = prEntries as PrEntryRow[]
         const stats = computeStats(prs)
 
-        const { data: auditRows } = await supabase
-            .from('audit_log')
-            .select('id, action, details, created_at, actor:employees!audit_log_actor_id_fkey(name)')
-            .eq('module', 'influencers')
-            .eq('target_id', id)
-            .order('created_at', { ascending: false })
-            .limit(50)
+        const { rows: auditRows } = await db.query(
+            `SELECT al.id, al.action, al.details, al.created_at, json_build_object('name', e.name) AS actor
+             FROM audit_log al LEFT JOIN employees e ON e.id = al.actor_id
+             WHERE al.module = 'influencers' AND al.target_id = $1
+             ORDER BY al.created_at DESC LIMIT 50`,
+            [id]
+        )
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const activity = (auditRows || []).map((a: any) => ({
+        const activity = auditRows.map(a => ({
             type: 'audit',
             id: a.id,
             label: a.action,
@@ -70,7 +72,7 @@ export async function GET(request: Request) {
             at: a.created_at,
         }))
 
-        return NextResponse.json({ data: { ...influencer, stats, activity } })
+        return NextResponse.json({ data: { ...influencer, pr_entries: prs, stats, activity } })
     }
 
     const search = searchParams.get('search')?.trim().toLowerCase() || ''
@@ -85,15 +87,18 @@ export async function GET(request: Request) {
     const endDate = searchParams.get('end_date')
     const hasDateFilter = !!(startDate && endDate)
 
-    const { data: rows, error } = await supabase
-        .from('influencers')
-        .select(`*, pr_entries:pr_management(id, delivery_status, video_status, payment_status, source, send_date, created_at)`)
+    const { rows } = await db.query(`SELECT * FROM influencers`)
+    const { rows: allPrRows } = await db.query(
+        `SELECT influencer_id, id, delivery_status, video_status, payment_status, source, send_date, created_at FROM pr_management WHERE influencer_id IS NOT NULL`
+    )
+    const prsByInfluencer: Record<string, PrEntryRow[]> = {}
+    allPrRows.forEach(r => {
+        if (!prsByInfluencer[r.influencer_id]) prsByInfluencer[r.influencer_id] = []
+        prsByInfluencer[r.influencer_id].push(r)
+    })
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let list = (rows || []).map((r: any) => {
-        const allPrs = (r.pr_entries || []) as PrEntryRow[]
+    let list = rows.map(r => {
+        const allPrs = prsByInfluencer[r.id] || []
         const scopedPrs = hasDateFilter
             ? allPrs.filter(p => {
                 const d = p.send_date || p.created_at?.slice(0, 10)
@@ -127,15 +132,15 @@ export async function GET(request: Request) {
     })
 
     const summary = {
-        total: (rows || []).length,
-        active: (rows || []).filter(r => (r.status || 'Active') === 'Active').length,
+        total: rows.length,
+        active: rows.filter(r => (r.status || 'Active') === 'Active').length,
         totalPrSent: list.reduce((sum, i) => sum + i.stats.total_prs, 0),
         totalVideosUploaded: list.reduce((sum, i) => sum + i.stats.total_videos, 0),
         pendingProducts: list.reduce((sum, i) => sum + i.stats.pending_products, 0),
-        paidInfluencers: (rows || []).filter(r => (r.payment_status || 'Unpaid') === 'Paid').length,
-        unpaidInfluencers: (rows || []).filter(r => (r.payment_status || 'Unpaid') === 'Unpaid').length,
-        averageRating: (rows || []).length > 0
-            ? Math.round(((rows || []).reduce((sum, r) => sum + (r.rating || 0), 0) / (rows || []).length) * 10) / 10
+        paidInfluencers: rows.filter(r => (r.payment_status || 'Unpaid') === 'Paid').length,
+        unpaidInfluencers: rows.filter(r => (r.payment_status || 'Unpaid') === 'Unpaid').length,
+        averageRating: rows.length > 0
+            ? Math.round((rows.reduce((sum, r) => sum + (r.rating || 0), 0) / rows.length) * 10) / 10
             : 0,
     }
 
@@ -146,33 +151,22 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
     const auth = await requireAuth(3) // Admin+
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const payload = await request.json()
     if (!payload.name?.trim()) return NextResponse.json({ error: 'Name is required' }, { status: 400 })
 
-    const { data, error } = await auth.supabase
-        .from('influencers')
-        .insert({
-            name: payload.name.trim(),
-            phone: payload.phone || null,
-            page_url: payload.page_url || null,
-            instagram_url: payload.instagram_url || null,
-            tiktok_url: payload.tiktok_url || null,
-            youtube_url: payload.youtube_url || null,
-            address: payload.address || null,
-            photo_url: payload.photo_url || null,
-            contact_source: payload.contact_source || null,
-            contact_value: payload.contact_value || null,
-            follower_count: Number(payload.follower_count) || 0,
-            status: payload.status || 'Active',
-            payment_status: payload.payment_status || 'Unpaid',
-            notes: payload.notes || null,
-            uploaded_platforms: Array.isArray(payload.uploaded_platforms) ? payload.uploaded_platforms : [],
-        })
-        .select('*')
-        .single()
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { rows: [data] } = await db.query(
+        `INSERT INTO influencers (name, phone, page_url, instagram_url, tiktok_url, youtube_url, address, photo_url, contact_source, contact_value, follower_count, status, payment_status, notes, uploaded_platforms)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+        [
+            payload.name.trim(), payload.phone || null, payload.page_url || null, payload.instagram_url || null,
+            payload.tiktok_url || null, payload.youtube_url || null, payload.address || null, payload.photo_url || null,
+            payload.contact_source || null, payload.contact_value || null, Number(payload.follower_count) || 0,
+            payload.status || 'Active', payload.payment_status || 'Unpaid', payload.notes || null,
+            Array.isArray(payload.uploaded_platforms) ? payload.uploaded_platforms : [],
+        ]
+    )
 
     await logAudit(auth.employee.id, `Added influencer profile "${data.name}"`, 'influencers', data.id)
 
@@ -185,6 +179,7 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
     const auth = await requireAuth(3) // Admin+
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const payload = await request.json()
     const { id, ...updates } = payload
@@ -194,22 +189,24 @@ export async function PUT(request: Request) {
     const isRatingUpdate = ratingFields.some(f => f in updates)
 
     if (isRatingUpdate) {
-        const { data: existing } = await auth.supabase.from('influencers').select(ratingFields.join(',')).eq('id', id).single()
-        const existingRow = (existing || {}) as Record<string, number>
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const merged: any = { ...existingRow, ...updates }
+        const { rows: [existingRow] } = await db.query(
+            `SELECT ${ratingFields.join(', ')} FROM influencers WHERE id = $1`,
+            [id]
+        )
+        const merged: Record<string, unknown> = { ...(existingRow || {}), ...updates }
         const values = ratingFields.map(f => Number(merged[f])).filter(v => !isNaN(v) && v > 0)
         updates.rating = values.length > 0 ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10 : 0
     }
 
-    const { data, error } = await auth.supabase
-        .from('influencers')
-        .update(updates)
-        .eq('id', id)
-        .select('*')
-        .single()
+    const keys = Object.keys(updates)
+    if (keys.length === 0) return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    const { rows: [data] } = await db.query(
+        `UPDATE influencers SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *`,
+        [id, ...keys.map(k => updates[k])]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!data) return NextResponse.json({ error: 'Influencer not found' }, { status: 404 })
 
     if (isRatingUpdate) {
         await logAudit(auth.employee.id, `Rated influencer "${data.name}" (${updates.rating}/5 overall)`, 'influencers', id, {
@@ -232,14 +229,14 @@ export async function PUT(request: Request) {
 export async function DELETE(request: Request) {
     const auth = await requireAuth(3) // Admin+
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const id = new URL(request.url).searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'Missing ID' }, { status: 400 })
 
-    const { data: existing } = await auth.supabase.from('influencers').select('name').eq('id', id).single()
+    const { rows: [existing] } = await db.query(`SELECT name FROM influencers WHERE id = $1`, [id])
 
-    const { error } = await auth.supabase.from('influencers').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await db.query(`DELETE FROM influencers WHERE id = $1`, [id])
 
     await logAudit(auth.employee.id, `Deleted influencer profile "${existing?.name || id}"`, 'influencers', id)
 

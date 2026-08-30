@@ -1,48 +1,45 @@
 import { requireAuth, isAuthed, awardPoints } from '@/lib/auth'
 import { NextResponse } from 'next/server'
 
-// Helper: get current employee from auth context
-async function getCurrentEmployee(supabase: ReturnType<typeof import('@/lib/supabase/admin').createAdminClient>, userId: string) {
-    const { data } = await supabase.from('employees').select('id, name, role:roles(level)').eq('user_id', userId).single()
-    return data
-}
+const PROBLEM_SELECT = `p.*,
+    json_build_object('id', pk.id, 'name', pk.name, 'employee_id', pk.employee_id) AS peek,
+    json_build_object('id', sv.id, 'name', sv.name, 'employee_id', sv.employee_id) AS solver,
+    json_build_object('id', mg.id, 'name', mg.name) AS manager,
+    json_build_object('id', au.id, 'name', au.name) AS authority`
+const PROBLEM_JOINS = `LEFT JOIN employees pk ON pk.id = p.problem_peek
+    LEFT JOIN employees sv ON sv.id = p.problem_solver
+    LEFT JOIN employees mg ON mg.id = p.management_check
+    LEFT JOIN employees au ON au.id = p.authority_check`
 
 // GET /api/problems (any employee can view)
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
-
     const status = searchParams.get('status')
     const priority = searchParams.get('priority')
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
 
-    let query = supabase
-        .from('problems')
-        .select(`
-            *,
-            peek:employees!problem_peek(id, name, employee_id),
-            solver:employees!problem_solver(id, name, employee_id),
-            manager:employees!management_check(id, name),
-            authority:employees!authority_check(id, name)
-        `)
-        .order('created_at', { ascending: false })
+    const conditions: string[] = []
+    const params: unknown[] = []
+    if (status && status !== 'all') { params.push(status); conditions.push(`p.status = $${params.length}`) }
+    if (priority && priority !== 'all') { params.push(priority); conditions.push(`p.priority = $${params.length}`) }
+    if (startDate) { params.push(startDate); conditions.push(`p.entry_date >= $${params.length}`) }
+    if (endDate) { params.push(endDate); conditions.push(`p.entry_date <= $${params.length}`) }
 
-    if (status && status !== 'all') query = query.eq('status', status)
-    if (priority && priority !== 'all') query = query.eq('priority', priority)
-    if (startDate) query = query.gte('entry_date', startDate)
-    if (endDate) query = query.lte('entry_date', endDate)
+    const { rows: problems } = await db.query(
+        `SELECT ${PROBLEM_SELECT} FROM problems p ${PROBLEM_JOINS}
+         ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+         ORDER BY p.created_at DESC`,
+        params
+    )
 
-    const { data, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    const problems = data || []
     const categoryCounts: Record<string, number> = {}
     problems.forEach(p => {
-        const cat = (p as Record<string, unknown>).category as string || 'uncategorized'
+        const cat = p.category || 'uncategorized'
         categoryCounts[cat] = (categoryCounts[cat] || 0) + 1
     })
 
@@ -62,12 +59,12 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const body = await request.json()
 
     // Auto-generate problem number
-    const { count } = await supabase.from('problems').select('*', { count: 'exact', head: true })
+    const { rows: [{ count }] } = await db.query(`SELECT COUNT(*)::int AS count FROM problems`)
     const problemNo = `PRB-${String((count || 0) + 1).padStart(4, '0')}`
 
     // NOTE: problem_peek (the picker who earns the solve award) is set only when explicitly
@@ -76,39 +73,25 @@ export async function POST(request: Request) {
     // took the order, which read as work-log silently syncing into the problem box (V3 #8c glitch).
     const problemPeek = body.problem_peek || null
 
-    const { data, error } = await supabase
-        .from('problems')
-        .insert({
-            problem_no: problemNo,
-            entry_date: body.entry_date || new Date().toISOString().split('T')[0],
-            customer_name: body.customer_name,
-            customer_phone: body.customer_phone,
-            problem_details: body.problem_details,
-            problem_peek: problemPeek,
-            priority: body.priority || 'medium',
-            status: 'open',
-            notes: body.notes || null,
-            payment_gateway: body.payment_gateway || null,
-            business_name: body.business_name || null,
-            category: body.category || null,
-        })
-        .select('*')
-        .single()
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { rows: [data] } = await db.query(
+        `INSERT INTO problems (problem_no, entry_date, customer_name, customer_phone, problem_details, problem_peek, priority, status, notes, payment_gateway, business_name, category)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', $8, $9, $10, $11) RETURNING *`,
+        [
+            problemNo, body.entry_date || new Date().toISOString().split('T')[0], body.customer_name, body.customer_phone,
+            body.problem_details, problemPeek, body.priority || 'medium', body.notes || null,
+            body.payment_gateway || null, body.business_name || null, body.category || null,
+        ]
+    )
 
     // Give 5 points for entering the problem
-    await awardPoints(supabase, auth.employee.id, 5, 'problem', data.id, 'Entered problem', auth.employee.id)
+    await awardPoints(db, auth.employee.id, 5, 'problem', data.id, 'Entered problem', auth.employee.id)
 
     // Log creation
-    await supabase.from('audit_log').insert({
-        actor_id: auth.employee.id,
-        module: 'problems',
-        action: 'created',
-        target_id: data.id,
-        new_value: problemNo,
-        details: { actor_name: auth.employee.name },
-    }).then(() => { })
+    await db.query(
+        `INSERT INTO audit_log (actor_id, module, action, target_id, new_value, details)
+         VALUES ($1, 'problems', 'created', $2, $3, $4)`,
+        [auth.employee.id, data.id, problemNo, JSON.stringify({ actor_name: auth.employee.name })]
+    )
 
     return NextResponse.json({ ...data, awardedPoints: 5 }, { status: 201 })
 }
@@ -117,8 +100,8 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const body = await request.json()
     const { id, status_note, ...updates } = body
     if (!id) return NextResponse.json({ error: 'Missing problem id' }, { status: 400 })
@@ -132,64 +115,61 @@ export async function PUT(request: Request) {
     }
 
     // Get old state for logging
-    const { data: oldProblem } = await supabase
-        .from('problems')
-        .select('status, priority, problem_peek, problem_solver')
-        .eq('id', id)
-        .single()
+    const { rows: [oldProblem] } = await db.query(
+        `SELECT status, priority, problem_peek, problem_solver FROM problems WHERE id = $1`,
+        [id]
+    )
 
     if (updates.status === 'resolved' && !updates.solved_date) {
         updates.solved_date = new Date().toISOString().split('T')[0]
     }
 
-    const { data, error } = await supabase
-        .from('problems')
-        .update(updates)
-        .eq('id', id)
-        // Re-join the related employees so the response carries solver/peek names
-        // (otherwise the resolver's name is blank until a full refetch).
-        .select(`
-            *,
-            peek:employees!problem_peek(id, name, employee_id),
-            solver:employees!problem_solver(id, name, employee_id),
-            manager:employees!management_check(id, name),
-            authority:employees!authority_check(id, name)
-        `)
-        .single()
+    const keys = Object.keys(updates)
+    if (keys.length === 0) return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    const { rows: [data] } = await db.query(
+        `WITH upd AS (
+            UPDATE problems SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *
+         )
+         SELECT ${PROBLEM_SELECT} FROM upd p ${PROBLEM_JOINS}`,
+        [id, ...keys.map(k => updates[k])]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!data) return NextResponse.json({ error: 'Problem not found' }, { status: 404 })
 
     // Log changes and handle points
     if (updates.status && oldProblem && updates.status !== oldProblem.status) {
-        await supabase.from('audit_log').insert({
-            actor_id: auth.employee.id, module: 'problems', action: 'status_change', target_id: id,
-            old_value: oldProblem.status, new_value: updates.status,
-            details: { actor_name: auth.employee.name, status_note: status_note || null },
-        }).then(() => { })
+        await db.query(
+            `INSERT INTO audit_log (actor_id, module, action, target_id, old_value, new_value, details)
+             VALUES ($1, 'problems', 'status_change', $2, $3, $4, $5)`,
+            [auth.employee.id, id, oldProblem.status, updates.status, JSON.stringify({ actor_name: auth.employee.name, status_note: status_note || null })]
+        )
     }
 
     if (updates.priority && oldProblem && updates.priority !== oldProblem.priority) {
-        await supabase.from('audit_log').insert({
-            actor_id: auth.employee.id, module: 'problems', action: 'priority_change', target_id: id,
-            old_value: oldProblem.priority, new_value: updates.priority,
-            details: { actor_name: auth.employee.name },
-        }).then(() => { })
+        await db.query(
+            `INSERT INTO audit_log (actor_id, module, action, target_id, old_value, new_value, details)
+             VALUES ($1, 'problems', 'priority_change', $2, $3, $4, $5)`,
+            [auth.employee.id, id, oldProblem.priority, updates.priority, JSON.stringify({ actor_name: auth.employee.name })]
+        )
     }
 
     // Handle pick
     if (updates.problem_peek && (!oldProblem?.problem_peek || updates.problem_peek !== oldProblem.problem_peek)) {
-        await supabase.from('audit_log').insert({
-            actor_id: auth.employee.id, module: 'problems', action: 'pick', target_id: id,
-            new_value: updates.problem_peek, details: { actor_name: auth.employee.name },
-        }).then(() => { })
+        await db.query(
+            `INSERT INTO audit_log (actor_id, module, action, target_id, new_value, details)
+             VALUES ($1, 'problems', 'pick', $2, $3, $4)`,
+            [auth.employee.id, id, updates.problem_peek, JSON.stringify({ actor_name: auth.employee.name })]
+        )
     }
 
     // Handle unpick
     if (updates.problem_peek === null && oldProblem?.problem_peek) {
-        await supabase.from('audit_log').insert({
-            actor_id: auth.employee.id, module: 'problems', action: 'unpick', target_id: id,
-            old_value: oldProblem.problem_peek, details: { actor_name: auth.employee.name },
-        }).then(() => { })
+        await db.query(
+            `INSERT INTO audit_log (actor_id, module, action, target_id, old_value, details)
+             VALUES ($1, 'problems', 'unpick', $2, $3, $4)`,
+            [auth.employee.id, id, oldProblem.problem_peek, JSON.stringify({ actor_name: auth.employee.name })]
+        )
     }
 
     // Handle solve - award 10 points to solver
@@ -197,12 +177,13 @@ export async function PUT(request: Request) {
     if (updates.status === 'resolved' && oldProblem?.status !== 'resolved') {
         const solverId = updates.problem_solver || data.problem_solver
         if (solverId) {
-            await awardPoints(supabase, solverId, 10, 'problem', id, 'Solved problem', auth.employee.id)
+            await awardPoints(db, solverId, 10, 'problem', id, 'Solved problem', auth.employee.id)
             awardedPoints = 10
-            await supabase.from('audit_log').insert({
-                actor_id: auth.employee.id, module: 'problems', action: 'solve', target_id: id,
-                new_value: solverId, details: { actor_name: auth.employee.name, points: 10 },
-            }).then(() => { })
+            await db.query(
+                `INSERT INTO audit_log (actor_id, module, action, target_id, new_value, details)
+                 VALUES ($1, 'problems', 'solve', $2, $3, $4)`,
+                [auth.employee.id, id, solverId, JSON.stringify({ actor_name: auth.employee.name, points: 10 })]
+            )
         }
     }
 
@@ -218,7 +199,6 @@ export async function DELETE(request: Request) {
     const id = searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const { error } = await auth.supabase.from('problems').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await auth.db.query(`DELETE FROM problems WHERE id = $1`, [id])
     return NextResponse.json({ success: true })
 }

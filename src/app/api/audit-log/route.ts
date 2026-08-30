@@ -1,4 +1,3 @@
-import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -6,8 +5,8 @@ import { NextRequest, NextResponse } from 'next/server'
 export async function GET(req: NextRequest) {
     const auth = await requireAuth(3) // Admin+ only
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const limit = parseInt(req.nextUrl.searchParams.get('limit') || '50')
     const offset = parseInt(req.nextUrl.searchParams.get('offset') || '0')
     const search = req.nextUrl.searchParams.get('search')
@@ -17,32 +16,38 @@ export async function GET(req: NextRequest) {
     const id = req.nextUrl.searchParams.get('id')
 
     if (id) {
-        const { data, error } = await supabase
-            .from('audit_log')
-            .select('*, actor:employees!actor_id(name)')
-            .eq('id', id)
-            .single()
-        
-        if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-        return NextResponse.json({ entry: data })
+        const { rows: [entry] } = await db.query(
+            `SELECT al.*, json_build_object('name', e.name) AS actor
+             FROM audit_log al LEFT JOIN employees e ON e.id = al.actor_id
+             WHERE al.id = $1`,
+            [id]
+        )
+        if (!entry) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+        return NextResponse.json({ entry })
     }
 
-    let query = supabase
-        .from('audit_log')
-        .select('*, actor:employees!actor_id(name)', { count: 'exact' })
-        .order('created_at', { ascending: false })
+    const conditions: string[] = []
+    const params: unknown[] = []
+    if (search) { params.push(`%${search}%`); conditions.push(`al.action ILIKE $${params.length}`) }
+    if (module && module !== 'all') { params.push(module); conditions.push(`al.module = $${params.length}`) }
+    if (startDate) { params.push(`${startDate}T00:00:00`); conditions.push(`al.created_at >= $${params.length}`) }
+    if (endDate) { params.push(`${endDate}T23:59:59`); conditions.push(`al.created_at <= $${params.length}`) }
 
-    if (search) query = query.ilike('action', `%${search}%`)
-    if (module && module !== 'all') query = query.eq('module', module)
-    if (startDate) query = query.gte('created_at', `${startDate}T00:00:00`)
-    if (endDate) query = query.lte('created_at', `${endDate}T23:59:59`)
+    const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''
 
-    query = query.range(offset, offset + limit - 1)
+    const [{ rows }, { rows: [{ count }] }] = await Promise.all([
+        db.query(
+            `SELECT al.*, json_build_object('name', e.name) AS actor
+             FROM audit_log al LEFT JOIN employees e ON e.id = al.actor_id
+             ${where}
+             ORDER BY al.created_at DESC
+             LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+            [...params, limit, offset]
+        ),
+        db.query(`SELECT COUNT(*)::int AS count FROM audit_log al ${where}`, params),
+    ])
 
-    const { data, count, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    return NextResponse.json({ entries: data || [], total: count || 0 })
+    return NextResponse.json({ entries: rows, total: count || 0 })
 }
 
 // POST /api/audit-log - log an action
@@ -50,23 +55,18 @@ export async function POST(req: NextRequest) {
     const auth = await requireAuth(3) // Admin+ only
     if (!isAuthed(auth)) return auth
 
-    const supabase = auth.supabase
     const body = await req.json()
-
     const { action, module, target_id, details } = body
 
     if (!action || !module) {
         return NextResponse.json({ error: 'action and module required' }, { status: 400 })
     }
 
-    const { data, error } = await supabase
-        .from('audit_log')
+    const { rows: [data] } = await auth.db.query(
         // Always stamp the actor from the authenticated session — never trust a client-supplied actor_id.
-        .insert({ actor_id: auth.employee.id, action, module, target_id, details })
-        .select()
-        .single()
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        `INSERT INTO audit_log (actor_id, action, module, target_id, details) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [auth.employee.id, action, module, target_id || null, details ? JSON.stringify(details) : null]
+    )
 
     return NextResponse.json(data, { status: 201 })
 }

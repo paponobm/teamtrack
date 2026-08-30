@@ -1,4 +1,3 @@
-import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { NextResponse } from 'next/server'
 
@@ -6,46 +5,34 @@ import { NextResponse } from 'next/server'
 export async function GET() {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = createAdminClient()
-    const { data, error } = await supabase
-        .from('app_settings')
-        .select('*')
-        .single()
+    const { rows: [existing] } = await db.query(`SELECT * FROM app_settings LIMIT 1`)
+    if (existing) return NextResponse.json(existing)
 
-    if (error) {
-        // If no settings row exists, create one with defaults
-        const { data: newRow, error: insertErr } = await supabase
-            .from('app_settings')
-            .insert({
-                whatsapp_enabled: false,
-                auto_assign_problems: true,
-                smart_notifications: true,
-                quick_entry_default: false,
-            })
-            .select('*')
-            .single()
-
-        if (insertErr) {
-            return NextResponse.json({
-                whatsapp_enabled: false,
-                auto_assign_problems: true,
-                smart_notifications: true,
-                quick_entry_default: false,
-            })
-        }
+    // If no settings row exists, create one with defaults
+    try {
+        const { rows: [newRow] } = await db.query(
+            `INSERT INTO app_settings (whatsapp_enabled, auto_assign_problems, smart_notifications, quick_entry_default)
+             VALUES (false, true, true, false) RETURNING *`
+        )
         return NextResponse.json(newRow)
+    } catch {
+        return NextResponse.json({
+            whatsapp_enabled: false,
+            auto_assign_problems: true,
+            smart_notifications: true,
+            quick_entry_default: false,
+        })
     }
-
-    return NextResponse.json(data)
 }
 
 // PUT /api/settings/features - update feature toggles (admin+)
 export async function PUT(request: Request) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = createAdminClient()
     const body = await request.json()
 
     // Whitelist: only allow known toggle fields
@@ -58,30 +45,24 @@ export async function PUT(request: Request) {
         return NextResponse.json({ error: 'No valid settings fields provided' }, { status: 400 })
     }
 
-    const { data: existing } = await supabase
-        .from('app_settings')
-        .select('id')
-        .limit(1)
-        .single()
+    const { rows: [existing] } = await db.query(`SELECT id FROM app_settings LIMIT 1`)
+
+    const keys = Object.keys(safeBody)
 
     if (existing) {
-        const { data, error } = await supabase
-            .from('app_settings')
-            .update(safeBody)
-            .eq('id', existing.id)
-            .select('*')
-            .single()
-
-        if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+        const { rows: [data] } = await db.query(
+            `UPDATE app_settings SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *`,
+            [existing.id, ...keys.map(k => safeBody[k])]
+        )
         return NextResponse.json(data)
     } else {
-        const { data, error } = await supabase
-            .from('app_settings')
-            .insert(safeBody)
-            .select('*')
-            .single()
-
-        if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        const colList = keys.map(k => `"${k}"`).join(', ')
+        const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ')
+        const { rows: [data] } = await db.query(
+            `INSERT INTO app_settings (${colList}) VALUES (${placeholders}) RETURNING *`,
+            keys.map(k => safeBody[k])
+        )
         return NextResponse.json(data)
     }
 }

@@ -11,16 +11,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
-    const supabase = auth.supabase
+    const db = auth.db
     const body = await request.json()
 
-    const { data: existing, error: fetchError } = await supabase
-        .from('emis')
-        .select('employee_id, amount, term_months, start_date, interest_rate, expense_id')
-        .eq('id', id)
-        .maybeSingle()
+    const { rows: [existing] } = await db.query(
+        `SELECT employee_id, amount, term_months, start_date, interest_rate, expense_id FROM emis WHERE id = $1`,
+        [id]
+    )
 
-    if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 })
     if (!existing) return NextResponse.json({ error: 'EMI record not found' }, { status: 404 })
 
     const update: Record<string, number | string> = {}
@@ -73,11 +71,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         update.monthly_installment = computeMonthlyInstallment(Number(finalAmount), Number(finalRate), Number(finalTerm))
     }
 
-    const { error } = await supabase.from('emis').update(update).eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const keys = Object.keys(update)
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    await db.query(`UPDATE emis SET ${setClauses.join(', ')} WHERE id = $1`, [id, ...keys.map(k => update[k])])
 
     if (existing.expense_id) {
-        await syncLinkedExpense(supabase, existing.expense_id, {
+        await syncLinkedExpense(db, existing.expense_id, {
             employeeId: (update.employee_id as string) ?? existing.employee_id,
             amount: (update.amount as number) ?? existing.amount,
             date: (update.start_date as string) ?? existing.start_date,
@@ -94,15 +93,14 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
-    const supabase = auth.supabase
+    const db = auth.db
 
-    const { data: existing } = await supabase.from('emis').select('expense_id').eq('id', id).maybeSingle()
+    const { rows: [existing] } = await db.query(`SELECT expense_id FROM emis WHERE id = $1`, [id])
 
-    const { error } = await supabase.from('emis').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await db.query(`DELETE FROM emis WHERE id = $1`, [id])
 
     if (existing?.expense_id) {
-        await deleteLinkedExpense(supabase, existing.expense_id)
+        await deleteLinkedExpense(db, existing.expense_id)
     }
 
     return NextResponse.json({ success: true })

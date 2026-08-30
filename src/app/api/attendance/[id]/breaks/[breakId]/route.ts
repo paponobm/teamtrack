@@ -8,6 +8,7 @@ export async function PATCH(
 ) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const { id, breakId } = await params
     const body = await request.json().catch(() => ({}))
@@ -16,23 +17,20 @@ export async function PATCH(
     if (body.start_time !== undefined) updateFields.start_time = body.start_time
     if (body.end_time !== undefined) updateFields.end_time = body.end_time
 
-    const { data, error } = await auth.supabase
-        .from('attendance_breaks')
-        .update(updateFields)
-        .eq('id', breakId)
-        .eq('attendance_id', id)
-        .select('id, start_time, end_time')
-        .single()
+    const keys = Object.keys(updateFields)
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 3}`)
+    const { rows: [data] } = await db.query(
+        `UPDATE attendance_breaks SET ${setClauses.join(', ')} WHERE id = $1 AND attendance_id = $2 RETURNING id, start_time, end_time`,
+        [breakId, id, ...keys.map(k => updateFields[k])]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!data) return NextResponse.json({ error: 'Break not found' }, { status: 404 })
 
-    await auth.supabase.from('audit_log').insert({
-        actor_id: auth.employee.id,
-        module: 'attendance',
-        action: 'Edited a break',
-        target_id: id,
-        details: { actor_name: auth.employee.name },
-    }).then(() => { })
+    await db.query(
+        `INSERT INTO audit_log (actor_id, module, action, target_id, details)
+         VALUES ($1, 'attendance', 'Edited a break', $2, $3)`,
+        [auth.employee.id, id, JSON.stringify({ actor_name: auth.employee.name })]
+    )
 
     return NextResponse.json(data)
 }
@@ -44,23 +42,16 @@ export async function DELETE(
 ) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const { id, breakId } = await params
-    const { error } = await auth.supabase
-        .from('attendance_breaks')
-        .delete()
-        .eq('id', breakId)
-        .eq('attendance_id', id)
+    await db.query(`DELETE FROM attendance_breaks WHERE id = $1 AND attendance_id = $2`, [breakId, id])
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    await auth.supabase.from('audit_log').insert({
-        actor_id: auth.employee.id,
-        module: 'attendance',
-        action: 'Deleted a break',
-        target_id: id,
-        details: { actor_name: auth.employee.name },
-    }).then(() => { })
+    await db.query(
+        `INSERT INTO audit_log (actor_id, module, action, target_id, details)
+         VALUES ($1, 'attendance', 'Deleted a break', $2, $3)`,
+        [auth.employee.id, id, JSON.stringify({ actor_name: auth.employee.name })]
+    )
 
     return NextResponse.json({ success: true })
 }

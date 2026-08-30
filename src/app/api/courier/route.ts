@@ -1,37 +1,39 @@
 import { requireAuth, isAuthed, awardPoints } from '@/lib/auth'
-import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 
 // GET /api/courier (any employee)
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
 
-    let query = supabase
-        .from('courier_issues')
-        .select(`
-            *,
-            peek_by:employees!call_peek(id, name),
-            solver:employees!problem_solver(id, name),
-            manager:employees!management_check(id, name),
-            verifier:employees!verified_by(id, name)
-        `)
-        .order('created_at', { ascending: false })
+    const conditions: string[] = []
+    const params: unknown[] = []
+    if (status && status !== 'all') { params.push(status); conditions.push(`ci.problem_status = $${params.length}`) }
+    if (startDate) { params.push(startDate); conditions.push(`ci.date >= $${params.length}`) }
+    if (endDate) { params.push(endDate); conditions.push(`ci.date <= $${params.length}`) }
 
-    if (status && status !== 'all') query = query.eq('problem_status', status)
-    if (startDate) query = query.gte('date', startDate)
-    if (endDate) query = query.lte('date', endDate)
+    const { rows: issues } = await db.query(
+        `SELECT ci.*,
+            json_build_object('id', pk.id, 'name', pk.name) AS peek_by,
+            json_build_object('id', sv.id, 'name', sv.name) AS solver,
+            json_build_object('id', mg.id, 'name', mg.name) AS manager,
+            json_build_object('id', vf.id, 'name', vf.name) AS verifier
+         FROM courier_issues ci
+         LEFT JOIN employees pk ON pk.id = ci.call_peek
+         LEFT JOIN employees sv ON sv.id = ci.problem_solver
+         LEFT JOIN employees mg ON mg.id = ci.management_check
+         LEFT JOIN employees vf ON vf.id = ci.verified_by
+         ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+         ORDER BY ci.created_at DESC`,
+        params
+    )
 
-    const { data, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    const issues = data || []
     const stats = {
         total: issues.length,
         pending: issues.filter(i => i.problem_status === 'pending').length,
@@ -46,22 +48,18 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const body = await request.json()
 
-    // Parcel ID must be unique (when provided) — use admin client to bypass RLS so the
-    // check sees ALL existing parcels regardless of the submitting user's permissions.
-    // Client-side trim comparison handles legacy rows that were stored with stray whitespace.
+    // Parcel ID must be unique (when provided). Client-side trim comparison handles legacy
+    // rows that were stored with stray whitespace.
     const trimmedParcelId = body.parcel_id ? String(body.parcel_id).trim() : null
-    const adminSupabase = createAdminClient()
     if (trimmedParcelId) {
-        const { data: candidates, error: dupErr } = await adminSupabase
-            .from('courier_issues')
-            .select('id, parcel_id, fraud_note')
-            .not('parcel_id', 'is', null)
-            .limit(5000)
-        if (dupErr) return NextResponse.json({ error: 'Could not validate parcel ID' }, { status: 500 })
-        const existing = (candidates || []).find(r => String(r.parcel_id || '').trim().toLowerCase() === trimmedParcelId.toLowerCase())
+        const { rows: candidates } = await db.query(
+            `SELECT id, parcel_id, fraud_note FROM courier_issues WHERE parcel_id IS NOT NULL LIMIT 5000`
+        )
+        const existing = candidates.find(r => String(r.parcel_id || '').trim().toLowerCase() === trimmedParcelId.toLowerCase())
         if (existing) {
             if (existing.fraud_note) {
                 return NextResponse.json({ error: 'This parcel ID is flagged as fraud and cannot be reused.' }, { status: 409 })
@@ -73,12 +71,10 @@ export async function POST(request: Request) {
     // Check if contact number belongs to a fraud-flagged entry
     const trimmedContact = body.contact_number ? String(body.contact_number).trim() : null
     if (trimmedContact) {
-        const { data: fraudContacts } = await adminSupabase
-            .from('courier_issues')
-            .select('id, contact_number')
-            .eq('fraud_note', true)
-            .not('contact_number', 'is', null)
-        const isFraudContact = (fraudContacts || []).some(r => String(r.contact_number || '').trim() === trimmedContact)
+        const { rows: fraudContacts } = await db.query(
+            `SELECT id, contact_number FROM courier_issues WHERE fraud_note = true AND contact_number IS NOT NULL`
+        )
+        const isFraudContact = fraudContacts.some(r => String(r.contact_number || '').trim() === trimmedContact)
         if (isFraudContact) {
             return NextResponse.json({ error: 'This contact number is flagged as fraud and cannot be used for new entries.' }, { status: 409 })
         }
@@ -88,48 +84,34 @@ export async function POST(request: Request) {
     // in the work log, the member who entered that order is the referral. Mirrors problems.
     let autoCallPeek = body.call_peek || null
     if (!autoCallPeek && body.contact_number && String(body.contact_number).trim()) {
-        const { data: matchingEntries } = await auth.supabase
-            .from('work_entries')
-            .select('employee_id')
-            .eq('customer_phone', String(body.contact_number).trim())
-            .order('date', { ascending: false })
-            .limit(1)
-        if (matchingEntries?.[0]?.employee_id) {
+        const { rows: matchingEntries } = await db.query(
+            `SELECT employee_id FROM work_entries WHERE customer_phone = $1 ORDER BY date DESC LIMIT 1`,
+            [String(body.contact_number).trim()]
+        )
+        if (matchingEntries[0]?.employee_id) {
             autoCallPeek = matchingEntries[0].employee_id
         }
     }
 
-    const { data, error } = await auth.supabase
-        .from('courier_issues')
-        .insert({
-            date: body.date || new Date().toISOString().split('T')[0],
-            parcel_id: trimmedParcelId || null,
-            contact_number: body.contact_number || null,
-            problem_details: body.problem_details,
-            problem_category: body.problem_category || null,
-            source: body.source || null,
-            logistics: body.logistics || null,
-            problem_status: 'pending',
-            delivery_status: body.delivery_status || 'pending',
-            fraud_note: body.fraud_note || false,
-            payment_gateway: body.payment_gateway || null,
-            business_name: body.business_name || null,
-            call_peek: autoCallPeek,
-            problem_solver: body.problem_solver || null,
-        })
-        .select('*')
-        .single()
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { rows: [data] } = await db.query(
+        `INSERT INTO courier_issues (date, parcel_id, contact_number, problem_details, problem_category, source, logistics, problem_status, delivery_status, fraud_note, payment_gateway, business_name, call_peek, problem_solver)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12, $13) RETURNING *`,
+        [
+            body.date || new Date().toISOString().split('T')[0], trimmedParcelId || null, body.contact_number || null,
+            body.problem_details, body.problem_category || null, body.source || null, body.logistics || null,
+            body.delivery_status || 'pending', body.fraud_note || false, body.payment_gateway || null,
+            body.business_name || null, autoCallPeek, body.problem_solver || null,
+        ]
+    )
 
     // Award 5 points for reporting
-    await awardPoints(auth.supabase, auth.employee.id, 5, 'courier', data.id, 'Entered courier issue', auth.employee.id)
+    await awardPoints(db, auth.employee.id, 5, 'courier', data.id, 'Entered courier issue', auth.employee.id)
 
     // Log to audit trail
-    await auth.supabase.from('audit_log').insert({
-        actor_id: auth.employee.id, module: 'courier', action: 'created', target_id: data.id,
-        new_value: data.parcel_id || 'Issue',
-    }).then(() => {})
+    await db.query(
+        `INSERT INTO audit_log (actor_id, module, action, target_id, new_value) VALUES ($1, 'courier', 'created', $2, $3)`,
+        [auth.employee.id, data.id, data.parcel_id || 'Issue']
+    )
 
     return NextResponse.json({ ...data, awardedPoints: 5 }, { status: 201 })
 }
@@ -138,12 +120,16 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const body = await request.json()
     const { id, ...updates } = body
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const { data: oldIssue } = await auth.supabase.from('courier_issues').select('problem_status, problem_solver, call_peek').eq('id', id).single()
+    const { rows: [oldIssue] } = await db.query(
+        `SELECT problem_status, problem_solver, call_peek FROM courier_issues WHERE id = $1`,
+        [id]
+    )
 
     // Members may report, pick up (call_peek), edit details and change delivery status.
     // Only an admin may RESOLVE an issue, because resolving awards 10 points to the picker —
@@ -153,21 +139,22 @@ export async function PUT(request: Request) {
         return NextResponse.json({ error: 'Only an admin can resolve a courier issue' }, { status: 403 })
     }
 
-    const { data, error } = await auth.supabase
-        .from('courier_issues')
-        .update(updates)
-        .eq('id', id)
-        .select('*')
-        .single()
+    const keys = Object.keys(updates)
+    if (keys.length === 0) return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    const { rows: [data] } = await db.query(
+        `UPDATE courier_issues SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *`,
+        [id, ...keys.map(k => updates[k])]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!data) return NextResponse.json({ error: 'Courier issue not found' }, { status: 404 })
 
     let awardedPoints = 0
     // Award 10 points to the assigned solver (not whoever clicked resolve) when resolved.
     if (updates.problem_status === 'resolved' && oldIssue?.problem_status !== 'resolved') {
         const solverId = data.problem_solver || oldIssue?.problem_solver || oldIssue?.call_peek
         if (solverId) {
-            await awardPoints(auth.supabase, solverId, 10, 'courier', id, 'Resolved courier issue', auth.employee.id)
+            await awardPoints(db, solverId, 10, 'courier', id, 'Resolved courier issue', auth.employee.id)
             awardedPoints = 10
         }
     }
@@ -184,10 +171,10 @@ export async function PUT(request: Request) {
         logActions.push({ action: 'updated' })
     }
     for (const log of logActions) {
-        await auth.supabase.from('audit_log').insert({
-            actor_id: auth.employee.id, module: 'courier', action: log.action, target_id: id,
-            old_value: log.old_value || null, new_value: log.new_value || null,
-        }).then(() => {})
+        await db.query(
+            `INSERT INTO audit_log (actor_id, module, action, target_id, old_value, new_value) VALUES ($1, 'courier', $2, $3, $4, $5)`,
+            [auth.employee.id, log.action, id, log.old_value || null, log.new_value || null]
+        )
     }
 
     return NextResponse.json({ ...data, awardedPoints })
@@ -202,7 +189,6 @@ export async function DELETE(request: Request) {
     const id = searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-    const { error } = await auth.supabase.from('courier_issues').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await auth.db.query(`DELETE FROM courier_issues WHERE id = $1`, [id])
     return NextResponse.json({ success: true })
 }

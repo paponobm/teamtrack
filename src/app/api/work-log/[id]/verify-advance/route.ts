@@ -10,16 +10,16 @@ export async function POST(
 ) {
     const auth = await requireAuth(4)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const { id } = await params
 
-    const { data: entryRow, error: fetchErr } = await auth.supabase
-        .from('work_entries')
-        .select('advance, advance_verified, sl, invoice_no, date, payment_gateway, business_name')
-        .eq('id', id)
-        .single()
+    const { rows: [entryRow] } = await db.query(
+        `SELECT advance, advance_verified, sl, invoice_no, date, payment_gateway, business_name FROM work_entries WHERE id = $1`,
+        [id]
+    )
 
-    if (fetchErr || !entryRow) return NextResponse.json({ error: 'Entry not found' }, { status: 404 })
+    if (!entryRow) return NextResponse.json({ error: 'Entry not found' }, { status: 404 })
 
     if (!entryRow.advance || Number(entryRow.advance) <= 0) {
         return NextResponse.json({ error: 'This entry has no advance payment to verify' }, { status: 400 })
@@ -29,18 +29,16 @@ export async function POST(
     }
 
     const now = new Date().toISOString()
-    const { data, error } = await auth.supabase
-        .from('work_entries')
-        .update({ advance_verified: true, verified_by: auth.employee.id, verified_at: now })
-        .eq('id', id)
-        .select(`
-            *,
-            employee:employees!employee_id(id, name, employee_id),
-            verifier:employees!verified_by(id, name)
-        `)
-        .single()
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { rows: [data] } = await db.query(
+        `WITH upd AS (
+            UPDATE work_entries SET advance_verified = true, verified_by = $1, verified_at = $2 WHERE id = $3 RETURNING *
+         )
+         SELECT w.*,
+            json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id) AS employee,
+            json_build_object('id', v.id, 'name', v.name) AS verifier
+         FROM upd w LEFT JOIN employees e ON e.id = w.employee_id LEFT JOIN employees v ON v.id = w.verified_by`,
+        [auth.employee.id, now, id]
+    )
 
     const orderLabel = entryRow.invoice_no || `#${entryRow.sl}`
     await logAudit(
@@ -57,16 +55,19 @@ export async function POST(
     // mirror doesn't block verification itself, since work_entries is the record of truth for
     // advance verification. work_entry_id (unique, see migration
     // 067_income_work_entry_link.sql) means this can never double-insert for the same order.
-    await auth.supabase.from('income').insert({
-        date: entryRow.date,
-        description: `Advance payment — Order ${orderLabel}`,
-        amount: entryRow.advance,
-        source: 'Order Advance',
-        note: entryRow.payment_gateway ? `Paid via ${entryRow.payment_gateway}` : null,
-        business_name: entryRow.business_name || null,
-        work_entry_id: id,
-        added_by: auth.employee.id,
-    })
+    await db.query(
+        `INSERT INTO income (date, description, amount, source, note, business_name, work_entry_id, added_by)
+         VALUES ($1, $2, $3, 'Order Advance', $4, $5, $6, $7)`,
+        [
+            entryRow.date,
+            `Advance payment — Order ${orderLabel}`,
+            entryRow.advance,
+            entryRow.payment_gateway ? `Paid via ${entryRow.payment_gateway}` : null,
+            entryRow.business_name || null,
+            id,
+            auth.employee.id,
+        ]
+    )
 
     return NextResponse.json(data)
 }

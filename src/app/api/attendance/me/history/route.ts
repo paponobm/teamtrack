@@ -5,10 +5,10 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
-    
+
     const now = new Date()
     const month = parseInt(searchParams.get('month') || String(now.getMonth() + 1))
     const year = parseInt(searchParams.get('year') || String(now.getFullYear()))
@@ -18,30 +18,22 @@ export async function GET(request: Request) {
     const endDate = new Date(year, month, 0).toISOString().split('T')[0]
 
     // 1. Get attendance records for this month
-    const { data: attendanceRecords, error: attError } = await supabase
-        .from('attendance')
-        .select('*')
-        .eq('employee_id', auth.employee.id)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .order('date', { ascending: false })
+    const { rows: attendanceRecords } = await db.query(
+        `SELECT * FROM attendance WHERE employee_id = $1 AND date >= $2 AND date <= $3 ORDER BY date DESC`,
+        [auth.employee.id, startDate, endDate]
+    )
 
-    if (attError) return NextResponse.json({ error: attError.message }, { status: 500 })
-
-    if (!attendanceRecords || attendanceRecords.length === 0) {
+    if (attendanceRecords.length === 0) {
         return NextResponse.json({ records: [], breaks: [] })
     }
 
     const attendanceIds = attendanceRecords.map(r => r.id)
 
     // 2. Get breaks for these attendance records
-    const { data: breaks, error: breaksError } = await supabase
-        .from('attendance_breaks')
-        .select('*')
-        .in('attendance_id', attendanceIds)
-        .order('start_time', { ascending: true })
+    const { rows: breaks } = await db.query(
+        `SELECT * FROM attendance_breaks WHERE attendance_id = ANY($1) ORDER BY start_time ASC`,
+        [attendanceIds]
+    )
 
-    if (breaksError) return NextResponse.json({ error: breaksError.message }, { status: 500 })
-
-    return NextResponse.json({ records: attendanceRecords, breaks: breaks || [] })
+    return NextResponse.json({ records: attendanceRecords, breaks })
 }

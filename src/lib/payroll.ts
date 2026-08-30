@@ -1,7 +1,7 @@
 import { getMonthRangeFromString } from './dateRange'
-import { createAdminClient } from './supabase/admin'
+import type { Pool, PoolClient } from 'pg'
 
-type SupabaseClient = ReturnType<typeof createAdminClient>
+type Db = Pool | PoolClient
 
 export interface EmployeeAttendanceStats {
     present: number
@@ -13,21 +13,18 @@ export interface EmployeeAttendanceStats {
 // Reuses the exact same `attendance.status` values/rules the Attendance Report already
 // uses (present/late/absent/leave, with "late" also counting toward "present") — see
 // src/app/api/attendance/report/route.ts. Never a second/duplicate attendance system.
-export async function getAttendanceStatsForMonth(supabase: SupabaseClient, employeeIds: string[], month: string): Promise<Record<string, EmployeeAttendanceStats>> {
+export async function getAttendanceStatsForMonth(db: Db, employeeIds: string[], month: string): Promise<Record<string, EmployeeAttendanceStats>> {
     const { start, end } = getMonthRangeFromString(month)
     const stats: Record<string, EmployeeAttendanceStats> = {}
     employeeIds.forEach(id => { stats[id] = { present: 0, late: 0, absent: 0, leave: 0 } })
     if (employeeIds.length === 0) return stats
 
-    const { data } = await supabase
-        .from('attendance')
-        .select('employee_id, status')
-        .in('employee_id', employeeIds)
-        .gte('date', start)
-        .lte('date', end)
+    const { rows } = await db.query(
+        `SELECT employee_id, status FROM attendance WHERE employee_id = ANY($1) AND date >= $2 AND date <= $3`,
+        [employeeIds, start, end]
+    )
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(data || []).forEach((r: any) => {
+    rows.forEach((r: { employee_id: string; status: string }) => {
         const s = stats[r.employee_id]
         if (!s) return
         if (r.status === 'present') s.present++
@@ -52,21 +49,20 @@ export async function getAttendanceStatsForMonth(supabase: SupabaseClient, emplo
 // just "payment_status='Unpaid'" — that would make a fine vanish from its OWN settlement
 // month's total the instant it's marked Paid (corrupting that month's already-computed Payable
 // Salary/linked Expense), since settlement and this computation can happen in the same request.
-export async function getFineTotalsForMonth(supabase: SupabaseClient, employeeIds: string[], month: string): Promise<Record<string, number>> {
+export async function getFineTotalsForMonth(db: Db, employeeIds: string[], month: string): Promise<Record<string, number>> {
     const { end } = getMonthRangeFromString(month)
     const totals: Record<string, number> = {}
     employeeIds.forEach(id => { totals[id] = 0 })
     if (employeeIds.length === 0) return totals
 
-    const { data } = await supabase
-        .from('fines')
-        .select('member_id, amount, status, payment_status, settled_month, created_at')
-        .in('member_id', employeeIds)
-        .eq('status', 'Active')
-        .lte('created_at', `${end}T23:59:59`)
+    const { rows } = await db.query(
+        `SELECT member_id, amount, payment_status, settled_month
+         FROM fines
+         WHERE member_id = ANY($1) AND status = 'Active' AND created_at <= $2`,
+        [employeeIds, `${end}T23:59:59`]
+    )
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(data || []).forEach((r: any) => {
+    rows.forEach((r: { member_id: string; amount: number; payment_status: string; settled_month: string | null }) => {
         const counts = r.payment_status === 'Unpaid' || (!!r.settled_month && r.settled_month >= month)
         if (!counts) return
         totals[r.member_id] = (totals[r.member_id] || 0) + Number(r.amount || 0)
@@ -88,22 +84,20 @@ export interface EmployeeAdvanceDetail {
 // standalone `advances` table (Advance Management module), summed for the selected month.
 // Same "reuse, don't duplicate" pattern as attendance/fines. Returns the per-record breakdown
 // too, since the Salary Sheet shows a hover tooltip listing each advance date/amount.
-export async function getAdvanceDetailsForMonth(supabase: SupabaseClient, employeeIds: string[], month: string): Promise<Record<string, EmployeeAdvanceDetail>> {
+export async function getAdvanceDetailsForMonth(db: Db, employeeIds: string[], month: string): Promise<Record<string, EmployeeAdvanceDetail>> {
     const { start, end } = getMonthRangeFromString(month)
     const details: Record<string, EmployeeAdvanceDetail> = {}
     employeeIds.forEach(id => { details[id] = { total: 0, records: [] } })
     if (employeeIds.length === 0) return details
 
-    const { data } = await supabase
-        .from('advances')
-        .select('employee_id, amount, advance_date')
-        .in('employee_id', employeeIds)
-        .gte('advance_date', start)
-        .lte('advance_date', end)
-        .order('advance_date', { ascending: true })
+    const { rows } = await db.query(
+        `SELECT employee_id, amount, advance_date FROM advances
+         WHERE employee_id = ANY($1) AND advance_date >= $2 AND advance_date <= $3
+         ORDER BY advance_date ASC`,
+        [employeeIds, start, end]
+    )
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(data || []).forEach((r: any) => {
+    rows.forEach((r: { employee_id: string; amount: number; advance_date: string }) => {
         const d = details[r.employee_id]
         if (!d) return
         const amount = Number(r.amount) || 0
@@ -154,7 +148,7 @@ export const SALARY_EXPENSE_CATEGORY = 'Employee Salary'
 // src/app/api/payroll/salary-entries/route.ts). Creates the expense the first time an entry is
 // marked Paid; re-syncs the same expense (by expenseId) if a later edit changes the amount
 // while it's already Paid, so the two never drift apart.
-export async function createOrSyncSalaryExpense(supabase: SupabaseClient, params: {
+export async function createOrSyncSalaryExpense(db: Db, params: {
     expenseId: string | null
     employeeId: string
     month: string
@@ -162,33 +156,27 @@ export async function createOrSyncSalaryExpense(supabase: SupabaseClient, params
     date: string | null
     submittedBy: string
 }): Promise<string | null> {
-    const { data: employee } = await supabase.from('employees').select('name').eq('id', params.employeeId).maybeSingle()
+    const { rows: [employee] } = await db.query(`SELECT name FROM employees WHERE id = $1`, [params.employeeId])
     const employeeName = employee?.name || 'employee'
     const date = params.date || new Date().toISOString().slice(0, 10)
     const description = `Salary for ${employeeName} - ${params.month}`
 
     if (params.expenseId) {
-        await supabase
-            .from('expenses')
-            .update({ date, description, amount: params.amount, payment_status: 'paid', approved_by: params.submittedBy })
-            .eq('id', params.expenseId)
+        await db.query(
+            `UPDATE expenses SET date = $1, description = $2, amount = $3, payment_status = 'paid', approved_by = $4 WHERE id = $5`,
+            [date, description, params.amount, params.submittedBy, params.expenseId]
+        )
         return params.expenseId
     }
 
-    const { data: expense, error } = await supabase
-        .from('expenses')
-        .insert({
-            date,
-            category: SALARY_EXPENSE_CATEGORY,
-            description,
-            amount: params.amount,
-            payment_status: 'paid',
-            submitted_by: params.submittedBy,
-            approved_by: params.submittedBy,
-        })
-        .select('id')
-        .single()
-
-    if (error) return null
-    return expense.id
+    try {
+        const { rows: [expense] } = await db.query(
+            `INSERT INTO expenses (date, category, description, amount, payment_status, submitted_by, approved_by)
+             VALUES ($1, $2, $3, $4, 'paid', $5, $5) RETURNING id`,
+            [date, SALARY_EXPENSE_CATEGORY, description, params.amount, params.submittedBy]
+        )
+        return expense.id
+    } catch {
+        return null
+    }
 }

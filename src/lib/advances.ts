@@ -1,6 +1,6 @@
-import { createAdminClient } from './supabase/admin'
+import type { Pool, PoolClient } from 'pg'
 
-type SupabaseClient = ReturnType<typeof createAdminClient>
+type Db = Pool | PoolClient
 
 export const ADVANCE_EXPENSE_CATEGORY = 'Salary Advance'
 
@@ -19,59 +19,47 @@ function buildDescription(employeeName: string) {
 // has since repaid the advance (surfaced as "Receiving Status" wherever this expense is shown,
 // see /api/expenses). The two must stay independent: repaying an advance later must never flip
 // this expense back to pending, and this expense being 'paid' must never imply repayment.
-export async function createLinkedExpense(supabase: SupabaseClient, params: {
+export async function createLinkedExpense(db: Db, params: {
     employeeId: string
     amount: number
     date: string
     note: string | null
     submittedBy: string
 }): Promise<string | null> {
-    const { data: employee } = await supabase.from('employees').select('name').eq('id', params.employeeId).maybeSingle()
+    const { rows: [employee] } = await db.query(`SELECT name FROM employees WHERE id = $1`, [params.employeeId])
     const employeeName = employee?.name || 'employee'
 
-    const { data: expense, error } = await supabase
-        .from('expenses')
-        .insert({
-            date: params.date,
-            category: ADVANCE_EXPENSE_CATEGORY,
-            description: buildDescription(employeeName),
-            amount: params.amount,
-            payment_status: 'paid',
-            submitted_by: params.submittedBy,
-            approved_by: params.submittedBy,
-            note: params.note,
-        })
-        .select('id')
-        .single()
-
-    if (error) return null
-    return expense.id
+    try {
+        const { rows: [expense] } = await db.query(
+            `INSERT INTO expenses (date, category, description, amount, payment_status, submitted_by, approved_by, note)
+             VALUES ($1, $2, $3, $4, 'paid', $5, $5, $6) RETURNING id`,
+            [params.date, ADVANCE_EXPENSE_CATEGORY, buildDescription(employeeName), params.amount, params.submittedBy, params.note]
+        )
+        return expense.id
+    } catch {
+        return null
+    }
 }
 
 // Keeps an advance's linked expense in sync after an edit (amount/date/employee/note change) —
 // deliberately does NOT touch payment_status/approved_by, since the Expense's 'paid' status is
 // permanent from creation and independent of the advance's own repayment tracking (see
 // createLinkedExpense's doc comment above).
-export async function syncLinkedExpense(supabase: SupabaseClient, expenseId: string, params: {
+export async function syncLinkedExpense(db: Db, expenseId: string, params: {
     employeeId: string
     amount: number
     date: string
     note: string | null
 }) {
-    const { data: employee } = await supabase.from('employees').select('name').eq('id', params.employeeId).maybeSingle()
+    const { rows: [employee] } = await db.query(`SELECT name FROM employees WHERE id = $1`, [params.employeeId])
     const employeeName = employee?.name || 'employee'
 
-    await supabase
-        .from('expenses')
-        .update({
-            date: params.date,
-            description: buildDescription(employeeName),
-            amount: params.amount,
-            note: params.note,
-        })
-        .eq('id', expenseId)
+    await db.query(
+        `UPDATE expenses SET date = $1, description = $2, amount = $3, note = $4 WHERE id = $5`,
+        [params.date, buildDescription(employeeName), params.amount, params.note, expenseId]
+    )
 }
 
-export async function deleteLinkedExpense(supabase: SupabaseClient, expenseId: string) {
-    await supabase.from('expenses').delete().eq('id', expenseId)
+export async function deleteLinkedExpense(db: Db, expenseId: string) {
+    await db.query(`DELETE FROM expenses WHERE id = $1`, [expenseId])
 }

@@ -1,4 +1,4 @@
-import { createAdminClient } from '@/lib/supabase/admin'
+import { pool } from '@/lib/db'
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { NextResponse, NextRequest } from 'next/server'
 
@@ -11,26 +11,27 @@ export async function POST(req: NextRequest) {
         if (!isAuthed(auth)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const supabase = createAdminClient()
+    const db = pool
     const now = new Date()
     const today = now.toISOString().split('T')[0]
     const notifications: { recipient_id: string; title: string; message: string; type: string; is_read: boolean }[] = []
 
+    async function adminIdsForRoles(roleNames: string[]): Promise<string[]> {
+        const { rows } = await db.query(
+            `SELECT e.id FROM employees e LEFT JOIN roles r ON r.id = e.role_id WHERE r.name = ANY($1)`,
+            [roleNames]
+        )
+        return rows.map(r => r.id)
+    }
+
     // 1. High-value orders (2000+)
-    const { data: highOrders } = await supabase
-        .from('work_entries')
-        .select('id, amount, employee_id, customer_phone, date')
-        .gte('amount', 2000)
-        .eq('date', today)
+    const { rows: highOrders } = await db.query(
+        `SELECT id, amount, employee_id, customer_phone, date FROM work_entries WHERE amount >= 2000 AND date = $1`,
+        [today]
+    )
 
-    if (highOrders?.length) {
-        // Get all managers/admins to notify
-        const { data: admins } = await supabase
-            .from('employees')
-            .select('id, role_id')
-            .in('role_id', (await supabase.from('roles').select('id').in('name', ['Owner', 'Admin', 'Super Admin', 'Manager'])).data?.map(r => r.id) || [])
-
-        const adminIds = admins?.map(a => a.id) || []
+    if (highOrders.length) {
+        const adminIds = await adminIdsForRoles(['Owner', 'Admin', 'Super Admin', 'Manager'])
         for (const order of highOrders) {
             for (const adminId of adminIds) {
                 // Don't self-notify
@@ -48,20 +49,14 @@ export async function POST(req: NextRequest) {
 
     // 2. Unresolved problems (24h+)
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
-    const { data: oldProblems } = await supabase
-        .from('problems')
-        .select('id, problem_no, problem_details, problem_peek, created_at')
-        .in('status', ['open', 'in_progress'])
-        .lt('created_at', yesterday)
-        .limit(20)
+    const { rows: oldProblems } = await db.query(
+        `SELECT id, problem_no, problem_details, problem_peek, created_at
+         FROM problems WHERE status = ANY($1) AND created_at < $2 LIMIT 20`,
+        [['open', 'in_progress'], yesterday]
+    )
 
-    if (oldProblems?.length) {
-        const { data: admins } = await supabase
-            .from('employees')
-            .select('id, role_id')
-            .in('role_id', (await supabase.from('roles').select('id').in('name', ['Owner', 'Admin', 'Super Admin'])).data?.map(r => r.id) || [])
-
-        const adminIds = admins?.map(a => a.id) || []
+    if (oldProblems.length) {
+        const adminIds = await adminIdsForRoles(['Owner', 'Admin', 'Super Admin'])
         for (const prob of oldProblems) {
             for (const adminId of adminIds) {
                 notifications.push({
@@ -76,32 +71,20 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Attendance anomalies - check if any active employees have no clock-in today
-    const { data: activeEmployees } = await supabase
-        .from('employees')
-        .select('id, name')
-        .eq('is_active', true)
+    const { rows: activeEmployees } = await db.query(`SELECT id, name FROM employees WHERE is_active = true`)
+    const { rows: todayAttendance } = await db.query(`SELECT employee_id FROM attendance WHERE date = $1`, [today])
 
-    const { data: todayAttendance } = await supabase
-        .from('attendance')
-        .select('employee_id')
-        .eq('date', today)
-
-    const clockedInIds = new Set(todayAttendance?.map(a => a.employee_id) || [])
+    const clockedInIds = new Set(todayAttendance.map(a => a.employee_id))
 
     // Only after 10 AM local time (UTC+6)
     const localHour = (now.getUTCHours() + 6) % 24
-    if (localHour >= 10 && activeEmployees) {
+    if (localHour >= 10) {
         const absent = activeEmployees.filter(e => !clockedInIds.has(e.id))
         if (absent.length > 0) {
-            // Notify admins
-            const { data: admins } = await supabase
-                .from('employees')
-                .select('id, role_id')
-                .in('role_id', (await supabase.from('roles').select('id').in('name', ['Owner', 'Admin', 'Super Admin'])).data?.map(r => r.id) || [])
-
-            for (const admin of admins || []) {
+            const adminIds = await adminIdsForRoles(['Owner', 'Admin', 'Super Admin'])
+            for (const adminId of adminIds) {
                 notifications.push({
-                    recipient_id: admin.id,
+                    recipient_id: adminId,
                     title: '📋 Attendance alert',
                     message: `${absent.length} employee${absent.length > 1 ? 's' : ''} haven't clocked in: ${absent.slice(0, 3).map(e => e.name).join(', ')}${absent.length > 3 ? '...' : ''}`,
                     type: 'attendance_anomaly',
@@ -113,17 +96,26 @@ export async function POST(req: NextRequest) {
 
     // Deduplicate - don't insert if same type+recipient+today already exists
     if (notifications.length > 0) {
-        const { data: existing } = await supabase
-            .from('notifications')
-            .select('recipient_id, type')
-            .gte('created_at', `${today}T00:00:00`)
+        const { rows: existing } = await db.query(
+            `SELECT recipient_id, type FROM notifications WHERE created_at >= $1`,
+            [`${today}T00:00:00`]
+        )
 
-        const existingKeys = new Set((existing || []).map(e => `${e.recipient_id}:${e.type}`))
+        const existingKeys = new Set(existing.map(e => `${e.recipient_id}:${e.type}`))
         const newNotifs = notifications.filter(n => !existingKeys.has(`${n.recipient_id}:${n.type}`))
 
         if (newNotifs.length > 0) {
-            const { error } = await supabase.from('notifications').insert(newNotifs)
-            if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+            await db.query(
+                `INSERT INTO notifications (recipient_id, title, message, type, is_read)
+                 SELECT * FROM UNNEST($1::uuid[], $2::text[], $3::text[], $4::text[], $5::boolean[])`,
+                [
+                    newNotifs.map(n => n.recipient_id),
+                    newNotifs.map(n => n.title),
+                    newNotifs.map(n => n.message),
+                    newNotifs.map(n => n.type),
+                    newNotifs.map(n => n.is_read),
+                ]
+            )
             return NextResponse.json({ generated: newNotifs.length, total_candidates: notifications.length })
         }
     }

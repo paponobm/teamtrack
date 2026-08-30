@@ -6,49 +6,38 @@ export async function GET() {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
 
-    const { data, error } = await auth.supabase
-        .from('notifications')
-        .select('*')
-        .eq('recipient_id', auth.employee.id)
-        .order('created_at', { ascending: false })
-        .limit(50)
+    const { rows } = await auth.db.query(
+        `SELECT * FROM notifications WHERE recipient_id = $1 ORDER BY created_at DESC LIMIT 50`,
+        [auth.employee.id]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const unread_count = rows.filter(n => !n.is_read).length
 
-    const notifications = data || []
-    const unread_count = notifications.filter(n => !n.is_read).length
-
-    return NextResponse.json({ notifications, unread_count })
+    return NextResponse.json({ notifications: rows, unread_count })
 }
 
 // PUT /api/notifications - mark as read
 export async function PUT(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const body = await request.json()
 
     if (body.mark_all_read) {
         // Mark all as read for an employee
-        const { error } = await supabase
-            .from('notifications')
-            .update({ is_read: true })
-            .eq('recipient_id', auth.employee.id) // ONLY allow marking own notifications
-            .eq('is_read', false)
-
-        if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        await db.query(
+            `UPDATE notifications SET is_read = true WHERE recipient_id = $1 AND is_read = false`,
+            [auth.employee.id]
+        )
         return NextResponse.json({ success: true })
     }
 
     if (body.id) {
-        const { error } = await supabase
-            .from('notifications')
-            .update({ is_read: true })
-            .eq('id', body.id)
-            .eq('recipient_id', auth.employee.id) // ONLY allow marking own notification (prevent IDOR)
-
-        if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        await db.query(
+            `UPDATE notifications SET is_read = true WHERE id = $1 AND recipient_id = $2`, // ONLY allow marking own notification (prevent IDOR)
+            [body.id, auth.employee.id]
+        )
         return NextResponse.json({ success: true })
     }
 
@@ -60,12 +49,10 @@ export async function DELETE() {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
 
-    const { error } = await auth.supabase
-        .from('notifications')
-        .delete()
-        .eq('recipient_id', auth.employee.id)
-        .eq('is_read', true)
+    await auth.db.query(
+        `DELETE FROM notifications WHERE recipient_id = $1 AND is_read = true`,
+        [auth.employee.id]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ success: true })
 }

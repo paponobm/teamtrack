@@ -1,5 +1,6 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { NextResponse } from 'next/server'
+import bcrypt from 'bcryptjs'
 
 // POST /api/members/[id]/reset-password - admin resets a member's password
 export async function POST(
@@ -8,6 +9,7 @@ export async function POST(
 ) {
     const auth = await requireAuth(3) // Admin+
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const { id } = await params
     const body = await request.json()
@@ -21,55 +23,31 @@ export async function POST(
     // level than yourself (consistent with the member edit/deactivate guards). This blocks
     // an admin from resetting a peer admin's (or a super admin's) password.
     if (id !== auth.employee.id) {
-        const { data: target } = await auth.supabase
-            .from('employees')
-            .select('role:roles(level)')
-            .eq('id', id)
-            .single()
-        const targetLevel = (target?.role as unknown as { level: number })?.level ?? 99
+        const { rows: [target] } = await db.query(
+            `SELECT r.level FROM employees e LEFT JOIN roles r ON r.id = e.role_id WHERE e.id = $1`,
+            [id]
+        )
+        const targetLevel = target?.level ?? 99
         if (targetLevel <= auth.employee.roleLevel) {
             return NextResponse.json({ error: 'You cannot reset the password of a user at your own or a higher access level' }, { status: 403 })
         }
     }
 
-    // Get the user's Supabase Auth ID
-    const { data: emp } = await auth.supabase
-        .from('employees')
-        .select('user_id, name')
-        .eq('id', id)
-        .single()
+    const { rows: [emp] } = await db.query(`SELECT user_id, name FROM employees WHERE id = $1`, [id])
 
     if (!emp || !emp.user_id) {
-        return NextResponse.json({ error: 'Employee not found or has no auth account' }, { status: 404 })
+        return NextResponse.json({ error: 'Employee not found or has no login account' }, { status: 404 })
     }
 
-    // Use admin API to update password directly (no email flow needed)
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-
-    const res = await fetch(`${supabaseUrl}/auth/v1/admin/users/${emp.user_id}`, {
-        method: 'PUT',
-        headers: {
-            'apikey': serviceKey,
-            'Authorization': `Bearer ${serviceKey}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ password: new_password }),
-    })
-
-    if (!res.ok) {
-        const err = await res.json()
-        return NextResponse.json({ error: err.message || 'Failed to reset password' }, { status: 400 })
-    }
+    const passwordHash = await bcrypt.hash(new_password, 10)
+    await db.query(`UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`, [passwordHash, emp.user_id])
 
     // Audit log
-    await auth.supabase.from('audit_log').insert({
-        actor_id: auth.employee.id,
-        module: 'members',
-        action: 'password_reset',
-        target_id: id,
-        details: { actor_name: auth.employee.name, target_name: emp.name },
-    })
+    await db.query(
+        `INSERT INTO audit_log (actor_id, module, action, target_id, details)
+         VALUES ($1, 'members', 'password_reset', $2, $3)`,
+        [auth.employee.id, id, JSON.stringify({ actor_name: auth.employee.name, target_name: emp.name })]
+    )
 
     return NextResponse.json({ success: true, message: `Password reset for ${emp.name}` })
 }

@@ -10,14 +10,11 @@ export async function GET(
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
-    const { data, error } = await auth.supabase
-        .from('attendance_breaks')
-        .select('id, start_time, end_time')
-        .eq('attendance_id', id)
-        .order('start_time', { ascending: true })
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json(data || [])
+    const { rows } = await auth.db.query(
+        `SELECT id, start_time, end_time FROM attendance_breaks WHERE attendance_id = $1 ORDER BY start_time ASC`,
+        [id]
+    )
+    return NextResponse.json(rows)
 }
 
 // POST /api/attendance/[id]/breaks - add a break to an attendance record (admin only)
@@ -27,27 +24,23 @@ export async function POST(
 ) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const { id } = await params
     const body = await request.json().catch(() => ({}))
     const start_time = body.start_time || new Date().toISOString()
     const end_time = body.end_time || null
 
-    const { data, error } = await auth.supabase
-        .from('attendance_breaks')
-        .insert({ attendance_id: id, start_time, end_time })
-        .select('id, start_time, end_time')
-        .single()
+    const { rows: [data] } = await db.query(
+        `INSERT INTO attendance_breaks (attendance_id, start_time, end_time) VALUES ($1, $2, $3) RETURNING id, start_time, end_time`,
+        [id, start_time, end_time]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    await auth.supabase.from('audit_log').insert({
-        actor_id: auth.employee.id,
-        module: 'attendance',
-        action: 'Added a break',
-        target_id: id,
-        details: { actor_name: auth.employee.name },
-    }).then(() => { })
+    await db.query(
+        `INSERT INTO audit_log (actor_id, module, action, target_id, details)
+         VALUES ($1, 'attendance', 'Added a break', $2, $3)`,
+        [auth.employee.id, id, JSON.stringify({ actor_name: auth.employee.name })]
+    )
 
     return NextResponse.json(data, { status: 201 })
 }

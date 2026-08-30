@@ -6,7 +6,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const auth = await requireAuth(2) // Only Super Admin (Level <= 2) can review appeals
     if (!isAuthed(auth)) return auth
 
-    const { supabase, employee } = auth
+    const { db, employee } = auth
 
     try {
         const payload = await request.json()
@@ -16,13 +16,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             return NextResponse.json({ error: 'Invalid action. Use waive or reject' }, { status: 400 })
         }
 
-        const { data: fine, error: fetchError } = await supabase
-            .from('fines')
-            .select('*')
-            .eq('id', id)
-            .single()
+        const { rows: [fine] } = await db.query(`SELECT * FROM fines WHERE id = $1`, [id])
 
-        if (fetchError || !fine) {
+        if (!fine) {
             return NextResponse.json({ error: 'Fine not found' }, { status: 404 })
         }
 
@@ -32,25 +28,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
         const newStatus = action === 'waive' ? 'Waived' : 'Active' // If rejected, it goes back to Active
 
-        const { data, error } = await supabase
-            .from('fines')
-            .update({
-                status: newStatus,
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', id)
-            .select()
-            .single()
-
-        if (error) {
-            console.error('Error reviewing fine:', error)
-            return NextResponse.json({ error: error.message }, { status: 500 })
-        }
+        const { rows: [data] } = await db.query(
+            `UPDATE fines SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+            [newStatus, id]
+        )
 
         // If waived, refund the points
         if (action === 'waive') {
             await awardPoints(
-                supabase,
+                db,
                 fine.member_id,
                 Math.abs(fine.amount), // Positive amount to refund
                 'Fine Waived',
@@ -61,7 +47,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         }
 
         return NextResponse.json({ data })
-    } catch (error) {
+    } catch {
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
     }
 }

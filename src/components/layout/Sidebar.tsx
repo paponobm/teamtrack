@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { motion } from 'framer-motion'
 import { useLanguage } from '@/lib/LanguageContext'
 import { usePermissions } from '@/lib/PermissionsContext'
@@ -103,7 +102,6 @@ function NavIcon({ type }: { type: string }) {
 export default function Sidebar({ user, onClose, isOpen }: SidebarProps) {
     const pathname = usePathname()
     const router = useRouter()
-    const supabase = createClient()
     const { lang, setLang, t } = useLanguage()
     const { data, isLoading } = usePermissions()
     const userPermissions = data.permissions
@@ -186,7 +184,7 @@ export default function Sidebar({ user, onClose, isOpen }: SidebarProps) {
     }
 
     const handleLogout = async () => {
-        await supabase.auth.signOut()
+        await fetch('/api/auth/logout', { method: 'POST' })
         router.push('/login')
         router.refresh()
     }

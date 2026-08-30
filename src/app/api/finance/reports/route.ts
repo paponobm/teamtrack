@@ -5,8 +5,8 @@ import { NextResponse } from 'next/server'
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const isAdmin = auth.employee.roleLevel <= 3
     if (!isAdmin) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     // Only Super Admin sees company-wide reports; a plain Admin (level 3) only sees reports
@@ -18,35 +18,42 @@ export async function GET(request: Request) {
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
 
-    let expenseQuery = supabase.from('expenses').select('id, amount, category, date, submitted_by')
-    let incomeQuery = supabase.from('income').select('id, amount, source, date, added_by')
-
-    if (!isSuperAdmin) {
-        expenseQuery = expenseQuery.eq('submitted_by', auth.employee.id)
-        incomeQuery = incomeQuery.eq('added_by', auth.employee.id)
-    }
-
-    if (startDate) {
-        expenseQuery = expenseQuery.gte('date', startDate)
-        incomeQuery = incomeQuery.gte('date', startDate)
-    }
-    if (endDate) {
-        expenseQuery = expenseQuery.lte('date', endDate)
-        incomeQuery = incomeQuery.lte('date', endDate)
-    }
+    let start: string | null = startDate
+    let end: string | null = endDate
     if (month && !startDate && !endDate) {
         const [y, m] = month.split('-').map(Number)
-        const monthEnd = new Date(y, m, 0).toISOString().split('T')[0]
-        expenseQuery = expenseQuery.gte('date', `${month}-01`).lte('date', monthEnd)
-        incomeQuery = incomeQuery.gte('date', `${month}-01`).lte('date', monthEnd)
+        start = `${month}-01`
+        end = new Date(y, m, 0).toISOString().split('T')[0]
     }
 
-    const [expenseRes, incomeRes] = await Promise.all([expenseQuery, incomeQuery])
-    if (expenseRes.error) return NextResponse.json({ error: expenseRes.error.message }, { status: 500 })
-    if (incomeRes.error) return NextResponse.json({ error: incomeRes.error.message }, { status: 500 })
+    const expenseConditions: string[] = []
+    const expenseParams: unknown[] = []
+    const incomeConditions: string[] = []
+    const incomeParams: unknown[] = []
 
-    const expenses = expenseRes.data || []
-    const incomes = incomeRes.data || []
+    if (!isSuperAdmin) {
+        expenseParams.push(auth.employee.id); expenseConditions.push(`submitted_by = $${expenseParams.length}`)
+        incomeParams.push(auth.employee.id); incomeConditions.push(`added_by = $${incomeParams.length}`)
+    }
+    if (start) {
+        expenseParams.push(start); expenseConditions.push(`date >= $${expenseParams.length}`)
+        incomeParams.push(start); incomeConditions.push(`date >= $${incomeParams.length}`)
+    }
+    if (end) {
+        expenseParams.push(end); expenseConditions.push(`date <= $${expenseParams.length}`)
+        incomeParams.push(end); incomeConditions.push(`date <= $${incomeParams.length}`)
+    }
+
+    const [{ rows: expenses }, { rows: incomes }] = await Promise.all([
+        db.query(
+            `SELECT id, amount, category, date, submitted_by FROM expenses ${expenseConditions.length ? 'WHERE ' + expenseConditions.join(' AND ') : ''}`,
+            expenseParams
+        ),
+        db.query(
+            `SELECT id, amount, source, date, added_by FROM income ${incomeConditions.length ? 'WHERE ' + incomeConditions.join(' AND ') : ''}`,
+            incomeParams
+        ),
+    ])
 
     const totalExpense = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0)
     const totalIncome = incomes.reduce((s, i) => s + (Number(i.amount) || 0), 0)

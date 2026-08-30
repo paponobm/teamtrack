@@ -1,5 +1,4 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { createAdminClient } from '@/lib/supabase/admin'
 import { NextResponse } from 'next/server'
 
 // GET /api/attendance/absent
@@ -8,34 +7,32 @@ import { NextResponse } from 'next/server'
 export async function GET() {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
-
-    const adminSupabase = createAdminClient()
+    const db = auth.db
 
     const today = new Date().toISOString().split('T')[0]
     const nowMs = Date.now()
     const TWO_HOURS_MS = 2 * 60 * 60 * 1000
 
     // Get all active employees with their duty_start_time
-    const { data: employees } = await adminSupabase
-        .from('employees')
-        .select('id, name, employee_id, designation, avatar_url, duty_start_time')
-        .eq('is_active', true)
+    const { rows: employees } = await db.query(
+        `SELECT id, name, employee_id, designation, avatar_url, duty_start_time FROM employees WHERE is_active = true`
+    )
 
-    if (!employees?.length) return NextResponse.json([])
+    if (!employees.length) return NextResponse.json([])
 
     // Get today's attendance records
-    const { data: attendance } = await adminSupabase
-        .from('attendance')
-        .select('employee_id, clock_in, status')
-        .eq('date', today)
+    const { rows: attendance } = await db.query(
+        `SELECT employee_id, clock_in, status FROM attendance WHERE date = $1`,
+        [today]
+    )
 
     const attendedIds = new Set(
-        (attendance || [])
+        attendance
             .filter(a => a.clock_in || ['present', 'late', 'on_duty'].includes(a.status))
             .map(a => a.employee_id)
     )
     const onLeaveIds = new Set(
-        (attendance || [])
+        attendance
             .filter(a => ['leave', 'half_day'].includes(a.status))
             .map(a => a.employee_id)
     )

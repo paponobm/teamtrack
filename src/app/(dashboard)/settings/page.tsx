@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useLanguage } from '@/lib/LanguageContext'
-import { createClient } from '@/lib/supabase/client'
 import { IconMessageCircle, IconTarget, IconBell, IconBolt } from '@/components/icons/Icons'
 
 interface Role { id: string; name: string }
@@ -14,7 +13,6 @@ const item = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0, transiti
 
 export default function SettingsPage() {
     const { lang, setLang, t } = useLanguage()
-    const supabase = createClient()
 
     const [roles, setRoles] = useState<Role[]>([])
     const [departments, setDepartments] = useState<Department[]>([])
@@ -44,14 +42,12 @@ export default function SettingsPage() {
         if (Array.isArray(rolesData)) setRoles(rolesData)
         if (Array.isArray(deptsData)) setDepartments(deptsData)
 
-        const { data: { user: authUser } } = await supabase.auth.getUser()
-        if (authUser) {
-            const { data: emp } = await supabase
-                .from('employees')
-                .select('name')
-                .eq('user_id', authUser.id)
-                .single()
-            setUser({ email: authUser.email || '', name: emp?.name || authUser.email?.split('@')[0] || '' })
+        const meRes = await fetch('/api/auth/me')
+        if (meRes.ok) {
+            const me = await meRes.json()
+            if (!me.ghost && !me.deactivated) {
+                setUser({ email: me.email || '', name: me.name || me.email?.split('@')[0] || '' })
+            }
         }
 
         // Fetch feature toggles
@@ -118,10 +114,19 @@ export default function SettingsPage() {
     }
 
     const handlePasswordReset = async () => {
-        if (!user?.email) return
-        const { error } = await supabase.auth.resetPasswordForEmail(user.email)
-        if (!error) showMessage('Password reset email sent')
-        else showMessage('Error: ' + error.message)
+        const current_password = window.prompt('Enter your current password:')
+        if (!current_password) return
+        const new_password = window.prompt('Enter your new password (min 8 characters):')
+        if (!new_password) return
+
+        const res = await fetch('/api/auth/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ current_password, new_password }),
+        })
+        const d = await res.json()
+        if (res.ok) showMessage('Password changed successfully')
+        else showMessage('Error: ' + (d.error || 'Failed to change password'))
     }
 
     const toggleFeature = async (key: string, value: boolean) => {
@@ -225,7 +230,7 @@ export default function SettingsPage() {
                             <input className="input" value={user?.email || ''} disabled style={{ opacity: 0.6 }} />
                         </div>
                         <button className="btn btn-secondary btn-sm" onClick={handlePasswordReset} style={{ alignSelf: 'flex-start' }}>
-                            {lang === 'bn' ? 'পাসওয়ার্ড রিসেট করুন' : 'Reset Password'}
+                            {lang === 'bn' ? 'পাসওয়ার্ড পরিবর্তন করুন' : 'Change Password'}
                         </button>
                     </div>
                 </motion.div>

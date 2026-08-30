@@ -1,28 +1,27 @@
-// Creates (or re-provisions) a Super Admin account — meant for exactly the situation this was
-// written for: you've wiped the database (e.g. via 062_full_data_reset.sql or a manual purge)
-// and need a first admin to log in with again. Non-destructive: never deletes or wipes
-// anything, only creates/updates the one account you name. Safe to re-run — if the email
-// already has an auth user, its password is reset and it's (re)linked to the Super Admin role
-// instead of erroring out.
+// Creates (or re-provisions) a Super Admin account on Neon — same purpose and CLI shape as
+// before the Supabase → Neon migration, just backed by our own `users` table + bcrypt instead
+// of Supabase Auth. Non-destructive: never deletes or wipes anything, only creates/updates the
+// one account you name. Safe to re-run — if the email already has a user row, its password is
+// reset and it's (re)linked to the Super Admin role instead of erroring out.
 //
 // Usage:
 //   npm run create-super-admin -- <email> <password> [name] [employeeId]
-//
-// Example:
-//   npm run create-super-admin -- owner@company.com "Str0ng!Pass" "Jane Doe" ADM-001
 
-import { createClient } from '@supabase/supabase-js'
+import dns from 'dns'
+import pg from 'pg'
+import bcrypt from 'bcryptjs'
 import dotenv from 'dotenv'
-import ws from 'ws'
 
 dotenv.config({ path: '.env.local' })
-if (!process.env.NEXT_PUBLIC_SUPABASE_URL) dotenv.config({ path: '.env' })
+if (!process.env.DATABASE_URL) dotenv.config({ path: '.env' })
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+// This environment's DNS resolution can hang on Neon's IPv6-first "happy eyeballs" attempt
+// before falling back to IPv4 — forcing ipv4first avoids that multi-second timeout.
+dns.setDefaultResultOrder('ipv4first')
 
-if (!supabaseUrl || !supabaseServiceKey) {
-    console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY (checked .env.local then .env).')
+const DATABASE_URL = process.env.DATABASE_URL
+if (!DATABASE_URL) {
+    console.error('Missing DATABASE_URL in .env.local or .env.')
     process.exit(1)
 }
 
@@ -33,75 +32,72 @@ if (!email || !password) {
     process.exit(1)
 }
 if (password.length < 6) {
-    console.error('Password must be at least 6 characters (Supabase Auth minimum).')
+    console.error('Password must be at least 6 characters.')
     process.exit(1)
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-    realtime: { transport: ws },
-})
-
-async function main() {
-    const { data: role, error: roleError } = await supabase
-        .from('roles')
-        .select('id, name')
-        .eq('name', 'Super Admin')
-        .maybeSingle()
-
-    if (roleError || !role) {
-        console.error('Could not find the "Super Admin" role — has the roles table been seeded (see 001_initial_schema.sql)?', roleError?.message || '')
-        process.exit(1)
-    }
-
-    const { data: { users: existingUsers }, error: listError } = await supabase.auth.admin.listUsers({ perPage: 1000 })
-    if (listError) {
-        console.error('Error listing existing auth users:', listError.message)
-        process.exit(1)
-    }
-
-    let authUser = existingUsers.find(u => u.email === email)
-    if (authUser) {
-        const { data, error } = await supabase.auth.admin.updateUserById(authUser.id, { password, email_confirm: true })
-        if (error) {
-            console.error(`Failed to reset password for existing auth user ${email}:`, error.message)
-            process.exit(1)
-        }
-        authUser = data.user
-        console.log(`Auth user already existed for ${email} — password reset.`)
-    } else {
-        const { data, error } = await supabase.auth.admin.createUser({
-            email,
-            password,
-            email_confirm: true,
-        })
-        if (error) {
-            console.error(`Failed to create auth user for ${email}:`, error.message)
-            process.exit(1)
-        }
-        authUser = data.user
-        console.log(`Created new auth user for ${email}.`)
-    }
-
-    const { data: employee, error: upsertError } = await supabase
-        .from('employees')
-        .upsert({
-            user_id: authUser.id,
-            email,
-            name: name || 'Super Admin',
-            employee_id: employeeId || null,
-            role_id: role.id,
-            is_active: true,
-        }, { onConflict: 'email' })
-        .select('id, name, employee_id')
-        .single()
-
-    if (upsertError) {
-        console.error(`Failed to link ${email} to an employee record:`, upsertError.message)
-        process.exit(1)
-    }
-
-    console.log(`\n${email} is now Super Admin (employee "${employee.name}"${employee.employee_id ? `, ID ${employee.employee_id}` : ''}). Log in with the password you provided.`)
+async function connect() {
+    const url = new URL(DATABASE_URL)
+    const addresses = await dns.promises.resolve4(url.hostname)
+    const client = new pg.Client({
+        host: addresses[0],
+        port: Number(url.port) || 5432,
+        database: url.pathname.replace(/^\//, ''),
+        user: decodeURIComponent(url.username),
+        password: decodeURIComponent(url.password),
+        ssl: { rejectUnauthorized: false, servername: url.hostname },
+        connectionTimeoutMillis: 20000,
+    })
+    await client.connect()
+    return client
 }
 
-main()
+async function main() {
+    const client = await connect()
+
+    try {
+        const { rows: [role] } = await client.query(`SELECT id FROM roles WHERE name = 'Super Admin' LIMIT 1`)
+        if (!role) {
+            console.error('Could not find the "Super Admin" role — has the roles table been seeded (see 001_initial_schema.sql)?')
+            process.exit(1)
+        }
+
+        const passwordHash = await bcrypt.hash(password, 10)
+
+        const { rows: [user] } = await client.query(
+            `INSERT INTO users (email, password_hash)
+             VALUES ($1, $2)
+             ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = NOW()
+             RETURNING id`,
+            [email, passwordHash]
+        )
+
+        // employees' only unique constraint is the composite (email, employee_id) — and since
+        // Postgres never treats two NULLs as conflicting, ON CONFLICT can't target a plain
+        // email lookup reliably. Look the row up explicitly instead so re-runs stay idempotent.
+        const { rows: [existing] } = await client.query(`SELECT id FROM employees WHERE email = $1`, [email])
+
+        const employee = existing
+            ? (await client.query(
+                `UPDATE employees SET user_id = $1, name = $2, role_id = $3, is_active = true
+                 WHERE id = $4
+                 RETURNING id, name, employee_id`,
+                [user.id, name || 'Super Admin', role.id, existing.id]
+            )).rows[0]
+            : (await client.query(
+                `INSERT INTO employees (user_id, email, name, employee_id, role_id, is_active)
+                 VALUES ($1, $2, $3, $4, $5, true)
+                 RETURNING id, name, employee_id`,
+                [user.id, email, name || 'Super Admin', employeeId || null, role.id]
+            )).rows[0]
+
+        console.log(`\n${email} is now Super Admin (employee "${employee.name}"${employee.employee_id ? `, ID ${employee.employee_id}` : ''}). Log in with the password you provided.`)
+    } finally {
+        await client.end()
+    }
+}
+
+main().catch(err => {
+    console.error('Failed:', err.message)
+    process.exit(1)
+})

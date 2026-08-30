@@ -1,7 +1,6 @@
-import { requireAuth, isAuthed } from '@/lib/auth'
+import { requireAuth, isAuthed, awardPoints } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
 import { NextResponse } from 'next/server'
-import { awardPoints } from '@/lib/auth'
 
 // PATCH /api/work-log/[id] - update work entry (admin or owner of entry)
 export async function PATCH(
@@ -10,13 +9,14 @@ export async function PATCH(
 ) {
     const auth = await requireAuth(0) // Any authed user
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const { id } = await params
     const body = await request.json()
     const isAdmin = auth.employee.roleLevel <= 3
 
     // Fetch old entry (full row) to detect changes, status transitions and ownership
-    const { data: oldEntry } = await auth.supabase.from('work_entries').select('*').eq('id', id).single()
+    const { rows: [oldEntry] } = await db.query(`SELECT * FROM work_entries WHERE id = $1`, [id])
 
     if (!oldEntry) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
@@ -25,14 +25,19 @@ export async function PATCH(
         return NextResponse.json({ error: 'Unauthorized to edit this entry' }, { status: 403 })
     }
 
-    const { data, error } = await auth.supabase
-        .from('work_entries')
-        .update(body)
-        .eq('id', id)
-        .select(`*, employee:employees!employee_id(id, name, employee_id)`)
-        .single()
+    const keys = Object.keys(body)
+    if (keys.length === 0) return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    const { rows: [data] } = await db.query(
+        `WITH upd AS (
+            UPDATE work_entries SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *
+         )
+         SELECT w.*, json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id) AS employee
+         FROM upd w LEFT JOIN employees e ON e.id = w.employee_id`,
+        [id, ...keys.map(k => body[k])]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
     // Record a field-level diff so the entry's history shows exactly what changed (#7).
     const TRACKED_FIELDS = ['order_type', 'source', 'amount', 'suggested_amount', 'delivery_status', 'customer_name', 'customer_phone', 'product_details', 'business_name', 'quantity', 'notes', 'date', 'logistics', 'payment_gateway', 'transaction_id']
@@ -57,7 +62,7 @@ export async function PATCH(
         }
         const pts = pointMap[body.order_type || data.order_type || 'normal'] || 0
         if (pts > 0) {
-            await awardPoints(auth.supabase, data.employee_id, pts, 'work_log', data.id, `Order delivered (${body.order_type || data.order_type || 'normal'})`, auth.employee.id)
+            await awardPoints(db, data.employee_id, pts, 'work_log', data.id, `Order delivered (${body.order_type || data.order_type || 'normal'})`, auth.employee.id)
             awardedPoints = pts
         }
     }
@@ -74,8 +79,7 @@ export async function DELETE(
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
-    const { error } = await auth.supabase.from('work_entries').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await auth.db.query(`DELETE FROM work_entries WHERE id = $1`, [id])
     await logAudit(auth.employee.id, 'Deleted work log entry', 'work_log', id)
     return NextResponse.json({ message: 'Entry deleted' })
 }

@@ -11,17 +11,16 @@ export async function GET(request: Request) {
     const employeeId = searchParams.get('employee_id')
     if (!employeeId) return NextResponse.json({ error: 'employee_id is required' }, { status: 400 })
 
-    const { data, error } = await auth.supabase
-        .from('work_evaluations')
-        .select(`
-            id, period_start, period_end, total_assigned_points, total_earned_points, note, evaluated_at,
-            evaluator:employees!evaluated_by(id, name)
-        `)
-        .eq('employee_id', employeeId)
-        .order('evaluated_at', { ascending: false })
+    const { rows } = await auth.db.query(
+        `SELECT we.id, we.period_start, we.period_end, we.total_assigned_points, we.total_earned_points, we.note, we.evaluated_at,
+            json_build_object('id', ev.id, 'name', ev.name) AS evaluator
+         FROM work_evaluations we LEFT JOIN employees ev ON ev.id = we.evaluated_by
+         WHERE we.employee_id = $1
+         ORDER BY we.evaluated_at DESC`,
+        [employeeId]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json(data || [])
+    return NextResponse.json(rows)
 }
 
 // POST /api/work-comparison/evaluations - save an evaluation, score each work report,
@@ -29,8 +28,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
     const auth = await requireAuth(3) // Admin+ only
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const body = await request.json().catch(() => ({}))
     const { employee_id, period_start, period_end, total_assigned_points, note, items } = body
 
@@ -50,33 +49,24 @@ export async function POST(request: Request) {
 
     const totalEarnedPoints = cleanItems.reduce((sum, it) => sum + it.points, 0)
 
-    const { data: evaluation, error: evalErr } = await supabase
-        .from('work_evaluations')
-        .insert({
-            employee_id,
-            period_start,
-            period_end,
-            total_assigned_points: Math.max(0, Math.round(Number(total_assigned_points) || 0)),
-            total_earned_points: totalEarnedPoints,
-            note: note || null,
-            evaluated_by: auth.employee.id,
-        })
-        .select('id')
-        .single()
-
-    if (evalErr) return NextResponse.json({ error: evalErr.message }, { status: 500 })
+    const { rows: [evaluation] } = await db.query(
+        `INSERT INTO work_evaluations (employee_id, period_start, period_end, total_assigned_points, total_earned_points, note, evaluated_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+        [employee_id, period_start, period_end, Math.max(0, Math.round(Number(total_assigned_points) || 0)), totalEarnedPoints, note || null, auth.employee.id]
+    )
 
     if (cleanItems.length > 0) {
-        const { error: itemsErr } = await supabase
-            .from('work_evaluation_items')
-            .insert(cleanItems.map(it => ({ evaluation_id: evaluation.id, work_report_id: it.work_report_id, points: it.points })))
-        if (itemsErr) return NextResponse.json({ error: itemsErr.message }, { status: 500 })
+        await db.query(
+            `INSERT INTO work_evaluation_items (evaluation_id, work_report_id, points)
+             SELECT $1, * FROM UNNEST($2::uuid[], $3::int[])`,
+            [evaluation.id, cleanItems.map(it => it.work_report_id), cleanItems.map(it => it.points)]
+        )
     }
 
     // Additive only — awardPoints increments employees.total_points, it never sets/overwrites it.
     if (totalEarnedPoints > 0) {
         await awardPoints(
-            supabase,
+            db,
             employee_id,
             totalEarnedPoints,
             'work_evaluation',

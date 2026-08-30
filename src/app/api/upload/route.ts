@@ -1,12 +1,12 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
+import { saveUploadedFile, publicUrlFor } from '@/lib/localStorage'
 import { NextResponse } from 'next/server'
 
-// POST /api/upload - upload a file to Supabase Storage (requires auth)
+// POST /api/upload - upload a file to local disk (requires auth)
 export async function POST(request: Request) {
     const auth = await requireAuth(0) // Any employee
     if (!isAuthed(auth)) return auth
-
-    const supabase = auth.supabase
+    const db = auth.db
 
     const formData = await request.formData()
     const file = formData.get('file') as File | null
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'File size must be under 2MB' }, { status: 400 })
     }
 
-    // Only allow known bucket names to prevent arbitrary bucket creation
+    // Only allow known bucket names to prevent arbitrary directory creation
     const allowedBuckets = ['avatars', 'memories', 'attachments']
     if (!allowedBuckets.includes(bucket)) {
         return NextResponse.json({ error: 'Invalid storage bucket' }, { status: 400 })
@@ -48,33 +48,17 @@ export async function POST(request: Request) {
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
 
-    // Auto-create bucket if it doesn't exist
-    const { data: buckets } = await supabase.storage.listBuckets()
-    const bucketExists = buckets?.some(b => b.name === bucket)
-    if (!bucketExists) {
-        await supabase.storage.createBucket(bucket, { public: true })
+    try {
+        await saveUploadedFile(bucket, fileName, buffer)
+    } catch (err) {
+        return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed to save file' }, { status: 500 })
     }
 
-    const { error: uploadError } = await supabase.storage
-        .from(bucket)
-        .upload(fileName, buffer, {
-            contentType: file.type,
-            upsert: true,
-        })
-
-    if (uploadError) {
-        return NextResponse.json({ error: uploadError.message }, { status: 500 })
-    }
-
-    // Get public URL
-    const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(fileName)
+    const publicUrl = publicUrlFor(bucket, fileName)
 
     // If employee_id is provided, directly save avatar_url to the employee record
     if (employeeId && bucket === 'avatars') {
-        await supabase
-            .from('employees')
-            .update({ avatar_url: publicUrl })
-            .eq('id', employeeId)
+        await db.query(`UPDATE employees SET avatar_url = $1 WHERE id = $2`, [publicUrl, employeeId])
     }
 
     return NextResponse.json({ url: publicUrl }, { status: 201 })

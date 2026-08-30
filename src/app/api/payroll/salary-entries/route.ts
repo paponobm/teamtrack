@@ -20,8 +20,8 @@ const PAYMENT_METHODS = ['bKash', 'Rocket', 'Nagad', 'Bank', 'Cash'] as const
 export async function PUT(request: Request) {
     const auth = await requireAuth(2)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const body = await request.json()
     const { id } = body
     if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
@@ -31,7 +31,7 @@ export async function PUT(request: Request) {
     // not just hidden in the UI, since Paid triggers side effects (advance/product buy
     // settlement below) that don't have a matching "undo" on reversal.
     if (body.payment_status === 'Unpaid') {
-        const { data: existing } = await supabase.from('salary_entries').select('payment_status').eq('id', id).maybeSingle()
+        const { rows: [existing] } = await db.query(`SELECT payment_status FROM salary_entries WHERE id = $1`, [id])
         if (existing?.payment_status === 'Paid') {
             return NextResponse.json({ error: 'A Paid entry cannot be changed back to Unpaid' }, { status: 400 })
         }
@@ -75,17 +75,15 @@ export async function PUT(request: Request) {
 
     update.updated_by = auth.employee.id
 
-    const { data, error } = await supabase
-        .from('salary_entries')
-        .update(update)
-        .eq('id', id)
-        .select(`
-            id, employee_id, salary_sheet_id, expense_id, payment_date,
-            basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus, other_deduction
-        `)
-        .maybeSingle()
+    const keys = Object.keys(update)
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    const { rows: [data] } = await db.query(
+        `UPDATE salary_entries SET ${setClauses.join(', ')} WHERE id = $1
+         RETURNING id, employee_id, salary_sheet_id, expense_id, payment_date,
+             basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus, other_deduction`,
+        [id, ...keys.map(k => update[k])]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     if (!data) return NextResponse.json({ error: 'Salary entry not found' }, { status: 404 })
 
     // Marking the salary as Paid means that month's advance was recovered through this
@@ -95,7 +93,7 @@ export async function PUT(request: Request) {
     // resends payment_status:'Paid' once it's locked in), which is exactly what's wanted for
     // re-syncing the linked salary Expense below if extra_duty/performance_bonus changes.
     if (update.payment_status === 'Paid') {
-        const { data: sheet } = await supabase.from('salary_sheets').select('month').eq('id', data.salary_sheet_id).maybeSingle()
+        const { rows: [sheet] } = await db.query(`SELECT month FROM salary_sheets WHERE id = $1`, [data.salary_sheet_id])
         if (sheet) {
             const { start, end } = getMonthRangeFromString(sheet.month)
             // Settling here only updates the advance's own payment_status (employee repayment
@@ -105,26 +103,22 @@ export async function PUT(request: Request) {
             // in src/lib/advances.ts); employee repayment is a separate concern, surfaced as
             // "Receiving Status" wherever that expense is shown (see /api/expenses), never by
             // flipping the expense's own payment_status.
-            await supabase
-                .from('advances')
-                .update({ payment_status: 'Paid' })
-                .eq('employee_id', data.employee_id)
-                .eq('payment_status', 'Unpaid')
-                .gte('advance_date', start)
-                .lte('advance_date', end)
+            await db.query(
+                `UPDATE advances SET payment_status = 'Paid'
+                 WHERE employee_id = $1 AND payment_status = 'Unpaid' AND advance_date >= $2 AND advance_date <= $3`,
+                [data.employee_id, start, end]
+            )
 
             // Same settlement, mirrored for Product Buy — a separate deduction type/table
             // from Advance, so it's settled independently here. Product Buy no longer links
             // into Finance Hub Expenses (see src/lib/productBuys.ts), so this only updates the
             // product_buys row's own status, not a mirrored expense.
-            const { data: settledProductBuys } = await supabase
-                .from('product_buys')
-                .update({ payment_status: 'Paid' })
-                .eq('employee_id', data.employee_id)
-                .eq('payment_status', 'Unpaid')
-                .gte('purchase_date', start)
-                .lte('purchase_date', end)
-                .select('id, item, amount')
+            const { rows: settledProductBuys } = await db.query(
+                `UPDATE product_buys SET payment_status = 'Paid'
+                 WHERE employee_id = $1 AND payment_status = 'Unpaid' AND purchase_date >= $2 AND purchase_date <= $3
+                 RETURNING id, item, amount`,
+                [data.employee_id, start, end]
+            )
 
             // Recovering a Product Buy's cost through payroll is, from the company's side,
             // revenue from having sold that product to the employee — mirrored into Finance
@@ -132,17 +126,16 @@ export async function PUT(request: Request) {
             // Work Log advances mirror into income too (see
             // src/app/api/work-log/[id]/verify-advance/route.ts). product_buy_id (unique, see
             // migration 069_income_product_buy_link.sql) means a given Product Buy can never
-            // be mirrored twice, and .eq('payment_status', 'Unpaid') above already guarantees
+            // be mirrored twice, and the payment_status='Unpaid' filter above already guarantees
             // settledProductBuys only ever contains buys settled for the first time.
-            if (settledProductBuys && settledProductBuys.length > 0) {
-                await supabase.from('income').insert(settledProductBuys.map(pb => ({
-                    date: data.payment_date || end,
-                    description: `Product sale — ${pb.item || 'Product'}`,
-                    amount: pb.amount,
-                    source: 'Product Sell',
-                    product_buy_id: pb.id,
-                    added_by: auth.employee.id,
-                })))
+            if (settledProductBuys.length > 0) {
+                for (const pb of settledProductBuys) {
+                    await db.query(
+                        `INSERT INTO income (date, description, amount, source, product_buy_id, added_by)
+                         VALUES ($1, $2, $3, 'Product Sell', $4, $5)`,
+                        [data.payment_date || end, `Product sale — ${pb.item || 'Product'}`, pb.amount, pb.id, auth.employee.id]
+                    )
+                }
             }
 
             // Same again for Fines — Active, still-Unpaid fines count as "recovered through this
@@ -154,13 +147,11 @@ export async function PUT(request: Request) {
             // exact month. settled_month is stamped with the sheet's own month so
             // getFineTotalsForMonth still counts it for THIS month (and any earlier one it
             // rolled through) even though payment_status flips to 'Paid' in this same request.
-            await supabase
-                .from('fines')
-                .update({ payment_status: 'Paid', settled_month: sheet.month })
-                .eq('member_id', data.employee_id)
-                .eq('status', 'Active')
-                .eq('payment_status', 'Unpaid')
-                .lte('created_at', `${end}T23:59:59`)
+            await db.query(
+                `UPDATE fines SET payment_status = 'Paid', settled_month = $1
+                 WHERE member_id = $2 AND status = 'Active' AND payment_status = 'Unpaid' AND created_at <= $3`,
+                [sheet.month, data.employee_id, `${end}T23:59:59`]
+            )
 
             // The payout itself also becomes a Finance Hub Expense (category "Employee
             // Salary", amount = Payable Salary) — same live deduction lookups the Salary Sheet
@@ -168,11 +159,11 @@ export async function PUT(request: Request) {
             // the sheet shows for this entry.
             const employeeIds = [data.employee_id]
             const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails] = await Promise.all([
-                getFineTotalsForMonth(supabase, employeeIds, sheet.month),
-                getAdvanceDetailsForMonth(supabase, employeeIds, sheet.month),
-                getProductBuyDetailsForMonth(supabase, employeeIds, sheet.month),
-                getEmiLoanDetailsForMonth(supabase, employeeIds, sheet.month),
-                getProvidentFundDetailsForMonth(supabase, employeeIds, sheet.month),
+                getFineTotalsForMonth(db, employeeIds, sheet.month),
+                getAdvanceDetailsForMonth(db, employeeIds, sheet.month),
+                getProductBuyDetailsForMonth(db, employeeIds, sheet.month),
+                getEmiLoanDetailsForMonth(db, employeeIds, sheet.month),
+                getProvidentFundDetailsForMonth(db, employeeIds, sheet.month),
             ])
             const netPayable = computeNetPayable(
                 data,
@@ -183,7 +174,7 @@ export async function PUT(request: Request) {
                 providentFundDetails[data.employee_id]?.total || 0,
             )
 
-            const salaryExpenseId = await createOrSyncSalaryExpense(supabase, {
+            const salaryExpenseId = await createOrSyncSalaryExpense(db, {
                 expenseId: data.expense_id,
                 employeeId: data.employee_id,
                 month: sheet.month,
@@ -192,7 +183,7 @@ export async function PUT(request: Request) {
                 submittedBy: auth.employee.id,
             })
             if (salaryExpenseId && salaryExpenseId !== data.expense_id) {
-                await supabase.from('salary_entries').update({ expense_id: salaryExpenseId }).eq('id', id)
+                await db.query(`UPDATE salary_entries SET expense_id = $1 WHERE id = $2`, [salaryExpenseId, id])
             }
         }
     }

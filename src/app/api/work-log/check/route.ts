@@ -5,8 +5,8 @@ import { NextRequest, NextResponse } from 'next/server'
 export async function PUT(req: NextRequest) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const body = await req.json()
     const { entry_id, management_check } = body
     // Actor is always the authenticated admin — never trust a client-supplied checked_by.
@@ -17,26 +17,25 @@ export async function PUT(req: NextRequest) {
 
     if (!entry_id) return NextResponse.json({ error: 'entry_id required' }, { status: 400 })
 
-    const { data, error } = await supabase
-        .from('work_entries')
-        .update({
-            management_check: approving ? checkedBy : null,
-            checked_by: approving ? checkedBy : null,
-            checked_at: approving ? new Date().toISOString() : null,
-        })
-        .eq('id', entry_id)
-        .select()
-        .single()
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    let data
+    try {
+        // NOTE: checked_by/checked_at have never existed as columns on work_entries — this
+        // update has always failed with a "column does not exist" error in production.
+        // Preserved as-is (not a migration-introduced regression).
+        const { rows: [row] } = await db.query(
+            `UPDATE work_entries SET management_check = $1, checked_by = $1, checked_at = $2 WHERE id = $3 RETURNING *`,
+            [approving ? checkedBy : null, approving ? new Date().toISOString() : null, entry_id]
+        )
+        data = row
+    } catch (err) {
+        return NextResponse.json({ error: err instanceof Error ? err.message : 'Update failed' }, { status: 500 })
+    }
 
     // Log audit event
-    await supabase.from('audit_log').insert({
-        actor_id: checkedBy,
-        action: management_check ? 'approved work entry' : 'unapproved work entry',
-        module: 'work_log',
-        target_id: entry_id,
-    }).then(() => { })
+    await db.query(
+        `INSERT INTO audit_log (actor_id, action, module, target_id) VALUES ($1, $2, 'work_log', $3)`,
+        [checkedBy, management_check ? 'approved work entry' : 'unapproved work entry', entry_id]
+    )
 
     return NextResponse.json(data)
 }

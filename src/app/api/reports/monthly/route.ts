@@ -5,26 +5,25 @@ import { NextRequest, NextResponse } from 'next/server'
 export async function GET(req: NextRequest) {
     const auth = await requireAuth(3) // Admin+
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const month = req.nextUrl.searchParams.get('month') || new Date().toISOString().slice(0, 7)
     const monthStart = month + '-01'
     const monthEnd = new Date(parseInt(month.split('-')[0]), parseInt(month.split('-')[1]), 0).toISOString().split('T')[0]
 
-    const [employees, workEntries, pointTx, attendanceData] = await Promise.all([
-        supabase.from('employees').select('id, name, employee_id, avatar_url, total_points, department:departments(name)').eq('is_active', true).order('name'),
-        supabase.from('work_entries').select('employee_id, amount, suggested_amount, delivery_status').gte('date', monthStart).lte('date', monthEnd),
+    const [{ rows: employees }, { rows: work }, { rows: pts }, { rows: att }] = await Promise.all([
+        db.query(
+            `SELECT e.id, e.name, e.employee_id, e.avatar_url, e.total_points, json_build_object('name', d.name) AS department
+             FROM employees e LEFT JOIN departments d ON d.id = e.department_id
+             WHERE e.is_active = true ORDER BY e.name`
+        ),
+        db.query(`SELECT employee_id, amount, suggested_amount, delivery_status FROM work_entries WHERE date >= $1 AND date <= $2`, [monthStart, monthEnd]),
         // Rank by points actually EARNED this month (delivered orders, tasks, etc.), from the ledger.
-        supabase.from('point_transactions').select('employee_id, points').gte('created_at', monthStart + 'T00:00:00').lte('created_at', monthEnd + 'T23:59:59'),
-        supabase.from('attendance').select('employee_id, status').gte('date', monthStart).lte('date', monthEnd),
+        db.query(`SELECT employee_id, points FROM point_transactions WHERE created_at >= $1 AND created_at <= $2`, [monthStart + 'T00:00:00', monthEnd + 'T23:59:59']),
+        db.query(`SELECT employee_id, status FROM attendance WHERE date >= $1 AND date <= $2`, [monthStart, monthEnd]),
     ])
 
-    const work = workEntries.data || []
-    const pts = pointTx.data || []
-    const att = attendanceData.data || []
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const report = (employees.data || []).map((emp: any) => {
+    const report = employees.map(emp => {
         const empWork = work.filter(w => w.employee_id === emp.id)
         const empPts = pts.filter(p => p.employee_id === emp.id)
         const empAtt = att.filter(a => a.employee_id === emp.id)
@@ -42,26 +41,23 @@ export async function GET(req: NextRequest) {
         const totalDays = empAtt.length || 1
         const attendanceRate = Math.round((presentDays / totalDays) * 100)
 
-        const deptName = Array.isArray(emp.department) ? emp.department[0]?.name : emp.department?.name
-
         return {
             id: emp.id, name: emp.name, employeeId: emp.employee_id,
-            department: deptName || '-', avatar_url: emp.avatar_url || null,
+            department: emp.department?.name || '-', avatar_url: emp.avatar_url || null,
             totalOrders, totalAmount, delivered, cancelled,
             deliveryRate, cancelRate, totalPoints, lifetimePoints, attendanceRate, presentDays,
         }
     })
 
     // Rank by points earned this month; tiebreak by order amount so equal-points rows aren't alphabetical.
-    report.sort((a: { totalPoints: number; totalAmount: number }, b: { totalPoints: number; totalAmount: number }) =>
-        b.totalPoints - a.totalPoints || b.totalAmount - a.totalAmount)
+    report.sort((a, b) => b.totalPoints - a.totalPoints || b.totalAmount - a.totalAmount)
 
     const teamTotals = {
-        totalOrders: report.reduce((s: number, r: { totalOrders: number }) => s + r.totalOrders, 0),
-        totalAmount: report.reduce((s: number, r: { totalAmount: number }) => s + r.totalAmount, 0),
-        totalPoints: report.reduce((s: number, r: { totalPoints: number }) => s + r.totalPoints, 0),
-        avgDeliveryRate: report.length > 0 ? Math.round(report.reduce((s: number, r: { deliveryRate: number }) => s + r.deliveryRate, 0) / report.length) : 0,
-        avgAttendance: report.length > 0 ? Math.round(report.reduce((s: number, r: { attendanceRate: number }) => s + r.attendanceRate, 0) / report.length) : 0,
+        totalOrders: report.reduce((s, r) => s + r.totalOrders, 0),
+        totalAmount: report.reduce((s, r) => s + r.totalAmount, 0),
+        totalPoints: report.reduce((s, r) => s + r.totalPoints, 0),
+        avgDeliveryRate: report.length > 0 ? Math.round(report.reduce((s, r) => s + r.deliveryRate, 0) / report.length) : 0,
+        avgAttendance: report.length > 0 ? Math.round(report.reduce((s, r) => s + r.attendanceRate, 0) / report.length) : 0,
     }
 
     return NextResponse.json({ month, report, teamTotals })

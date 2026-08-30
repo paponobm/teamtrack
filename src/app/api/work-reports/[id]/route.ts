@@ -10,17 +10,14 @@ export async function PATCH(
 ) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const { id } = await params
     const isAdmin = auth.employee.roleLevel <= 3
 
-    const { data: existing, error: fetchErr } = await auth.supabase
-        .from('work_reports')
-        .select('employee_id, date')
-        .eq('id', id)
-        .single()
+    const { rows: [existing] } = await db.query(`SELECT employee_id, date FROM work_reports WHERE id = $1`, [id])
 
-    if (fetchErr || !existing) return NextResponse.json({ error: 'Report not found' }, { status: 404 })
+    if (!existing) return NextResponse.json({ error: 'Report not found' }, { status: 404 })
 
     const today = new Date().toISOString().split('T')[0]
     const isOwner = existing.employee_id === auth.employee.id
@@ -40,17 +37,20 @@ export async function PATCH(
     if (isAdmin && body.date !== undefined) updateFields.date = body.date
     updateFields.updated_at = new Date().toISOString()
 
-    const { data, error } = await auth.supabase
-        .from('work_reports')
-        .update(updateFields)
-        .eq('id', id)
-        .select(`
-            id, date, project, description, hours, progress, status, attachment_url, notes, created_at,
-            employee:employees(id, name, employee_id, avatar_url, department:departments(id, name))
-        `)
-        .single()
+    const keys = Object.keys(updateFields)
+    const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
+    const { rows: [data] } = await db.query(
+        `WITH upd AS (
+            UPDATE work_reports SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *
+         )
+         SELECT wr.id, wr.date, wr.project, wr.description, wr.hours, wr.progress, wr.status, wr.attachment_url, wr.notes, wr.created_at,
+            json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url,
+                'department', json_build_object('id', d.id, 'name', d.name)) AS employee
+         FROM upd wr LEFT JOIN employees e ON e.id = wr.employee_id LEFT JOIN departments d ON d.id = e.department_id`,
+        [id, ...keys.map(k => updateFields[k])]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!data) return NextResponse.json({ error: 'Report not found' }, { status: 404 })
 
     await logAudit(auth.employee.id, `Updated a daily work report for ${data.project}`, 'work_reports', id)
 
@@ -64,32 +64,25 @@ export async function DELETE(
 ) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
     const { id } = await params
 
-    const { data: report, error: fetchErr } = await auth.supabase
-        .from('work_reports')
-        .select('employee_id, project')
-        .eq('id', id)
-        .single()
-    if (fetchErr || !report) return NextResponse.json({ error: 'Report not found' }, { status: 404 })
+    const { rows: [report] } = await db.query(`SELECT employee_id, project FROM work_reports WHERE id = $1`, [id])
+    if (!report) return NextResponse.json({ error: 'Report not found' }, { status: 404 })
 
     // If this report was already scored via Work Comparison, reverse exactly the points
     // it was awarded — total_points and point_transactions history stay accurate instead
     // of keeping points for a report that no longer exists. work_evaluation_items rows
     // themselves cascade-delete with the report, so read them before deleting.
-    const { data: scoredItems } = await auth.supabase
-        .from('work_evaluation_items')
-        .select('points')
-        .eq('work_report_id', id)
-    const pointsToReverse = (scoredItems || []).reduce((sum, it) => sum + (it.points || 0), 0)
+    const { rows: scoredItems } = await db.query(`SELECT points FROM work_evaluation_items WHERE work_report_id = $1`, [id])
+    const pointsToReverse = scoredItems.reduce((sum, it) => sum + (it.points || 0), 0)
 
-    const { error } = await auth.supabase.from('work_reports').delete().eq('id', id)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await db.query(`DELETE FROM work_reports WHERE id = $1`, [id])
 
     if (pointsToReverse > 0) {
         await awardPoints(
-            auth.supabase,
+            db,
             report.employee_id,
             -pointsToReverse,
             'work_evaluation_reversal',

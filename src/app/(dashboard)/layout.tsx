@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import Sidebar from '@/components/layout/Sidebar'
 import Header from '@/components/layout/Header'
 import FloatingCalculator from '@/components/layout/FloatingCalculator'
-import { createClient } from '@/lib/supabase/client'
 import { LanguageProvider } from '@/lib/LanguageContext'
 import { ToastProvider } from '@/lib/ToastContext'
 import { PermissionsProvider } from '@/lib/PermissionsContext'
@@ -21,8 +20,6 @@ export default function DashboardLayout({
     const [authChecked, setAuthChecked] = useState(false)
 
     useEffect(() => {
-        const supabase = createClient()
-
         // Load sidebar collapsed state
         try {
             const saved = localStorage.getItem('tt_sidebar_collapsed')
@@ -37,33 +34,29 @@ export default function DashboardLayout({
         window.addEventListener('sidebar-toggle', handleSidebarToggle)
 
         const getUser = async () => {
-            const { data: { user: authUser } } = await supabase.auth.getUser()
-            if (authUser) {
-                const { data: employee } = await supabase
-                    .from('employees')
-                    .select('name, avatar_url, is_active, role:roles(name)')
-                    .eq('user_id', authUser.id)
-                    .single()
+            const res = await fetch('/api/auth/me')
+            if (res.ok) {
+                const data = await res.json()
 
-                if (!employee) {
-                    // Ghost User detected: auth exists but no employee record
+                if (data.ghost) {
+                    // Ghost User detected: session exists but no employee record
                     setGhostUser(true)
                     setAuthChecked(true)
                     return
                 }
 
                 // Account deactivated while logged in — sign out and bounce to login.
-                if (employee.is_active === false) {
-                    await supabase.auth.signOut()
+                if (data.deactivated) {
+                    await fetch('/api/auth/logout', { method: 'POST' })
                     window.location.href = '/login?deactivated=1'
                     return
                 }
 
                 setUser({
-                    name: employee?.name || authUser.email?.split('@')[0] || 'User',
-                    role: (employee?.role as unknown as { name: string })?.name || 'Member',
-                    email: authUser.email || '',
-                    avatar_url: employee?.avatar_url || null,
+                    name: data.name,
+                    role: data.role,
+                    email: data.email,
+                    avatar_url: data.avatar_url,
                 })
             }
             setAuthChecked(true)
@@ -143,8 +136,7 @@ export default function DashboardLayout({
     }, [])
 
     const handleLogout = async () => {
-        const supabase = createClient()
-        await supabase.auth.signOut()
+        await fetch('/api/auth/logout', { method: 'POST' })
         window.location.href = '/login'
     }
 

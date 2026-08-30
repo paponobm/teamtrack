@@ -1,34 +1,36 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { NextResponse } from 'next/server'
 
+const PB_SELECT = `p.id, p.employee_id, p.amount, p.product_price, p.discount_price, p.purchase_date, p.item, p.note, p.payment_status, p.expense_id, p.created_at,
+    json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url) AS employee,
+    json_build_object('id', c.id, 'name', c.name) AS created_by_employee`
+const PB_JOINS = `LEFT JOIN employees e ON e.id = p.employee_id LEFT JOIN employees c ON c.id = p.created_by`
+
 // GET /api/product-buys?start_date=&end_date= — list product-buy records, optionally
 // date-filtered (Admin+). A separate table/endpoint from /api/advances — Product Buy and
 // Advance are independent deduction types, never merged.
 export async function GET(request: Request) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
 
-    let query = supabase
-        .from('product_buys')
-        .select(`
-            id, employee_id, amount, product_price, discount_price, purchase_date, item, note, payment_status, expense_id, created_at,
-            employee:employees!employee_id(id, name, employee_id, avatar_url),
-            created_by_employee:employees!created_by(id, name)
-        `)
-        .order('purchase_date', { ascending: false })
+    const conditions: string[] = []
+    const params: unknown[] = []
+    if (startDate) { params.push(startDate); conditions.push(`p.purchase_date >= $${params.length}`) }
+    if (endDate) { params.push(endDate); conditions.push(`p.purchase_date <= $${params.length}`) }
 
-    if (startDate) query = query.gte('purchase_date', startDate)
-    if (endDate) query = query.lte('purchase_date', endDate)
+    const { rows: productBuys } = await db.query(
+        `SELECT ${PB_SELECT} FROM product_buys p ${PB_JOINS}
+         ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+         ORDER BY p.purchase_date DESC`,
+        params
+    )
 
-    const { data, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    return NextResponse.json({ productBuys: data || [] })
+    return NextResponse.json({ productBuys })
 }
 
 // POST /api/product-buys — create a new product-buy record (Admin+). The form collects
@@ -39,8 +41,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
     const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const body = await request.json()
     const { employee_id, product_price, discount_price, purchase_date, item, note, payment_status } = body
 
@@ -70,35 +72,16 @@ export async function POST(request: Request) {
     const finalPaymentStatus: 'Paid' | 'Unpaid' = payment_status || 'Unpaid'
     const numAmount = numProductPrice - numDiscountPrice
 
-    const { data: inserted, error } = await supabase
-        .from('product_buys')
-        .insert({
-            employee_id,
-            amount: numAmount,
-            product_price: numProductPrice,
-            discount_price: numDiscountPrice,
-            purchase_date,
-            item: item || null,
-            note: note || null,
-            payment_status: finalPaymentStatus,
-            created_by: auth.employee.id,
-        })
-        .select('id')
-        .single()
+    const { rows: [inserted] } = await db.query(
+        `INSERT INTO product_buys (employee_id, amount, product_price, discount_price, purchase_date, item, note, payment_status, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+        [employee_id, numAmount, numProductPrice, numDiscountPrice, purchase_date, item || null, note || null, finalPaymentStatus, auth.employee.id]
+    )
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    const { data, error: fetchError } = await supabase
-        .from('product_buys')
-        .select(`
-            id, employee_id, amount, product_price, discount_price, purchase_date, item, note, payment_status, expense_id, created_at,
-            employee:employees!employee_id(id, name, employee_id, avatar_url),
-            created_by_employee:employees!created_by(id, name)
-        `)
-        .eq('id', inserted.id)
-        .single()
-
-    if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 })
+    const { rows: [data] } = await db.query(
+        `SELECT ${PB_SELECT} FROM product_buys p ${PB_JOINS} WHERE p.id = $1`,
+        [inserted.id]
+    )
 
     return NextResponse.json({ productBuy: data }, { status: 201 })
 }

@@ -8,39 +8,27 @@ export async function GET(request: Request) {
     const auth = await requireAuth(3) // Admin+
     if (!isAuthed(auth)) return auth
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const tab = searchParams.get('tab') || 'pending'
 
-    let query = supabase
-        .from('leave_records')
-        .select(`
-            *,
-            employee:employees!employee_id(id, name, avatar_url, designation)
-        `)
-        
-    if (tab === 'history') {
-        query = query.neq('status', 'pending')
-    } else {
-        query = query.eq('status', 'pending')
-    }
-        
-    const { data, error } = await query.order('created_at', { ascending: false })
+    const { rows } = await auth.db.query(
+        `SELECT lr.*,
+            json_build_object('id', e.id, 'name', e.name, 'avatar_url', e.avatar_url, 'designation', e.designation) AS employee
+         FROM leave_records lr
+         LEFT JOIN employees e ON e.id = lr.employee_id
+         WHERE lr.status ${tab === 'history' ? '!=' : '='} 'pending'
+         ORDER BY lr.created_at DESC`
+    )
 
-    if (error) {
-        console.error("[Leaves Admin API] Query Error:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    return NextResponse.json({ records: data || [] })
+    return NextResponse.json({ records: rows })
 }
 
 // POST /api/leaves/admin - approve/reject leave
 export async function POST(request: Request) {
     const auth = await requireAuth(3) // Admin+
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const body = await request.json()
     const { record_ids, action, rejection_reason } = body // action: 'approve' | 'reject'
 
@@ -55,57 +43,50 @@ export async function POST(request: Request) {
     // Safety guard: Admins cannot approve/reject their own leaves
     const isSuperAdmin = auth.employee.roleLevel <= 2
     if (!isSuperAdmin) {
-        const { data: recordsToCheck } = await supabase
-            .from('leave_records')
-            .select('employee_id')
-            .in('id', record_ids)
-            
-        const attemptingSelfApproval = recordsToCheck?.some(r => r.employee_id === auth.employee.id)
+        const { rows: recordsToCheck } = await db.query(
+            `SELECT employee_id FROM leave_records WHERE id = ANY($1)`,
+            [record_ids]
+        )
+        const attemptingSelfApproval = recordsToCheck.some(r => r.employee_id === auth.employee.id)
         if (attemptingSelfApproval) {
             return NextResponse.json({ error: 'Admins cannot approve or reject their own leave requests' }, { status: 403 })
         }
     }
 
-    // Update leave_records
-    const updatePayload: any = {
-        status: action === 'approve' ? 'approved' : 'rejected',
-        approved_by: auth.employee.id
-    }
-    
-    if (action === 'reject' && rejection_reason) {
-        updatePayload.rejection_reason = rejection_reason
-    }
-
-    const { error: updError } = await supabase
-        .from('leave_records')
-        .update(updatePayload)
-        .in('id', record_ids)
-
-    if (updError) {
-        return NextResponse.json({ error: updError.message }, { status: 500 })
+    try {
+        // Update leave_records
+        if (action === 'reject' && rejection_reason) {
+            await db.query(
+                `UPDATE leave_records SET status = 'rejected', approved_by = $1, rejection_reason = $2 WHERE id = ANY($3)`,
+                [auth.employee.id, rejection_reason, record_ids]
+            )
+        } else {
+            await db.query(
+                `UPDATE leave_records SET status = $1, approved_by = $2 WHERE id = ANY($3)`,
+                [action === 'approve' ? 'approved' : 'rejected', auth.employee.id, record_ids]
+            )
+        }
+    } catch (err) {
+        return NextResponse.json({ error: err instanceof Error ? err.message : 'Update failed' }, { status: 500 })
     }
 
     // If approved, upsert attendance records as 'leave'
     if (action === 'approve') {
-        const { data: leaves } = await supabase
-            .from('leave_records')
-            .select('employee_id, leave_date')
-            .in('id', record_ids)
+        const { rows: leaves } = await db.query(
+            `SELECT employee_id, leave_date FROM leave_records WHERE id = ANY($1)`,
+            [record_ids]
+        )
 
-        if (leaves && leaves.length > 0) {
-            const attendanceInserts = leaves.map(leave => ({
-                employee_id: leave.employee_id,
-                date: leave.leave_date,
-                status: 'leave',
-                notes: 'Approved Leave'
-            }))
-
-            const { error: attError } = await supabase
-                .from('attendance')
-                .upsert(attendanceInserts, { onConflict: 'employee_id,date' })
-
-            if (attError) {
-                console.error('Failed to sync attendance for leaves', attError)
+        if (leaves.length > 0) {
+            try {
+                await db.query(
+                    `INSERT INTO attendance (employee_id, date, status, notes)
+                     SELECT employee_id, leave_date, 'leave', 'Approved Leave' FROM UNNEST($1::uuid[], $2::date[]) AS t(employee_id, leave_date)
+                     ON CONFLICT (employee_id, date) DO UPDATE SET status = EXCLUDED.status, notes = EXCLUDED.notes`,
+                    [leaves.map(l => l.employee_id), leaves.map(l => l.leave_date)]
+                )
+            } catch (err) {
+                console.error('Failed to sync attendance for leaves', err)
                 // We don't fail the request here, but log it
             }
         }

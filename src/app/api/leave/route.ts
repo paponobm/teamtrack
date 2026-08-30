@@ -5,8 +5,8 @@ import { NextResponse } from 'next/server'
 export async function POST(request: Request) {
     const auth = await requireAuth(3) // Admin+ to create leave
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const body = await request.json()
     const { employee_id, date, reason, auto_notice } = body
 
@@ -15,32 +15,25 @@ export async function POST(request: Request) {
     }
 
     // Get employee name for notice
-    const { data: emp } = await supabase
-        .from('employees')
-        .select('id, name, designation')
-        .eq('id', employee_id)
-        .single()
+    const { rows: [emp] } = await db.query(
+        `SELECT id, name, designation FROM employees WHERE id = $1`,
+        [employee_id]
+    )
 
     if (!emp) return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
 
     // Create leave record
     let leaveRecord = null
-    const { data, error } = await supabase
-        .from('leave_records')
-        .insert({
-            employee_id,
-            leave_date: date,
-            reason: reason || 'Personal',
-            status: 'approved',
-        })
-        .select()
-        .single()
-
-    if (error) {
-        console.error('Leave record insert failed:', error.message)
-        // If table doesn't exist, still create the notice
-    } else {
+    try {
+        const { rows: [data] } = await db.query(
+            `INSERT INTO leave_records (employee_id, leave_date, reason, status)
+             VALUES ($1, $2, $3, 'approved') RETURNING *`,
+            [employee_id, date, reason || 'Personal']
+        )
         leaveRecord = data
+    } catch (err) {
+        console.error('Leave record insert failed:', err instanceof Error ? err.message : err)
+        // If table doesn't exist, still create the notice
     }
 
     // Auto-create noticeboard notice
@@ -51,15 +44,16 @@ export async function POST(request: Request) {
 
         const noticeContent = `${emp.name}${emp.designation ? ` (${emp.designation})` : ''} is on leave on ${dateFormatted}. Reason: ${reason || 'Personal'}.`
 
-        await supabase.from('notices').insert({
-            title: `🏠 ${emp.name} - On Leave`,
-            content: noticeContent,
-            type: 'announcement',
-            priority: 'normal',
-            is_pinned: false,
-            created_by: auth.employee.id,
-            expires_at: new Date(new Date(date).getTime() + 24 * 60 * 60 * 1000).toISOString(),
-        })
+        await db.query(
+            `INSERT INTO notices (title, content, type, priority, is_pinned, created_by, expires_at)
+             VALUES ($1, $2, 'announcement', 'normal', false, $3, $4)`,
+            [
+                `🏠 ${emp.name} - On Leave`,
+                noticeContent,
+                auth.employee.id,
+                new Date(new Date(date).getTime() + 24 * 60 * 60 * 1000).toISOString(),
+            ]
+        )
     }
 
     return NextResponse.json(leaveRecord || { success: true, employee_id, date }, { status: 201 })
@@ -69,23 +63,22 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
+    const db = auth.db
 
-    const supabase = auth.supabase
     const { searchParams } = new URL(request.url)
     const isAdmin = auth.employee.roleLevel <= 3
     const empId = searchParams.get('employee_id')
     const month = searchParams.get('month')
 
-    let query = supabase
-        .from('leave_records')
-        .select('*, employee:employees!employee_id(id, name, designation)')
-        .order('leave_date', { ascending: false })
+    const conditions: string[] = []
+    const params: unknown[] = []
 
-    // Members only see their own
     if (!isAdmin) {
-        query = query.eq('employee_id', auth.employee.id)
+        params.push(auth.employee.id)
+        conditions.push(`lr.employee_id = $${params.length}`)
     } else if (empId) {
-        query = query.eq('employee_id', empId)
+        params.push(empId)
+        conditions.push(`lr.employee_id = $${params.length}`)
     }
 
     if (month) {
@@ -94,11 +87,21 @@ export async function GET(request: Request) {
         d.setMonth(d.getMonth() + 1)
         d.setDate(0)
         const end = d.toISOString().split('T')[0]
-        query = query.gte('leave_date', start).lte('leave_date', end)
+        params.push(start)
+        conditions.push(`lr.leave_date >= $${params.length}`)
+        params.push(end)
+        conditions.push(`lr.leave_date <= $${params.length}`)
     }
 
-    const { data, error } = await query.limit(100)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { rows } = await db.query(
+        `SELECT lr.*, json_build_object('id', e.id, 'name', e.name, 'designation', e.designation) AS employee
+         FROM leave_records lr
+         LEFT JOIN employees e ON e.id = lr.employee_id
+         ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+         ORDER BY lr.leave_date DESC
+         LIMIT 100`,
+        params
+    )
 
-    return NextResponse.json(data || [])
+    return NextResponse.json(rows)
 }
