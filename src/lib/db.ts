@@ -1,8 +1,9 @@
 import dns from 'dns'
 import pg from 'pg'
 
-// This environment's DNS resolution can hang on Neon's IPv6-first "happy eyeballs" attempt
-// before falling back to IPv4 — forcing ipv4first avoids that multi-second timeout/ETIMEDOUT.
+// A flaky-IPv6-route safeguard, not a network call — this only changes the order Node tries
+// address families in when it does resolve a hostname later, so it's safe to run unconditionally
+// at import time.
 dns.setDefaultResultOrder('ipv4first')
 
 // node-postgres returns NUMERIC/DECIMAL columns as strings by default (e.g. "10000.00") to
@@ -26,17 +27,16 @@ declare global {
     var __teamtrackPgPool: pg.Pool | undefined
 }
 
-// Some environments hang (ETIMEDOUT) resolving Neon hostnames via IPv6-first "happy eyeballs"
-// even with ipv4first set — resolving the A record ourselves and dialing that IP directly is
-// the reliable fix. `servername` keeps TLS SNI pointed at the real hostname so Neon's pooler
-// proxy still routes to the correct backend.
-const resolvedIp = (await dns.promises.resolve4(connectionUrl.hostname))[0]
-
-// Reused across hot-reloads in dev so we don't leak a new pool per file-save.
+// Deliberately no DNS resolution (or any other network I/O) at module scope — importing this
+// file happens during `next build`'s page-data-collection step too, not just at request time,
+// so anything awaited here runs during the build itself. `pg.Pool` doesn't connect until the
+// first query, so construction here is synchronous and safe regardless of whether the database
+// is even reachable yet. `servername` keeps TLS SNI pointed at the real hostname (needed for
+// Neon's pooler to route correctly) even though `host` is also the hostname here.
 export const pool: pg.Pool =
     global.__teamtrackPgPool ??
     new pg.Pool({
-        host: resolvedIp,
+        host: connectionUrl.hostname,
         port: Number(connectionUrl.port) || 5432,
         database: connectionUrl.pathname.replace(/^\//, ''),
         user: decodeURIComponent(connectionUrl.username),

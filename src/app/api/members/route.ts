@@ -118,7 +118,7 @@ export async function POST(request: Request) {
              LEFT JOIN roles r ON r.id = ins.role_id
              LEFT JOIN departments d ON d.id = ins.department_id`,
             [
-                userId, empId, name, email, designation, address, nid_no, blood_group,
+                userId, empId || null, name, email, designation, address, nid_no, blood_group,
                 personal_contact, whatsapp_number, family_contact_1, family_contact_2,
                 department_id || null, role_id || null, joining_date || null, gender || null, date_of_birth || null,
                 duty_start_time || null, duty_end_time || null, cv_url || null, avatar_url || null,
