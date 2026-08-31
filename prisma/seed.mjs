@@ -10,18 +10,23 @@ import dotenv from 'dotenv'
 dotenv.config({ path: '.env.local' })
 if (!process.env.DATABASE_URL) dotenv.config({ path: '.env' })
 
+// A flaky-IPv6-route safeguard, not a network call — this only affects the order Node tries
+// address families in when it resolves a hostname later.
 dns.setDefaultResultOrder('ipv4first')
 
 async function connect() {
     const url = new URL(process.env.DATABASE_URL)
-    const addr = (await dns.promises.resolve4(url.hostname))[0]
+    // Only ask for SSL when the connection string actually requests it (Neon does via
+    // ?sslmode=require; a local/self-hosted Postgres like 127.0.0.1 typically doesn't have SSL
+    // configured at all) — forcing it unconditionally would break local setups.
+    const sslMode = url.searchParams.get('sslmode')
     const client = new pg.Client({
-        host: addr,
+        host: url.hostname,
         port: Number(url.port) || 5432,
         database: url.pathname.replace(/^\//, ''),
         user: decodeURIComponent(url.username),
         password: decodeURIComponent(url.password),
-        ssl: { rejectUnauthorized: false, servername: url.hostname },
+        ssl: sslMode && sslMode !== 'disable' ? { rejectUnauthorized: false, servername: url.hostname } : undefined,
         connectionTimeoutMillis: 20000,
     })
     await client.connect()

@@ -38,14 +38,17 @@ if (password.length < 6) {
 
 async function connect() {
     const url = new URL(DATABASE_URL)
-    const addresses = await dns.promises.resolve4(url.hostname)
+    // Only ask for SSL when the connection string actually requests it (Neon does via
+    // ?sslmode=require; a local/self-hosted Postgres like 127.0.0.1 typically doesn't have SSL
+    // configured at all) — forcing it unconditionally would break local setups.
+    const sslMode = url.searchParams.get('sslmode')
     const client = new pg.Client({
-        host: addresses[0],
+        host: url.hostname,
         port: Number(url.port) || 5432,
         database: url.pathname.replace(/^\//, ''),
         user: decodeURIComponent(url.username),
         password: decodeURIComponent(url.password),
-        ssl: { rejectUnauthorized: false, servername: url.hostname },
+        ssl: sslMode && sslMode !== 'disable' ? { rejectUnauthorized: false, servername: url.hostname } : undefined,
         connectionTimeoutMillis: 20000,
     })
     await client.connect()
