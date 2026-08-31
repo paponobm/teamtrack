@@ -5,6 +5,15 @@ import pg from 'pg'
 // before falling back to IPv4 — forcing ipv4first avoids that multi-second timeout/ETIMEDOUT.
 dns.setDefaultResultOrder('ipv4first')
 
+// node-postgres returns NUMERIC/DECIMAL columns as strings by default (e.g. "10000.00") to
+// avoid silent precision loss — but every amount/percentage column in this schema is well
+// within safe JS float range, and the app already treats them as numbers everywhere (sums,
+// multiplication, toLocaleString). Left unparsed, raw values leak into forms/API responses
+// as strings with whatever trailing zeros Postgres stored (unlike Supabase's PostgREST layer,
+// which always serialized numeric columns as plain JSON numbers). Parsing them here once,
+// globally, matches the old behavior everywhere instead of patching each call site.
+pg.types.setTypeParser(1700, (val: string) => parseFloat(val)) // 1700 = NUMERIC/DECIMAL
+
 const DATABASE_URL = process.env.DATABASE_URL
 if (!DATABASE_URL) {
     throw new Error('Missing DATABASE_URL environment variable.')

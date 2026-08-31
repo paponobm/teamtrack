@@ -1,0 +1,985 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model activity_log {
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actor_id   String?    @db.Uuid
+  module     String
+  action     String
+  target_id  String     @db.Uuid
+  old_value  String?
+  new_value  String?
+  details    Json?
+  created_at DateTime?  @default(now()) @db.Timestamptz(6)
+  employees  employees? @relation(fields: [actor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([actor_id], map: "idx_activity_log_actor")
+  @@index([created_at(sort: Desc)], map: "idx_activity_log_created")
+  @@index([module, target_id], map: "idx_activity_log_module_target")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model advances {
+  id                                        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id                               String     @db.Uuid
+  amount                                    Decimal    @db.Decimal(10, 2)
+  advance_date                              DateTime   @db.Date
+  note                                      String?
+  payment_status                            String     @default("Unpaid")
+  created_by                                String?    @db.Uuid
+  created_at                                DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at                                DateTime?  @default(now()) @db.Timestamptz(6)
+  expense_id                                String?    @db.Uuid
+  employees_advances_created_byToemployees  employees? @relation("advances_created_byToemployees", fields: [created_by], references: [id], onUpdate: NoAction)
+  employees_advances_employee_idToemployees employees  @relation("advances_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  expenses                                  expenses?  @relation(fields: [expense_id], references: [id], onUpdate: NoAction)
+
+  @@index([advance_date], map: "idx_advances_date")
+  @@index([employee_id], map: "idx_advances_employee")
+}
+
+model app_settings {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  whatsapp_enabled     Boolean?  @default(false)
+  auto_assign_problems Boolean?  @default(true)
+  smart_notifications  Boolean?  @default(true)
+  quick_entry_default  Boolean?  @default(false)
+  created_at           DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime? @default(now()) @db.Timestamptz(6)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model attendance {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id       String?             @db.Uuid
+  date              DateTime            @db.Date
+  clock_in          DateTime?           @db.Timestamptz(6)
+  clock_out         DateTime?           @db.Timestamptz(6)
+  status            String?             @default("present")
+  notes             String?
+  employees         employees?          @relation(fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  attendance_breaks attendance_breaks[]
+
+  @@unique([employee_id, date])
+  @@index([employee_id, date], map: "idx_attendance_employee_date")
+}
+
+model attendance_breaks {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attendance_id String?     @db.Uuid
+  start_time    DateTime    @db.Timestamptz(6)
+  end_time      DateTime?   @db.Timestamptz(6)
+  created_at    DateTime?   @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime?   @default(now()) @db.Timestamptz(6)
+  attendance    attendance? @relation(fields: [attendance_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([attendance_id], map: "idx_attendance_breaks_attendance_id")
+}
+
+model audit_log {
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actor_id   String?    @db.Uuid
+  action     String
+  module     String?
+  target_id  String?    @db.Uuid
+  details    Json?      @default("{}")
+  created_at DateTime?  @default(now()) @db.Timestamptz(6)
+  old_value  String?
+  new_value  String?
+  employees  employees? @relation(fields: [actor_id], references: [id], onUpdate: NoAction)
+
+  @@index([actor_id], map: "idx_audit_log_actor")
+  @@index([module], map: "idx_audit_log_module")
+  @@index([target_id], map: "idx_audit_log_target")
+}
+
+model content_batches {
+  id               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type             String?    @default("video")
+  titles           String[]   @default([])
+  shoot_done       Boolean?   @default(false)
+  edit_done        Boolean?   @default(false)
+  upload_done      Boolean?   @default(false)
+  created_by       String?    @db.Uuid
+  created_at       DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime?  @default(now()) @db.Timestamptz(6)
+  uploaded_to      String[]   @default([])
+  category         String?
+  shoot_date       DateTime?  @db.Timestamptz(6)
+  edit_date        DateTime?  @db.Timestamptz(6)
+  upload_date      DateTime?  @db.Timestamptz(6)
+  metrics_likes    Int?       @default(0)
+  metrics_comments Int?       @default(0)
+  metrics_reach    Int?       @default(0)
+  rating           String?
+  employees        employees? @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+
+  @@index([created_by], map: "idx_content_batches_created_by")
+}
+
+model content_entries {
+  id                                                    String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  date                                                  DateTime?  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  video_shoot_count                                     Int?       @default(0)
+  video_info                                            String?
+  video_edited                                          Boolean?   @default(false)
+  video_uploaded                                        Boolean?   @default(false)
+  platform_fb1                                          Boolean?   @default(false)
+  platform_fb2                                          Boolean?   @default(false)
+  platform_instagram                                    Boolean?   @default(false)
+  platform_tiktok                                       Boolean?   @default(false)
+  platform_youtube                                      Boolean?   @default(false)
+  management_check                                      String?    @db.Uuid
+  note                                                  String?
+  created_by                                            String?    @db.Uuid
+  created_at                                            DateTime?  @default(now()) @db.Timestamptz(6)
+  employees_content_entries_created_byToemployees       employees? @relation("content_entries_created_byToemployees", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  employees_content_entries_management_checkToemployees employees? @relation("content_entries_management_checkToemployees", fields: [management_check], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model content_items {
+  id                                             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title                                          String
+  type                                           String?    @default("post")
+  platform                                       String?    @default("facebook")
+  status                                         String?    @default("draft")
+  assigned_to                                    String?    @db.Uuid
+  due_date                                       DateTime?  @db.Date
+  content_url                                    String?
+  description                                    String?
+  notes                                          String?
+  created_by                                     String?    @db.Uuid
+  created_at                                     DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at                                     DateTime?  @default(now()) @db.Timestamptz(6)
+  employees_content_items_assigned_toToemployees employees? @relation("content_items_assigned_toToemployees", fields: [assigned_to], references: [id], onUpdate: NoAction)
+  employees_content_items_created_byToemployees  employees? @relation("content_items_created_byToemployees", fields: [created_by], references: [id], onUpdate: NoAction)
+
+  @@index([assigned_to], map: "idx_content_items_assigned")
+  @@index([status], map: "idx_content_items_status")
+}
+
+model courier_issues {
+  id                                                   String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  date                                                 DateTime?  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  parcel_id                                            String?
+  contact_number                                       String?
+  problem_details                                      String?
+  problem_category                                     String?
+  source                                               String?
+  call_peek                                            String?    @db.Uuid
+  problem_status                                       String?    @default("pending")
+  delivery_status                                      String?
+  problem_solver                                       String?    @db.Uuid
+  fraud_note                                           Boolean?   @default(false)
+  solved_description                                   String?
+  management_check                                     String?    @db.Uuid
+  verified_by                                          String?    @db.Uuid
+  remarks                                              String?
+  created_at                                           DateTime?  @default(now()) @db.Timestamptz(6)
+  payment_gateway                                      String?
+  business_name                                        String?
+  logistics                                            String?
+  employees_courier_issues_call_peekToemployees        employees? @relation("courier_issues_call_peekToemployees", fields: [call_peek], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  employees_courier_issues_management_checkToemployees employees? @relation("courier_issues_management_checkToemployees", fields: [management_check], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  employees_courier_issues_problem_solverToemployees   employees? @relation("courier_issues_problem_solverToemployees", fields: [problem_solver], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  employees_courier_issues_verified_byToemployees      employees? @relation("courier_issues_verified_byToemployees", fields: [verified_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model departments {
+  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String
+  name_bn    String?
+  created_at DateTime?   @default(now()) @db.Timestamptz(6)
+  employees  employees[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model emis {
+  id                                    String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id                           String     @db.Uuid
+  amount                                Decimal    @db.Decimal(10, 2)
+  term_months                           Int
+  start_date                            DateTime   @db.Date
+  interest_rate                         Decimal    @default(0) @db.Decimal(5, 2)
+  monthly_installment                   Decimal    @db.Decimal(10, 2)
+  created_by                            String?    @db.Uuid
+  created_at                            DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at                            DateTime?  @default(now()) @db.Timestamptz(6)
+  expense_id                            String?    @db.Uuid
+  employees_emis_created_byToemployees  employees? @relation("emis_created_byToemployees", fields: [created_by], references: [id], onUpdate: NoAction)
+  employees_emis_employee_idToemployees employees  @relation("emis_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  expenses                              expenses?  @relation(fields: [expense_id], references: [id], onUpdate: NoAction)
+
+  @@index([employee_id], map: "idx_emis_employee")
+  @@index([start_date], map: "idx_emis_start_date")
+}
+
+model employee_access_records {
+  id                                                       String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id                                              String?    @db.Uuid
+  platform_name                                            String
+  role_description                                         String?
+  granted_by                                               String?    @db.Uuid
+  granted_at                                               DateTime?  @default(now()) @db.Timestamptz(6)
+  notes                                                    String?
+  created_at                                               DateTime?  @default(now()) @db.Timestamptz(6)
+  employees_employee_access_records_employee_idToemployees employees? @relation("employee_access_records_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  employees_employee_access_records_granted_byToemployees  employees? @relation("employee_access_records_granted_byToemployees", fields: [granted_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([employee_id], map: "idx_employee_access_employee")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model employee_permissions {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id  String?    @db.Uuid
+  feature_id   String?    @db.Uuid
+  access_level String?    @default("no_access")
+  employees    employees? @relation(fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  features     features?  @relation(fields: [feature_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([employee_id, feature_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model employees {
+  id                                                                     String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                                                                String?                   @db.Uuid
+  employee_id                                                            String?                   @unique
+  name                                                                   String
+  photo_url                                                              String?
+  designation                                                            String?
+  address                                                                String?
+  nid_no                                                                 String?
+  blood_group                                                            String?
+  personal_contact                                                       String?
+  whatsapp_number                                                        String?
+  family_contact_1                                                       String?
+  family_contact_2                                                       String?
+  email                                                                  String?                   @unique
+  department_id                                                          String?                   @db.Uuid
+  role_id                                                                String?                   @db.Uuid
+  joining_date                                                           DateTime?                 @db.Date
+  is_active                                                              Boolean?                  @default(true)
+  created_at                                                             DateTime?                 @default(now()) @db.Timestamptz(6)
+  updated_at                                                             DateTime?                 @default(now()) @db.Timestamptz(6)
+  gender                                                                 String?
+  date_of_birth                                                          DateTime?                 @db.Date
+  cv_url                                                                 String?
+  duty_start_time                                                        DateTime?                 @db.Time(6)
+  duty_end_time                                                          DateTime?                 @db.Time(6)
+  total_points                                                           Int?                      @default(0)
+  avatar_url                                                             String?
+  payroll_basic_salary                                                   Decimal                   @default(0) @db.Decimal(10, 2)
+  payroll_transportation_bill                                            Decimal                   @default(0) @db.Decimal(10, 2)
+  payroll_snacks_bill                                                    Decimal                   @default(0) @db.Decimal(10, 2)
+  festival_bonus_percentage                                              Decimal                   @default(0) @db.Decimal(5, 2)
+  festival_bonus_months                                                  Int[]                     @default([])
+  salary_increment_amount                                                Decimal                   @default(0) @db.Decimal(10, 2)
+  salary_increment_effective_month                                       String?                   @db.VarChar(7)
+  basic_salary_effective_month                                           String?                   @db.VarChar(7)
+  activity_log                                                           activity_log[]
+  advances_advances_created_byToemployees                                advances[]                @relation("advances_created_byToemployees")
+  advances_advances_employee_idToemployees                               advances[]                @relation("advances_employee_idToemployees")
+  attendance                                                             attendance[]
+  audit_log                                                              audit_log[]
+  content_batches                                                        content_batches[]
+  content_entries_content_entries_created_byToemployees                  content_entries[]         @relation("content_entries_created_byToemployees")
+  content_entries_content_entries_management_checkToemployees            content_entries[]         @relation("content_entries_management_checkToemployees")
+  content_items_content_items_assigned_toToemployees                     content_items[]           @relation("content_items_assigned_toToemployees")
+  content_items_content_items_created_byToemployees                      content_items[]           @relation("content_items_created_byToemployees")
+  courier_issues_courier_issues_call_peekToemployees                     courier_issues[]          @relation("courier_issues_call_peekToemployees")
+  courier_issues_courier_issues_management_checkToemployees              courier_issues[]          @relation("courier_issues_management_checkToemployees")
+  courier_issues_courier_issues_problem_solverToemployees                courier_issues[]          @relation("courier_issues_problem_solverToemployees")
+  courier_issues_courier_issues_verified_byToemployees                   courier_issues[]          @relation("courier_issues_verified_byToemployees")
+  emis_emis_created_byToemployees                                        emis[]                    @relation("emis_created_byToemployees")
+  emis_emis_employee_idToemployees                                       emis[]                    @relation("emis_employee_idToemployees")
+  employee_access_records_employee_access_records_employee_idToemployees employee_access_records[] @relation("employee_access_records_employee_idToemployees")
+  employee_access_records_employee_access_records_granted_byToemployees  employee_access_records[] @relation("employee_access_records_granted_byToemployees")
+  employee_permissions                                                   employee_permissions[]
+  departments                                                            departments?              @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  roles                                                                  roles?                    @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                                                                  users?                    @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+  expenses_expenses_approved_byToemployees                               expenses[]                @relation("expenses_approved_byToemployees")
+  expenses_expenses_submitted_byToemployees                              expenses[]                @relation("expenses_submitted_byToemployees")
+  fines_fines_issued_byToemployees                                       fines[]                   @relation("fines_issued_byToemployees")
+  fines_fines_member_idToemployees                                       fines[]                   @relation("fines_member_idToemployees")
+  fund_allocations_fund_allocations_allocated_byToemployees              fund_allocations[]        @relation("fund_allocations_allocated_byToemployees")
+  fund_allocations_fund_allocations_employee_idToemployees               fund_allocations[]        @relation("fund_allocations_employee_idToemployees")
+  ideas                                                                  ideas[]
+  income                                                                 income[]
+  leave_records_leave_records_approved_byToemployees                     leave_records[]           @relation("leave_records_approved_byToemployees")
+  leave_records_leave_records_employee_idToemployees                     leave_records[]           @relation("leave_records_employee_idToemployees")
+  memories                                                               memories[]
+  notice_reads                                                           notice_reads[]
+  notices                                                                notices[]
+  notifications                                                          notifications[]
+  performance_scores_performance_scores_employee_idToemployees           performance_scores[]      @relation("performance_scores_employee_idToemployees")
+  performance_scores_performance_scores_scored_byToemployees             performance_scores[]      @relation("performance_scores_scored_byToemployees")
+  personal_todos                                                         personal_todos[]
+  point_transactions_point_transactions_awarded_byToemployees            point_transactions[]      @relation("point_transactions_awarded_byToemployees")
+  point_transactions_point_transactions_employee_idToemployees           point_transactions[]      @relation("point_transactions_employee_idToemployees")
+  point_withdrawals_point_withdrawals_employee_idToemployees             point_withdrawals[]       @relation("point_withdrawals_employee_idToemployees")
+  point_withdrawals_point_withdrawals_processed_byToemployees            point_withdrawals[]       @relation("point_withdrawals_processed_byToemployees")
+  pr_management                                                          pr_management[]
+  problems_problems_authority_checkToemployees                           problems[]                @relation("problems_authority_checkToemployees")
+  problems_problems_management_checkToemployees                          problems[]                @relation("problems_management_checkToemployees")
+  problems_problems_problem_peekToemployees                              problems[]                @relation("problems_problem_peekToemployees")
+  problems_problems_problem_solverToemployees                            problems[]                @relation("problems_problem_solverToemployees")
+  product_buys_product_buys_created_byToemployees                        product_buys[]            @relation("product_buys_created_byToemployees")
+  product_buys_product_buys_employee_idToemployees                       product_buys[]            @relation("product_buys_employee_idToemployees")
+  provident_funds_provident_funds_created_byToemployees                  provident_funds[]         @relation("provident_funds_created_byToemployees")
+  provident_funds_provident_funds_employee_idToemployees                 provident_funds[]         @relation("provident_funds_employee_idToemployees")
+  requisitions                                                           requisitions[]
+  salary_entries_salary_entries_employee_idToemployees                   salary_entries[]          @relation("salary_entries_employee_idToemployees")
+  salary_entries_salary_entries_updated_byToemployees                    salary_entries[]          @relation("salary_entries_updated_byToemployees")
+  salary_sheets                                                          salary_sheets[]
+  task_assignments                                                       task_assignments[]
+  tasks                                                                  tasks[]
+  work_entries_work_entries_authority_checkToemployees                   work_entries[]            @relation("work_entries_authority_checkToemployees")
+  work_entries_work_entries_employee_idToemployees                       work_entries[]            @relation("work_entries_employee_idToemployees")
+  work_entries_work_entries_management_checkToemployees                  work_entries[]            @relation("work_entries_management_checkToemployees")
+  work_entries_work_entries_verified_byToemployees                       work_entries[]            @relation("work_entries_verified_byToemployees")
+  work_evaluations_work_evaluations_employee_idToemployees               work_evaluations[]        @relation("work_evaluations_employee_idToemployees")
+  work_evaluations_work_evaluations_evaluated_byToemployees              work_evaluations[]        @relation("work_evaluations_evaluated_byToemployees")
+  work_reports                                                           work_reports[]
+
+  @@index([department_id], map: "idx_employees_department")
+  @@index([date_of_birth], map: "idx_employees_dob")
+  @@index([role_id], map: "idx_employees_role")
+  @@index([user_id], map: "idx_employees_user_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model expenses {
+  id                                         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  date                                       DateTime?        @default(dbgenerated("CURRENT_DATE")) @db.Date
+  category                                   String?
+  description                                String?
+  amount                                     Decimal?         @db.Decimal(10, 2)
+  payment_method                             String?
+  submitted_by                               String?          @db.Uuid
+  approved_by                                String?          @db.Uuid
+  payment_status                             String?          @default("pending")
+  note                                       String?
+  created_at                                 DateTime?        @default(now()) @db.Timestamptz(6)
+  business_name                              String?
+  payment_gateway                            String?
+  invoice_id                                 String?
+  fund_id                                    String?          @db.Uuid
+  advances                                   advances[]
+  emis                                       emis[]
+  employees_expenses_approved_byToemployees  employees?       @relation("expenses_approved_byToemployees", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  finance_funds                              finance_funds?   @relation(fields: [fund_id], references: [id], onUpdate: NoAction)
+  employees_expenses_submitted_byToemployees employees?       @relation("expenses_submitted_byToemployees", fields: [submitted_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  product_buys                               product_buys[]
+  salary_entries                             salary_entries[]
+}
+
+model features {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                 String
+  name_bn              String?
+  category             String?
+  slug                 String                 @unique
+  sort_order           Int?                   @default(0)
+  created_at           DateTime?              @default(now()) @db.Timestamptz(6)
+  employee_permissions employee_permissions[]
+}
+
+model finance_budgets {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  category_id        String             @db.Uuid
+  period             String
+  amount             Decimal            @default(0) @db.Decimal
+  created_at         DateTime           @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
+  finance_categories finance_categories @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([category_id, period])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model finance_categories {
+  id                       String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                     String
+  type                     String
+  parent_id                String?              @db.Uuid
+  created_at               DateTime             @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
+  finance_budgets          finance_budgets[]
+  finance_categories       finance_categories?  @relation("finance_categoriesTofinance_categories", fields: [parent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  other_finance_categories finance_categories[] @relation("finance_categoriesTofinance_categories")
+}
+
+model finance_funds {
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String
+  balance    Decimal    @default(0) @db.Decimal(12, 2)
+  category   String?    @default("Uncategorized")
+  created_at DateTime?  @default(now()) @db.Timestamptz(6)
+  expenses   expenses[]
+  income     income[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model fines {
+  id                                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  member_id                            String    @db.Uuid
+  issued_by                            String    @db.Uuid
+  amount                               Int
+  category                             String
+  reason                               String
+  status                               String    @default("Active")
+  appeal_reason                        String?
+  created_at                           DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at                           DateTime? @default(now()) @db.Timestamptz(6)
+  payment_status                       String    @default("Unpaid")
+  settled_month                        String?
+  employees_fines_issued_byToemployees employees @relation("fines_issued_byToemployees", fields: [issued_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  employees_fines_member_idToemployees employees @relation("fines_member_idToemployees", fields: [member_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model fund_allocations {
+  id                                                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id                                        String     @db.Uuid
+  amount                                             Decimal    @default(0) @db.Decimal(12, 2)
+  note                                               String?
+  allocated_by                                       String?    @db.Uuid
+  created_at                                         DateTime   @default(now()) @db.Timestamptz(6)
+  employees_fund_allocations_allocated_byToemployees employees? @relation("fund_allocations_allocated_byToemployees", fields: [allocated_by], references: [id], onUpdate: NoAction)
+  employees_fund_allocations_employee_idToemployees  employees  @relation("fund_allocations_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([created_at(sort: Desc)], map: "idx_fund_allocations_created_at")
+  @@index([employee_id], map: "idx_fund_allocations_employee")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model ideas {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  date            DateTime?  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  title           String?
+  description     String?
+  contributor     String?    @db.Uuid
+  category        String?
+  priority        String?    @default("medium")
+  status          String?    @default("submitted")
+  approval_status String?    @default("pending")
+  feedback        String?
+  notes           String?
+  created_at      DateTime?  @default(now()) @db.Timestamptz(6)
+  reference_links String?
+  idea_no         Int        @default(autoincrement())
+  employees       employees? @relation(fields: [contributor], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model income {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  date           DateTime?      @default(dbgenerated("CURRENT_DATE")) @db.Date
+  description    String?
+  amount         Decimal        @db.Decimal(10, 2)
+  source         String?
+  invoice_id     String?
+  note           String?
+  business_name  String?
+  added_by       String?        @db.Uuid
+  created_at     DateTime?      @default(now()) @db.Timestamptz(6)
+  work_entry_id  String?        @db.Uuid
+  product_buy_id String?        @db.Uuid
+  fund_id        String?        @db.Uuid
+  employees      employees?     @relation(fields: [added_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  finance_funds  finance_funds? @relation(fields: [fund_id], references: [id], onUpdate: NoAction)
+  product_buys   product_buys?  @relation(fields: [product_buy_id], references: [id], onUpdate: NoAction)
+  work_entries   work_entries?  @relation(fields: [work_entry_id], references: [id], onUpdate: NoAction)
+}
+
+model influencers {
+  id                     String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                   String
+  phone                  String?
+  page_url               String?
+  follower_count         Int?            @default(0)
+  rating                 Int?            @default(0)
+  notes                  String?
+  created_at             DateTime        @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
+  photo_url              String?
+  address                String?
+  status                 String          @default("Active")
+  instagram_url          String?
+  tiktok_url             String?
+  youtube_url            String?
+  rating_responsiveness  Int?
+  rating_quality         Int?
+  rating_professionalism Int?
+  rating_engagement      Int?
+  rating_reliability     Int?
+  updated_at             DateTime?       @default(now()) @db.Timestamptz(6)
+  uploaded_platforms     String[]        @default([])
+  contact_source         String?
+  contact_value          String?
+  payment_status         String          @default("Unpaid")
+  pr_management          pr_management[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model leave_records {
+  id                                             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id                                    String?    @db.Uuid
+  leave_date                                     DateTime   @db.Date
+  reason                                         String?
+  status                                         String?    @default("pending")
+  approved_by                                    String?    @db.Uuid
+  created_at                                     DateTime?  @default(now()) @db.Timestamptz(6)
+  employees_leave_records_approved_byToemployees employees? @relation("leave_records_approved_byToemployees", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  employees_leave_records_employee_idToemployees employees? @relation("leave_records_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([employee_id, leave_date])
+  @@index([employee_id, leave_date], map: "idx_leave_records_employee_date")
+}
+
+model memories {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title       String?
+  description String?
+  image_url   String
+  uploaded_by String?    @db.Uuid
+  created_at  DateTime?  @default(now()) @db.Timestamptz(6)
+  employees   employees? @relation(fields: [uploaded_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model notice_reads {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  notice_id   String?    @db.Uuid
+  employee_id String?    @db.Uuid
+  read_at     DateTime?  @default(now()) @db.Timestamptz(6)
+  employees   employees? @relation(fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  notices     notices?   @relation(fields: [notice_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([notice_id, employee_id])
+  @@index([employee_id], map: "idx_notice_reads_employee")
+  @@index([notice_id], map: "idx_notice_reads_notice")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model notices {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title        String
+  content      String?
+  type         String?        @default("notice")
+  priority     String?        @default("normal")
+  is_pinned    Boolean?       @default(false)
+  created_by   String?        @db.Uuid
+  expires_at   DateTime?      @db.Date
+  created_at   DateTime?      @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime?      @default(now()) @db.Timestamptz(6)
+  notice_reads notice_reads[]
+  employees    employees?     @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([created_at(sort: Desc)], map: "idx_notices_created_at")
+}
+
+model notifications {
+  id                  String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  recipient_id        String?    @db.Uuid
+  title               String
+  title_bn            String?
+  message             String?
+  message_bn          String?
+  type                String?
+  related_entity_type String?
+  related_entity_id   String?    @db.Uuid
+  is_read             Boolean?   @default(false)
+  created_at          DateTime?  @default(now()) @db.Timestamptz(6)
+  employees           employees? @relation(fields: [recipient_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([recipient_id, is_read], map: "idx_notifications_recipient")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model performance_scores {
+  id                                                  String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id                                         String?           @db.Uuid
+  category_id                                         String?           @db.Uuid
+  date                                                DateTime          @db.Date
+  points                                              Int?
+  scored_by                                           String?           @db.Uuid
+  created_at                                          DateTime?         @default(now()) @db.Timestamptz(6)
+  point_categories                                    point_categories? @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  employees_performance_scores_employee_idToemployees employees?        @relation("performance_scores_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  employees_performance_scores_scored_byToemployees   employees?        @relation("performance_scores_scored_byToemployees", fields: [scored_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([employee_id, category_id, date])
+  @@index([employee_id, date], map: "idx_performance_scores_employee_date")
+}
+
+model personal_todos {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id String?    @db.Uuid
+  title       String
+  description String?
+  completed   Boolean?   @default(false)
+  due_date    DateTime?  @db.Date
+  created_at  DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime?  @default(now()) @db.Timestamptz(6)
+  employees   employees? @relation(fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([completed], map: "idx_personal_todos_completed")
+  @@index([created_at(sort: Desc)], map: "idx_personal_todos_created_at")
+  @@index([employee_id], map: "idx_personal_todos_employee")
+}
+
+model point_categories {
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name               String
+  name_bn            String
+  max_points         Int?                 @default(10)
+  sort_order         Int?                 @default(0)
+  performance_scores performance_scores[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model point_transactions {
+  id                                                  String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id                                         String?    @db.Uuid
+  points                                              Int
+  source                                              String
+  source_id                                           String?    @db.Uuid
+  category                                            String?
+  description                                         String?
+  awarded_by                                          String?    @db.Uuid
+  created_at                                          DateTime?  @default(now()) @db.Timestamptz(6)
+  employees_point_transactions_awarded_byToemployees  employees? @relation("point_transactions_awarded_byToemployees", fields: [awarded_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  employees_point_transactions_employee_idToemployees employees? @relation("point_transactions_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([created_at(sort: Desc)], map: "idx_point_transactions_created")
+  @@index([employee_id], map: "idx_point_transactions_employee")
+  @@index([source], map: "idx_point_transactions_source")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model point_withdrawals {
+  id                                                  String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id                                         String     @db.Uuid
+  amount                                              Int
+  status                                              String     @default("pending")
+  requested_at                                        DateTime   @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
+  processed_at                                        DateTime?  @db.Timestamptz(6)
+  processed_by                                        String?    @db.Uuid
+  employees_point_withdrawals_employee_idToemployees  employees  @relation("point_withdrawals_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  employees_point_withdrawals_processed_byToemployees employees? @relation("point_withdrawals_processed_byToemployees", fields: [processed_by], references: [id], onUpdate: NoAction)
+}
+
+model pr_management {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  send_date       DateTime     @default(dbgenerated("CURRENT_DATE")) @db.Date
+  customer_name   String?
+  customer_phone  String?
+  address         String?
+  parcel_details  String?
+  source          String?
+  delivery_status String?      @default("Product Sent")
+  video_status    String?      @default("Pending")
+  payment_status  String?      @default("Unpaid")
+  video_link      String?
+  view_note       String?
+  ai_comments     String?
+  created_at      DateTime     @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
+  created_by      String?      @db.Uuid
+  updated_at      DateTime     @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
+  influencer_id   String?      @db.Uuid
+  video_links     String[]     @default([])
+  total_amount    Decimal?     @db.Decimal(10, 2)
+  advance_amount  Decimal?     @db.Decimal(10, 2)
+  due_amount      Decimal?     @db.Decimal(10, 2)
+  payment_method  String?
+  transaction_id  String?
+  employees       employees?   @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+  influencers     influencers? @relation(fields: [influencer_id], references: [id], onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model problems {
+  id                                             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  problem_no                                     String?    @unique
+  entry_date                                     DateTime?  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  customer_name                                  String?
+  customer_phone                                 String?
+  problem_details                                String?
+  problem_peek                                   String?    @db.Uuid
+  problem_solver                                 String?    @db.Uuid
+  solved_date                                    DateTime?  @db.Date
+  priority                                       String?    @default("medium")
+  status                                         String?    @default("open")
+  management_check                               String?    @db.Uuid
+  authority_check                                String?    @db.Uuid
+  notes                                          String?
+  created_at                                     DateTime?  @default(now()) @db.Timestamptz(6)
+  payment_gateway                                String?
+  business_name                                  String?
+  resolution_note                                String?
+  category                                       String?
+  employees_problems_authority_checkToemployees  employees? @relation("problems_authority_checkToemployees", fields: [authority_check], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  employees_problems_management_checkToemployees employees? @relation("problems_management_checkToemployees", fields: [management_check], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  employees_problems_problem_peekToemployees     employees? @relation("problems_problem_peekToemployees", fields: [problem_peek], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  employees_problems_problem_solverToemployees   employees? @relation("problems_problem_solverToemployees", fields: [problem_solver], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([status], map: "idx_problems_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model product_buys {
+  id                                            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id                                   String     @db.Uuid
+  amount                                        Decimal    @db.Decimal(10, 2)
+  purchase_date                                 DateTime   @db.Date
+  item                                          String?
+  note                                          String?
+  payment_status                                String     @default("Unpaid")
+  expense_id                                    String?    @db.Uuid
+  created_by                                    String?    @db.Uuid
+  created_at                                    DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at                                    DateTime?  @default(now()) @db.Timestamptz(6)
+  product_price                                 Decimal?   @db.Decimal(10, 2)
+  discount_price                                Decimal    @default(0) @db.Decimal(10, 2)
+  income                                        income[]
+  employees_product_buys_created_byToemployees  employees? @relation("product_buys_created_byToemployees", fields: [created_by], references: [id], onUpdate: NoAction)
+  employees_product_buys_employee_idToemployees employees  @relation("product_buys_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  expenses                                      expenses?  @relation(fields: [expense_id], references: [id], onUpdate: NoAction)
+
+  @@index([purchase_date], map: "idx_product_buys_date")
+  @@index([employee_id], map: "idx_product_buys_employee")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model provident_funds {
+  id                                               String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id                                      String     @db.Uuid
+  principal_amount                                 Decimal    @db.Decimal(10, 2)
+  duration_months                                  Int
+  interest_rate                                    Decimal    @default(0) @db.Decimal(5, 2)
+  monthly_installment                              Decimal    @db.Decimal(10, 2)
+  start_date                                       DateTime   @db.Date
+  note                                             String?
+  created_by                                       String?    @db.Uuid
+  created_at                                       DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at                                       DateTime?  @default(now()) @db.Timestamptz(6)
+  employees_provident_funds_created_byToemployees  employees? @relation("provident_funds_created_byToemployees", fields: [created_by], references: [id], onUpdate: NoAction)
+  employees_provident_funds_employee_idToemployees employees  @relation("provident_funds_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([employee_id], map: "idx_provident_funds_employee")
+  @@index([start_date], map: "idx_provident_funds_start_date")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model requisitions {
+  id                  String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requisition_no      Int        @default(autoincrement())
+  date                DateTime?  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  requested_by        String?    @db.Uuid
+  item_description    String?
+  quantity            Int?
+  reason              String?
+  priority            String?    @default("medium")
+  manager_approval    String?    @default("pending")
+  management_approval String?    @default("pending")
+  purchase_date       DateTime?  @db.Date
+  remarks             String?
+  created_at          DateTime?  @default(now()) @db.Timestamptz(6)
+  business_name       String?
+  purchase_status     String?    @default("pending")
+  payment_gateway     String?
+  employees           employees? @relation(fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model roles {
+  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String      @unique
+  level      Int
+  created_at DateTime?   @default(now()) @db.Timestamptz(6)
+  employees  employees[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model salary_entries {
+  id                                              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  salary_sheet_id                                 String        @db.Uuid
+  employee_id                                     String        @db.Uuid
+  basic_salary                                    Decimal       @default(0) @db.Decimal(10, 2)
+  extra_duty                                      Decimal       @default(0) @db.Decimal(10, 2)
+  advance                                         Decimal       @default(0) @db.Decimal(10, 2)
+  loan                                            Decimal       @default(0) @db.Decimal(10, 2)
+  other_deduction                                 Decimal       @default(0) @db.Decimal(10, 2)
+  payment_status                                  String        @default("Unpaid")
+  updated_by                                      String?       @db.Uuid
+  updated_at                                      DateTime?     @default(now()) @db.Timestamptz(6)
+  performance_bonus                               Decimal       @default(0) @db.Decimal(10, 2)
+  festival_bonus                                  Decimal       @default(0) @db.Decimal(10, 2)
+  payment_method                                  String?
+  payment_date                                    DateTime?     @db.Date
+  transportation_bill                             Decimal       @default(0) @db.Decimal(10, 2)
+  snacks_bill                                     Decimal       @default(0) @db.Decimal(10, 2)
+  expense_id                                      String?       @db.Uuid
+  employees_salary_entries_employee_idToemployees employees     @relation("salary_entries_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  expenses                                        expenses?     @relation(fields: [expense_id], references: [id], onUpdate: NoAction)
+  salary_sheets                                   salary_sheets @relation(fields: [salary_sheet_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  employees_salary_entries_updated_byToemployees  employees?    @relation("salary_entries_updated_byToemployees", fields: [updated_by], references: [id], onUpdate: NoAction)
+
+  @@unique([salary_sheet_id, employee_id])
+  @@index([employee_id], map: "idx_salary_entries_employee")
+  @@index([salary_sheet_id], map: "idx_salary_entries_sheet")
+}
+
+model salary_sheets {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  month          String           @unique
+  created_by     String?          @db.Uuid
+  created_at     DateTime?        @default(now()) @db.Timestamptz(6)
+  salary_entries salary_entries[]
+  employees      employees?       @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+}
+
+model source_options {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String    @unique
+  slug       String    @unique
+  is_active  Boolean?  @default(true)
+  sort_order Int?      @default(0)
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model task_assignments {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  task_id      String?    @db.Uuid
+  employee_id  String?    @db.Uuid
+  status       String?    @default("pending")
+  assigned_at  DateTime?  @default(now()) @db.Timestamptz(6)
+  responded_at DateTime?  @db.Timestamptz(6)
+  employees    employees? @relation(fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tasks        tasks?     @relation(fields: [task_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([task_id, employee_id])
+  @@index([employee_id], map: "idx_task_assignments_employee")
+  @@index([task_id], map: "idx_task_assignments_task")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model tasks {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title            String
+  description      String?
+  due_date         DateTime?          @db.Date
+  priority         String?            @default("medium")
+  status           String?            @default("pending")
+  created_by       String?            @db.Uuid
+  created_at       DateTime?          @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime?          @default(now()) @db.Timestamptz(6)
+  task_no          String?
+  task_assignments task_assignments[]
+  employees        employees?         @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([created_at(sort: Desc)], map: "idx_tasks_created_at")
+  @@index([created_by], map: "idx_tasks_created_by")
+  @@index([status], map: "idx_tasks_status")
+}
+
+model users {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String      @unique
+  password_hash String
+  created_at    DateTime?   @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime?   @default(now()) @db.Timestamptz(6)
+  employees     employees[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model work_entries {
+  id                                                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id                                        String?    @db.Uuid
+  date                                               DateTime   @db.Date
+  sl                                                 Int?
+  customer_phone                                     String?
+  invoice_no                                         String?
+  courier_id                                         String?
+  source                                             String?
+  amount                                             Decimal?   @db.Decimal(10, 2)
+  suggested_amount                                   Decimal?   @db.Decimal(10, 2)
+  advance                                            Decimal?   @db.Decimal(10, 2)
+  note                                               String?
+  order_type                                         String?
+  delivery_status                                    String?
+  management_check                                   String?    @db.Uuid
+  authority_check                                    String?    @db.Uuid
+  created_at                                         DateTime?  @default(now()) @db.Timestamptz(6)
+  customer_name                                      String?
+  payment_gateway                                    String?
+  business_name                                      String?
+  transaction_id                                     String?
+  advance_verified                                   Boolean    @default(false)
+  verified_by                                        String?    @db.Uuid
+  verified_at                                        DateTime?  @db.Timestamptz(6)
+  income                                             income[]
+  employees_work_entries_authority_checkToemployees  employees? @relation("work_entries_authority_checkToemployees", fields: [authority_check], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  employees_work_entries_employee_idToemployees      employees? @relation("work_entries_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  employees_work_entries_management_checkToemployees employees? @relation("work_entries_management_checkToemployees", fields: [management_check], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  employees_work_entries_verified_byToemployees      employees? @relation("work_entries_verified_byToemployees", fields: [verified_by], references: [id], onUpdate: NoAction)
+
+  @@index([advance_verified], map: "idx_work_entries_advance_verified")
+  @@index([employee_id, date], map: "idx_work_entries_employee_date")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model work_evaluation_items {
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  evaluation_id    String           @db.Uuid
+  work_report_id   String           @db.Uuid
+  points           Int              @default(0)
+  created_at       DateTime?        @default(now()) @db.Timestamptz(6)
+  work_evaluations work_evaluations @relation(fields: [evaluation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  work_reports     work_reports     @relation(fields: [work_report_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([evaluation_id], map: "idx_work_evaluation_items_evaluation")
+  @@index([work_report_id], map: "idx_work_evaluation_items_report")
+}
+
+model work_evaluations {
+  id                                                 String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id                                        String                  @db.Uuid
+  period_start                                       DateTime                @db.Date
+  period_end                                         DateTime                @db.Date
+  total_assigned_points                              Int                     @default(0)
+  total_earned_points                                Int                     @default(0)
+  note                                               String?
+  evaluated_by                                       String?                 @db.Uuid
+  evaluated_at                                       DateTime?               @default(now()) @db.Timestamptz(6)
+  created_at                                         DateTime?               @default(now()) @db.Timestamptz(6)
+  work_evaluation_items                              work_evaluation_items[]
+  employees_work_evaluations_employee_idToemployees  employees               @relation("work_evaluations_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  employees_work_evaluations_evaluated_byToemployees employees?              @relation("work_evaluations_evaluated_byToemployees", fields: [evaluated_by], references: [id], onUpdate: NoAction)
+
+  @@index([employee_id], map: "idx_work_evaluations_employee")
+  @@index([period_start, period_end], map: "idx_work_evaluations_period")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model work_reports {
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id           String                  @db.Uuid
+  date                  DateTime                @default(dbgenerated("CURRENT_DATE")) @db.Date
+  project               String
+  description           String?
+  hours                 Decimal                 @default(0) @db.Decimal(4, 1)
+  progress              Int                     @default(0)
+  status                String                  @default("in_progress")
+  attachment_url        String?
+  notes                 String?
+  created_at            DateTime?               @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime?               @default(now()) @db.Timestamptz(6)
+  work_evaluation_items work_evaluation_items[]
+  employees             employees               @relation(fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([date], map: "idx_work_reports_date")
+  @@index([employee_id], map: "idx_work_reports_employee")
+  @@index([status], map: "idx_work_reports_status")
+}
