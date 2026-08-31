@@ -8,6 +8,7 @@
 //   npm run create-super-admin -- <email> <password> [name] [employeeId]
 
 import dns from 'dns'
+import net from 'net'
 import pg from 'pg'
 import bcrypt from 'bcryptjs'
 import dotenv from 'dotenv'
@@ -15,9 +16,12 @@ import dotenv from 'dotenv'
 dotenv.config({ path: '.env.local' })
 if (!process.env.DATABASE_URL) dotenv.config({ path: '.env' })
 
-// This environment's DNS resolution can hang on Neon's IPv6-first "happy eyeballs" attempt
-// before falling back to IPv4 — forcing ipv4first avoids that multi-second timeout.
+// Some networks have a broken/flaky IPv6 route that makes Node's dual-stack "Happy Eyeballs"
+// connection dialing (the default since Node 20) fail outright instead of falling back to IPv4
+// — even with DNS ordering set to prefer IPv4. Disabling autoSelectFamily restores the older,
+// simpler behavior: resolve one address (honoring ipv4first below) and connect to just that one.
 dns.setDefaultResultOrder('ipv4first')
+net.setDefaultAutoSelectFamily(false)
 
 const DATABASE_URL = process.env.DATABASE_URL
 if (!DATABASE_URL) {
@@ -42,13 +46,14 @@ async function connect() {
     // ?sslmode=require; a local/self-hosted Postgres like 127.0.0.1 typically doesn't have SSL
     // configured at all) — forcing it unconditionally would break local setups.
     const sslMode = url.searchParams.get('sslmode')
+    const useSsl = !!(sslMode && sslMode !== 'disable')
     const client = new pg.Client({
         host: url.hostname,
         port: Number(url.port) || 5432,
         database: url.pathname.replace(/^\//, ''),
         user: decodeURIComponent(url.username),
         password: decodeURIComponent(url.password),
-        ssl: sslMode && sslMode !== 'disable' ? { rejectUnauthorized: false, servername: url.hostname } : undefined,
+        ssl: useSsl ? { rejectUnauthorized: false, servername: url.hostname } : undefined,
         connectionTimeoutMillis: 20000,
     })
     await client.connect()
@@ -101,6 +106,9 @@ async function main() {
 }
 
 main().catch(err => {
-    console.error('Failed:', err.message)
+    // err.message can be empty on an AggregateError (multiple failed connection attempts) —
+    // logging the whole error, plus any nested .errors, avoids a blank "Failed:" message.
+    console.error('Failed:', err.message || err)
+    if (err.errors) for (const e of err.errors) console.error('  -', e.message || e)
     process.exit(1)
 })

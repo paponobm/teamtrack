@@ -1,10 +1,14 @@
 import dns from 'dns'
+import net from 'net'
 import pg from 'pg'
 
-// A flaky-IPv6-route safeguard, not a network call — this only changes the order Node tries
-// address families in when it does resolve a hostname later, so it's safe to run unconditionally
-// at import time.
+// Some networks have a broken/flaky IPv6 route that makes Node's dual-stack "Happy Eyeballs"
+// connection dialing (the default since Node 20) fail outright instead of falling back to IPv4
+// — even with DNS ordering set to prefer IPv4. Disabling autoSelectFamily restores the older,
+// simpler behavior: resolve one address (honoring ipv4first below) and connect to just that one.
+// Both calls are synchronous config, not network I/O, so they're safe to run at import time.
 dns.setDefaultResultOrder('ipv4first')
+net.setDefaultAutoSelectFamily(false)
 
 // node-postgres returns NUMERIC/DECIMAL columns as strings by default (e.g. "10000.00") to
 // avoid silent precision loss — but every amount/percentage column in this schema is well
@@ -21,6 +25,11 @@ if (!DATABASE_URL) {
 }
 
 const connectionUrl = new URL(DATABASE_URL)
+// Only ask for SSL when the connection string actually requests it (Neon does via
+// ?sslmode=require; a local/self-hosted Postgres typically doesn't have SSL configured at all)
+// — forcing it unconditionally would break local/droplet setups.
+const sslMode = connectionUrl.searchParams.get('sslmode')
+const useSsl = !!(sslMode && sslMode !== 'disable')
 
 declare global {
     // eslint-disable-next-line no-var
@@ -41,7 +50,7 @@ export const pool: pg.Pool =
         database: connectionUrl.pathname.replace(/^\//, ''),
         user: decodeURIComponent(connectionUrl.username),
         password: decodeURIComponent(connectionUrl.password),
-        ssl: { rejectUnauthorized: false, servername: connectionUrl.hostname },
+        ssl: useSsl ? { rejectUnauthorized: false, servername: connectionUrl.hostname } : undefined,
         max: 10,
     })
 

@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
             [employeeId, monthStart, today]
         ),
         db.query(
-            `SELECT date, status, check_in, check_out FROM attendance
+            `SELECT date, status, clock_in AS check_in, clock_out AS check_out FROM attendance
              WHERE employee_id = $1 AND date >= $2 AND date <= $3
              ORDER BY date DESC`,
             [employeeId, monthStart, today]
