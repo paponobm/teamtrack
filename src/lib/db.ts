@@ -19,6 +19,15 @@ net.setDefaultAutoSelectFamily(false)
 // globally, matches the old behavior everywhere instead of patching each call site.
 pg.types.setTypeParser(1700, (val: string) => parseFloat(val)) // 1700 = NUMERIC/DECIMAL
 
+// node-postgres's default DATE parser builds a JS Date at local midnight, then every JSON
+// response serializes that as a UTC ISO string via .toISOString() — which silently shifts the
+// calendar day whenever the server's local timezone is ahead of UTC (e.g. Aug 31 becomes
+// "2026-08-30T18:00:00.000Z" at UTC+6), and produces "Invalid Date" wherever the frontend
+// expects a plain "YYYY-MM-DD" string to slice/compare/parse directly. Postgres already sends
+// DATE values over the wire as plain "YYYY-MM-DD" text — returning that raw string unparsed
+// matches what Supabase's PostgREST layer always returned, with no timezone math at all.
+pg.types.setTypeParser(1082, (val: string) => val) // 1082 = DATE
+
 const DATABASE_URL = process.env.DATABASE_URL
 if (!DATABASE_URL) {
     throw new Error('Missing DATABASE_URL environment variable.')
