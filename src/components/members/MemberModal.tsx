@@ -63,6 +63,7 @@ const PAGE_DEFINITIONS = [
         section: 'Work',
         pages: [
             { name: 'Work Log', slug: 'work-log', desc: 'Submit and track daily work orders' },
+            { name: 'PR Management', slug: 'pr-sending', desc: 'Manage influencer PR sends and follow-ups' },
             { name: 'Problem Box', slug: 'problem-box', desc: 'Report and resolve team problems' },
             { name: 'Tasks', slug: 'tasks', desc: 'View and manage assigned tasks' },
         ]

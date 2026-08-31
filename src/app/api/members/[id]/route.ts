@@ -77,9 +77,9 @@ export async function PATCH(
     }
 
     // Admin path: full update with safety guards.
-    // Look up the target's current role level once for the privilege checks below.
+    // Look up the target's current role (id + level) once for the privilege checks below.
     const { rows: [target] } = await db.query(
-        `SELECT r.level FROM employees e LEFT JOIN roles r ON r.id = e.role_id WHERE e.id = $1`,
+        `SELECT e.role_id, r.level FROM employees e LEFT JOIN roles r ON r.id = e.role_id WHERE e.id = $1`,
         [id]
     )
     const targetLevel = target?.level ?? 99
@@ -90,8 +90,10 @@ export async function PATCH(
         return NextResponse.json({ error: 'You cannot modify a user at your own or a higher access level' }, { status: 403 })
     }
 
-    // Nobody may change their own role through this endpoint (prevents self-escalation).
-    if (isSelf && body.role_id) {
+    // Nobody may change their own role through this endpoint (prevents self-escalation) — but the
+    // edit form always resubmits role_id as part of the full profile, even when it's untouched, so
+    // only block an actual change, not just its presence in the payload.
+    if (isSelf && body.role_id && body.role_id !== target?.role_id) {
         return NextResponse.json({ error: 'You cannot change your own role' }, { status: 403 })
     }
 
