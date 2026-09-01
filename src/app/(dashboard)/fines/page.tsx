@@ -259,6 +259,9 @@ export default function FinesPage() {
     const { data: permData } = usePermissions()
     const isAdmin = permData.is_admin || permData.is_super
     const isSuper = permData.is_super
+    // Issuing a fine is open to everyone except Members — Admins/Super Admins/Owners already
+    // pass isAdmin, so Manager is the one extra role that needs to be let in here.
+    const canIssueFine = isAdmin || permData.role === 'Manager'
 
     const [fines, setFines] = useState<Fine[]>([])
     const [loading, setLoading] = useState(true)
@@ -526,7 +529,7 @@ export default function FinesPage() {
                     <h1 className="page-title">Fines & Penalties</h1>
                     <p className="page-subtitle">Manage member infractions, deduct points, and handle appeals.</p>
                 </div>
-                {isAdmin && (
+                {canIssueFine && (
                     <button className="btn btn-danger btn-sm" onClick={() => setShowAddModal(true)}>
                         <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" /></svg>
                         Issue Fine
