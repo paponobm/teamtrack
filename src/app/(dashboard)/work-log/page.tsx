@@ -368,8 +368,8 @@ export default function WorkLogPage() {
 
     // Total Suggested Amount card — same per-entry total as "Total Amount" (base + suggested
     // amount), just scoped to orders whose type is specifically "Suggested".
-    const suggestedTypeEntries = entries.filter(e => e.order_type === 'suggested')
-    const totalSuggestedAmount = suggestedTypeEntries.reduce((s, e) => s + (Number(e.amount) || 0) + (Number(e.suggested_amount) || 0), 0)
+    const suggestedTypeEntries = entries.filter(e => e.order_type === 'suggested' && e.delivery_status === 'confirmed')
+    const totalSuggestedAmount = suggestedTypeEntries.reduce((s, e) => s + (Number(e.suggested_amount) || 0), 0)
     const suggestedTypeCount = suggestedTypeEntries.length
 
     return (
