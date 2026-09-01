@@ -11,7 +11,7 @@ import { formatLongDate } from '@/lib/format'
 import {
     IconDownload, IconBolt, IconBarChart3, IconPlus, IconChevronLeft, IconChevronRight,
     IconEdit, IconTrash, IconCheckCircle, IconTrophy, IconClipboard, IconBanknote,
-    IconWallet, IconLayers, IconFileText, IconX, IconSearch, IconClock, IconTarget
+    IconLayers, IconFileText, IconX, IconSearch, IconClock, IconTarget
 } from '@/components/icons/Icons'
 
 interface WorkEntry {
@@ -72,6 +72,8 @@ const SOURCE_LABELS: Record<string, string> = {
     web: 'Web',
     direct: 'Direct',
     other: 'Other',
+    tiktok: 'Tiktok',
+    instagram: 'Instagram',
 }
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -80,6 +82,8 @@ const SOURCE_COLORS: Record<string, string> = {
     web: '#6366F1',
     direct: '#F59E0B',
     other: '#6B7280',
+    tiktok: '#6B7280',
+    instagram: '#E1306C',
 }
 
 const ORDER_TYPE_LABELS: Record<string, string> = {
@@ -175,6 +179,7 @@ export default function WorkLogPage() {
     const [historyLogs, setHistoryLogs] = useState<any[]>([])
     const [historyLoading, setHistoryLoading] = useState(false)
     const [quickMode, setQuickMode] = useState(false)
+    const [showAdvanceSources, setShowAdvanceSources] = useState(false)
     const [quickForm, setQuickForm] = useState({ customer_phone: '', customer_name: '', invoice_no: '', courier_id: '', source: '', amount: '', order_type: '', delivery_status: 'confirmed', employee_id: '', payment_gateway: '', business_name: '' })
     const [quickSaving, setQuickSaving] = useState(false)
     const [currentUser, setCurrentUser] = useState<{ employee_id: string; name: string; is_super: boolean; role: string } | null>(null)
@@ -361,6 +366,12 @@ export default function WorkLogPage() {
 
     const medalColors = ['#FFD700', '#C0C0C0', '#CD7F32']
 
+    // Total Suggested Amount card — same per-entry total as "Total Amount" (base + suggested
+    // amount), just scoped to orders whose type is specifically "Suggested".
+    const suggestedTypeEntries = entries.filter(e => e.order_type === 'suggested')
+    const totalSuggestedAmount = suggestedTypeEntries.reduce((s, e) => s + (Number(e.amount) || 0) + (Number(e.suggested_amount) || 0), 0)
+    const suggestedTypeCount = suggestedTypeEntries.length
+
     return (
         <RequireFeature slugs={['work-log', 'orders-2000-plus', 'suggest-orders', 'pending-orders', 'payment-confirmation', 'daily-order-submit', 'refund-exchange', 'customer-review', 'pr-sending']}>
             <motion.div variants={container} animate="show">
@@ -516,7 +527,12 @@ export default function WorkLogPage() {
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconBanknote size={14} color="var(--color-text-tertiary)" /> Total Amount</span>
                         <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>৳{stats.totalAmount.toLocaleString()}</span>
                     </div>
-                   
+                    <div className="stat-card">
+                        <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconBanknote size={14} color="var(--color-text-tertiary)" /> Total Suggested Amount</span>
+                        <span className="stat-value" style={{ fontSize: '1.5rem', color: '#F59E0B' }}>৳{totalSuggestedAmount.toLocaleString()}</span>
+                        <div style={{ fontSize: '0.6875rem', color: '#F59E0B', marginTop: '4px' }}>{suggestedTypeCount} order{suggestedTypeCount === 1 ? '' : 's'}</div>
+                    </div>
+
                     <div className="stat-card">
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Pending Verification</span>
                         <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{stats.pendingAdvanceAmount.toLocaleString()}</span>
@@ -525,18 +541,29 @@ export default function WorkLogPage() {
                      <div className="stat-card">
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconCheckCircle size={14} color="var(--color-text-tertiary)" /> Verified Advance Payment</span>
                         <span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A' }}>৳{stats.verifiedAdvanceAmount.toLocaleString()}</span>
-                        <div style={{ fontSize: '0.6875rem', color: '#16A34A', marginTop: '4px' }}>Verified: {stats.verifiedAdvanceCount} Orders</div>
-                    </div>
-                    <div className="stat-card">
-                        <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconWallet size={14} color="var(--color-text-tertiary)" /> Advance Payment Source</span>
-                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
-                            {Object.entries(stats.paymentGatewaySummary || {}).map(([gw, amount]) => (
-                                <span key={gw} style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.625rem', fontWeight: 600, color: PAYMENT_GATEWAY_COLORS[gw] || '#6B7280', background: `${PAYMENT_GATEWAY_COLORS[gw] || '#6B7280'}15` }}>
-                                    {gw}: ৳{amount.toLocaleString()}
-                                </span>
-                            ))}
-                            {Object.keys(stats.paymentGatewaySummary || {}).length === 0 && <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>-</span>}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
+                            <div style={{ fontSize: '0.6875rem', color: '#16A34A' }}>Verified: {stats.verifiedAdvanceCount} Orders</div>
+                            {Object.keys(stats.paymentGatewaySummary || {}).length > 0 && (
+                                <button
+                                    onClick={() => setShowAdvanceSources(v => !v)}
+                                    title={showAdvanceSources ? 'Hide source breakdown' : 'Show source breakdown'}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', color: 'var(--color-text-tertiary)' }}
+                                >
+                                    <span style={{ display: 'flex', transform: showAdvanceSources ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>
+                                        <IconChevronRight size={14} />
+                                    </span>
+                                </button>
+                            )}
                         </div>
+                        {showAdvanceSources && (
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                                {Object.entries(stats.paymentGatewaySummary || {}).map(([gw, amount]) => (
+                                    <span key={gw} style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.625rem', fontWeight: 600, color: PAYMENT_GATEWAY_COLORS[gw] || '#6B7280', background: `${PAYMENT_GATEWAY_COLORS[gw] || '#6B7280'}15` }}>
+                                        {gw}: ৳{amount.toLocaleString()}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
                     </div>
                     <div className="stat-card">
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconTarget size={14} color="var(--color-text-tertiary)" /> Order Status</span>
@@ -555,7 +582,7 @@ export default function WorkLogPage() {
                     <div className="stat-card">
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconLayers size={14} color="var(--color-text-tertiary)" /> Order Types</span>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
-                            {Object.entries(stats.orderTypes || {}).map(([ot, count]) => (
+                            {Object.entries(stats.orderTypes || {}).sort((a, b) => b[1] - a[1]).map(([ot, count]) => (
                                 <span key={ot} style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.625rem', fontWeight: 600, color: ORDER_TYPE_COLORS[ot] || '#6B7280', background: `${ORDER_TYPE_COLORS[ot] || '#6B7280'}15` }}>
                                     {ORDER_TYPE_LABELS[ot] || ot}: {count}
                                 </span>
@@ -569,7 +596,7 @@ export default function WorkLogPage() {
                             Sources
                         </span>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
-                            {Object.entries(stats.sources || {}).map(([src, count]) => (
+                            {Object.entries(stats.sources || {}).sort((a, b) => b[1] - a[1]).map(([src, count]) => (
                                 <span key={src} style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.625rem', fontWeight: 600, color: SOURCE_COLORS[src] || '#6B7280', background: `${SOURCE_COLORS[src] || '#6B7280'}15` }}>
                                     {SOURCE_LABELS[src] || src}: {count}
                                 </span>
