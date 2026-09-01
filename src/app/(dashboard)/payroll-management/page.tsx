@@ -7,8 +7,11 @@ import { IconShieldAlert, IconSearch } from '@/components/icons/Icons'
 import SalaryDashboard from '@/components/payroll/SalaryDashboard'
 import SalarySheet from '@/components/payroll/SalarySheet'
 
-function currentMonth() {
+// Salary sheets are typically finalized after the month closes, so default to last month
+// (e.g. viewing in September defaults to August) rather than the still-in-progress current one.
+function defaultMonth() {
     const d = new Date()
+    d.setMonth(d.getMonth() - 1)
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
@@ -20,7 +23,7 @@ const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transiti
 // drives both, so switching months or searching an employee updates everything at once.
 export default function PayrollManagementPage() {
     const { data, isLoading } = usePermissions()
-    const [month, setMonth] = useState(currentMonth)
+    const [month, setMonth] = useState(defaultMonth)
     const [search, setSearch] = useState('')
     // Bumped whenever the Salary Sheet below reports a payment update, so the Payroll Summary
     // cards re-fetch and reflect it immediately — no browser refresh needed.
