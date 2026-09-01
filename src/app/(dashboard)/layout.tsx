@@ -15,7 +15,7 @@ export default function DashboardLayout({
 }) {
     const [sidebarOpen, setSidebarOpen] = useState(false)
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-    const [user, setUser] = useState<{ name: string; role: string; email: string; avatar_url?: string | null } | undefined>()
+    const [user, setUser] = useState<{ name: string; role: string; designation?: string | null; email: string; avatar_url?: string | null } | undefined>()
     const [ghostUser, setGhostUser] = useState(false)
     const [authChecked, setAuthChecked] = useState(false)
 
@@ -55,6 +55,7 @@ export default function DashboardLayout({
                 setUser({
                     name: data.name,
                     role: data.role,
+                    designation: data.designation,
                     email: data.email,
                     avatar_url: data.avatar_url,
                 })

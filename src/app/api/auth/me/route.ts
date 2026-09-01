@@ -13,7 +13,7 @@ export async function GET() {
     }
 
     const { rows: [employee] } = await pool.query(
-        `SELECT e.name, e.avatar_url, e.is_active, r.name AS role_name
+        `SELECT e.name, e.avatar_url, e.is_active, e.designation, r.name AS role_name
          FROM employees e
          LEFT JOIN roles r ON r.id = e.role_id
          WHERE e.user_id = $1`,
@@ -32,6 +32,7 @@ export async function GET() {
     return NextResponse.json({
         name: employee.name || session.email.split('@')[0] || 'User',
         role: employee.role_name || 'Member',
+        designation: employee.designation || null,
         email: session.email,
         avatar_url: employee.avatar_url || null,
     })

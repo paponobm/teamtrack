@@ -91,6 +91,7 @@ export default function MembersPage() {
     const [birthdayMembers, setBirthdayMembers] = useState<BirthdayMember[]>([])
     const [showBirthday, setShowBirthday] = useState(true)
     const [memberPermissions, setMemberPermissions] = useState<Record<string, string>>({})
+    const [zoomedAvatar, setZoomedAvatar] = useState<string | null>(null)
     const [permissionsLoading, setPermissionsLoading] = useState(false)
     const [savingPermissions, setSavingPermissions] = useState(false)
     const [isAdmin, setIsAdmin] = useState(false)
@@ -342,7 +343,9 @@ export default function MembersPage() {
                             whileHover={{ y: -1, boxShadow: '0 4px 20px rgba(15,23,42,0.06)' }}
                             style={{ cursor: 'pointer', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: '16px' }}
                             onClick={() => openViewMember(member)}>
-                            <div style={{ background: getAvatarColor(member.name), width: '44px', height: '44px', fontSize: '1rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', color: 'white', fontWeight: 600, overflow: 'hidden' }}>
+                            <div
+                                style={{ background: getAvatarColor(member.name), width: '44px', height: '44px', fontSize: '1rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', color: 'white', fontWeight: 600, overflow: 'hidden', cursor: member.avatar_url ? 'zoom-in' : undefined }}
+                                onClick={member.avatar_url ? (e) => { e.stopPropagation(); setZoomedAvatar(member.avatar_url) } : undefined}>
                                 {member.avatar_url ? (
                                     <img src={member.avatar_url} alt="" onError={(e) => { e.currentTarget.style.display = 'none' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                 ) : member.name[0]?.toUpperCase()}
@@ -549,6 +552,21 @@ export default function MembersPage() {
                     <MemberModal member={editingMember} departments={departments} roles={roles}
                         isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} initialTab={initialTab}
                         onClose={() => { setShowModal(false); setEditingMember(null); setInitialTab('profile') }} onSave={handleSave} />
+                )}
+            </AnimatePresence>
+
+            {/* Avatar Zoom */}
+            <AnimatePresence>
+                {zoomedAvatar && (
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        onClick={() => setZoomedAvatar(null)}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}>
+                        <motion.img
+                            src={zoomedAvatar} alt=""
+                            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+                            style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: '12px', objectFit: 'contain' }}
+                            onClick={(e) => e.stopPropagation()} />
+                    </motion.div>
                 )}
             </AnimatePresence>
         </motion.div>

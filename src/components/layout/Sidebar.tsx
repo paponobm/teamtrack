@@ -11,6 +11,7 @@ interface SidebarProps {
     user?: {
         name: string
         role: string
+        designation?: string | null
         email: string
         avatar_url?: string | null
     }
@@ -23,7 +24,6 @@ const navItems = [
         sectionKey: 'nav.overview',
         items: [
             { labelKey: 'nav.dashboard', href: '/dashboard', icon: 'dashboard', slugs: null, adminOnly: false },
-            { labelKey: 'nav.myProfile', href: '/profile', icon: 'profile', slugs: null, adminOnly: false },
             { labelKey: 'nav.myAttendance', href: '/my-attendance', icon: 'attendance', slugs: null, adminOnly: false },
             { labelKey: 'nav.noticeboard', href: '/noticeboard', icon: 'noticeboard', slugs: ['notice-board'], adminOnly: false },
         ]
@@ -276,7 +276,11 @@ export default function Sidebar({ user, onClose, isOpen }: SidebarProps) {
                 </div>
 
                 <div className="sidebar-user-container" style={{ padding: '0 12px', margin: '8px 0 16px 0', flexShrink: 0 }}>
-                    <div className="sidebar-user" style={isCollapsed ? { justifyContent: 'center', padding: '12px 8px' } : undefined}>
+                    <Link
+                        href="/profile"
+                        className="sidebar-user"
+                        style={isCollapsed ? { justifyContent: 'center', padding: '12px 8px', cursor: 'pointer' } : { cursor: 'pointer' }}
+                    >
                         <div className="avatar avatar-sm" style={{ background: getAvatarColor(user?.name || 'U'), overflow: 'hidden', flexShrink: 0 }}>
                             {user?.avatar_url ? (
                                 <img src={user.avatar_url} alt="" onError={(e) => { e.currentTarget.style.display = 'none' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -285,10 +289,10 @@ export default function Sidebar({ user, onClose, isOpen }: SidebarProps) {
                         {!isCollapsed && (
                             <div className="sidebar-user-info">
                                 <div className="sidebar-user-name">{user?.name || 'User'}</div>
-                                <div className="sidebar-user-role">{user?.role || 'Member'}</div>
+                                <div className="sidebar-user-role">{user?.designation || user?.role || 'Member'}</div>
                             </div>
                         )}
-                    </div>
+                    </Link>
                 </div>
 
                 <nav className="sidebar-nav">

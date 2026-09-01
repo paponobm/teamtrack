@@ -476,12 +476,19 @@ export default function WorkLogPage() {
                         <option value="normal">Normal</option>
                         <option value="suggested">Suggested</option>
                         <option value="2000_plus">2000+</option>
+                        <option value="3000_plus">3000+</option>
+                        <option value="5000_plus">5000+</option>
+                        <option value="upsell">Upsell</option>
+                        <option value="incomplete">Incomplete Order</option>
+                        <option value="exchange">Exchange</option>
                     </select>
                     <select className="input" value={filterSource} onChange={(e) => setFilterSource(e.target.value)} style={{ width: '140px', padding: '8px 12px', fontSize: '0.8125rem' }}>
                         <option value="all">All Sources</option>
                         <option value="facebook">Facebook</option>
                         <option value="whatsapp">WhatsApp</option>
                         <option value="web">Web</option>
+                        <option value="instagram">Instagram</option>
+                        <option value="tiktok">TikTok</option>
                         <option value="direct">Direct</option>
                         <option value="other">Other</option>
                     </select>
