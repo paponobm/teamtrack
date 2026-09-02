@@ -35,7 +35,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-    const auth = await requireAuth(4) // Everyone except Member (level <= 4) can issue fines
+    const auth = await requireAuth(3) // Only Admin (level <= 3) can issue fines
     if (!isAuthed(auth)) return auth
 
     const { db, employee } = auth
