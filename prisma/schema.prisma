@@ -281,6 +281,7 @@ model employees {
   salary_increment_amount                                                Decimal                   @default(0) @db.Decimal(10, 2)
   salary_increment_effective_month                                       String?                   @db.VarChar(7)
   basic_salary_effective_month                                           String?                   @db.VarChar(7)
+  sort_order                                                             Int?
   activity_log                                                           activity_log[]
   advances_advances_created_byToemployees                                advances[]                @relation("advances_created_byToemployees")
   advances_advances_employee_idToemployees                               advances[]                @relation("advances_employee_idToemployees")

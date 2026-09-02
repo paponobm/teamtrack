@@ -53,7 +53,7 @@ export async function GET(request: Request) {
          LEFT JOIN roles r ON r.id = e.role_id
          LEFT JOIN departments d ON d.id = e.department_id
          ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
-         ORDER BY e.created_at DESC`,
+         ORDER BY e.sort_order ASC NULLS LAST, e.created_at DESC`,
         params
     )
 
@@ -107,8 +107,9 @@ export async function POST(request: Request) {
                     user_id, employee_id, name, email, designation, address, nid_no, blood_group,
                     personal_contact, whatsapp_number, family_contact_1, family_contact_2,
                     department_id, role_id, joining_date, gender, date_of_birth,
-                    duty_start_time, duty_end_time, cv_url, avatar_url, is_active
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,true)
+                    duty_start_time, duty_end_time, cv_url, avatar_url, is_active, sort_order
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,true,
+                    (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM employees))
                 RETURNING *
              )
              SELECT ins.*,

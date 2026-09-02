@@ -7,7 +7,7 @@ import { usePermissions } from '@/lib/PermissionsContext'
 import { useToast } from '@/lib/ToastContext'
 import {
     IconPlus, IconSearch, IconClock, IconTrophy, IconCake, IconPartyPopper,
-    IconX, IconUsers, IconFileText
+    IconX, IconUsers, IconFileText, IconEdit
 } from '@/components/icons/Icons'
 
 interface Role {
@@ -92,6 +92,11 @@ export default function MembersPage() {
     const [showBirthday, setShowBirthday] = useState(true)
     const [memberPermissions, setMemberPermissions] = useState<Record<string, string>>({})
     const [zoomedAvatar, setZoomedAvatar] = useState<string | null>(null)
+    const [reorderMode, setReorderMode] = useState(false)
+    const [pendingPositions, setPendingPositions] = useState<Record<string, string>>({})
+    const [reorderError, setReorderError] = useState('')
+    const [confirmReorder, setConfirmReorder] = useState<{ id: string; name: string; oldPosition: number; newPosition: number } | null>(null)
+    const [reorderSaving, setReorderSaving] = useState(false)
     const [permissionsLoading, setPermissionsLoading] = useState(false)
     const [savingPermissions, setSavingPermissions] = useState(false)
     const [isAdmin, setIsAdmin] = useState(false)
@@ -236,6 +241,62 @@ export default function MembersPage() {
         fetchMembers(); setViewingMember(null)
     }
     const handleSave = () => { setShowModal(false); setEditingMember(null); fetchMembers() }
+
+    const enterReorderMode = () => {
+        const initial: Record<string, string> = {}
+        members.forEach((m, i) => { initial[m.id] = String(i + 1) })
+        setPendingPositions(initial)
+        setReorderError('')
+        setReorderMode(true)
+    }
+    const cancelReorderMode = () => {
+        setReorderMode(false)
+        setPendingPositions({})
+        setReorderError('')
+    }
+    const handlePositionChange = (id: string, value: string) => {
+        setReorderError('')
+        setPendingPositions(prev => ({ ...prev, [id]: value }))
+    }
+    const handleReorderDone = () => {
+        const changed = members
+            .map((m, i) => ({ id: m.id, name: m.name, oldPosition: i + 1, newPosition: Number(pendingPositions[m.id]) }))
+            .filter(m => pendingPositions[m.id] !== undefined && String(m.oldPosition) !== pendingPositions[m.id])
+
+        if (changed.length === 0) { cancelReorderMode(); return }
+        if (changed.length > 1) { setReorderError('Change one member\'s position at a time.'); return }
+
+        const change = changed[0]
+        if (!Number.isInteger(change.newPosition) || change.newPosition < 1 || change.newPosition > members.length) {
+            setReorderError(`Position must be between 1 and ${members.length} (total members).`)
+            return
+        }
+        setConfirmReorder(change)
+    }
+    const confirmReorderAction = async () => {
+        if (!confirmReorder) return
+        setReorderSaving(true)
+        try {
+            const res = await fetch(`/api/members/${confirmReorder.id}/reorder`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_position: confirmReorder.newPosition }),
+            })
+            if (!res.ok) {
+                const e = await res.json().catch(() => ({}))
+                toast.error(e.error || 'Failed to reorder')
+            } else {
+                toast.success('Order updated')
+                await fetchMembers()
+                cancelReorderMode()
+            }
+        } catch {
+            toast.error('Failed to reorder')
+        } finally {
+            setReorderSaving(false)
+            setConfirmReorder(null)
+        }
+    }
     const openViewMember = (member: Employee) => { setViewingMember(member); fetchPermissions(member.id) }
 
     const formatDate = (d: string | null) => {
@@ -316,6 +377,21 @@ export default function MembersPage() {
                     <option value="active">Active</option>
                     <option value="inactive">Inactive</option>
                 </select>
+                {isAdmin && !reorderMode && (
+                    <button className="btn btn-ghost btn-icon" title="Edit serial number order" onClick={enterReorderMode}
+                        style={{ width: '38px', height: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <IconEdit size={16} />
+                    </button>
+                )}
+                {reorderMode && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button className="btn btn-primary btn-sm" onClick={handleReorderDone}>Done</button>
+                        <button className="btn btn-ghost btn-sm" onClick={cancelReorderMode}>Cancel</button>
+                    </div>
+                )}
+                {reorderError && (
+                    <span style={{ fontSize: '0.8125rem', color: '#DC2626', display: 'flex', alignItems: 'center' }}>{reorderError}</span>
+                )}
             </motion.div>
 
             {/* Members List */}
@@ -338,11 +414,22 @@ export default function MembersPage() {
                 </motion.div>
             ) : (
                 <motion.div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }} variants={container} animate="show">
-                    {members.map((member) => (
+                    {members.map((member, index) => (
                         <motion.div key={member.id} className="card" variants={item}
                             whileHover={{ y: -1, boxShadow: '0 4px 20px rgba(15,23,42,0.06)' }}
                             style={{ cursor: 'pointer', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: '16px' }}
                             onClick={() => openViewMember(member)}>
+                            {reorderMode ? (
+                                <input
+                                    type="number" min={1} max={members.length}
+                                    value={pendingPositions[member.id] ?? String(index + 1)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => handlePositionChange(member.id, e.target.value)}
+                                    style={{ width: '40px', height: '28px', textAlign: 'center', fontSize: '0.8125rem', fontWeight: 700, borderRadius: '6px', border: '1px solid var(--color-border-light)', flexShrink: 0 }}
+                                />
+                            ) : (
+                                <span style={{ width: '24px', textAlign: 'center', fontSize: '0.8125rem', fontWeight: 700, color: 'var(--color-text-tertiary)', flexShrink: 0 }}>{index + 1}</span>
+                            )}
                             <div
                                 style={{ background: getAvatarColor(member.name), width: '44px', height: '44px', fontSize: '1rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', color: 'white', fontWeight: 600, overflow: 'hidden', cursor: member.avatar_url ? 'zoom-in' : undefined }}
                                 onClick={member.avatar_url ? (e) => { e.stopPropagation(); setZoomedAvatar(member.avatar_url) } : undefined}>
@@ -552,6 +639,30 @@ export default function MembersPage() {
                     <MemberModal member={editingMember} departments={departments} roles={roles}
                         isAdmin={isAdmin} isSuperAdmin={isSuperAdmin} initialTab={initialTab}
                         onClose={() => { setShowModal(false); setEditingMember(null); setInitialTab('profile') }} onSave={handleSave} />
+                )}
+            </AnimatePresence>
+
+            {/* Reorder Confirm */}
+            <AnimatePresence>
+                {confirmReorder && (
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        onClick={() => !reorderSaving && setConfirmReorder(null)}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <motion.div className="card" initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ padding: '24px', width: '380px', maxWidth: '90vw' }}>
+                            <div style={{ fontSize: '0.9375rem', fontWeight: 600, marginBottom: '8px' }}>Confirm reorder</div>
+                            <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '20px' }}>
+                                Move <strong>{confirmReorder.name}</strong> from position {confirmReorder.oldPosition} to position {confirmReorder.newPosition}?
+                            </p>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                                <button className="btn btn-ghost btn-sm" disabled={reorderSaving} onClick={() => setConfirmReorder(null)}>Cancel</button>
+                                <button className="btn btn-primary btn-sm" disabled={reorderSaving} onClick={confirmReorderAction}>
+                                    {reorderSaving ? 'Saving...' : 'Confirm'}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
                 )}
             </AnimatePresence>
 

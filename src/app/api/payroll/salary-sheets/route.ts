@@ -132,7 +132,7 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
          LEFT JOIN employees e ON e.id = se.employee_id
          LEFT JOIN departments d ON d.id = e.department_id
          WHERE se.salary_sheet_id = $1
-         ORDER BY se.updated_at ASC`,
+         ORDER BY e.sort_order ASC NULLS LAST, se.updated_at ASC`,
         [sheetId]
     )
 
