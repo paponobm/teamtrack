@@ -66,6 +66,11 @@ interface RankingEntry {
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.03 } } }
 const item = { hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } }
 
+// Sentinel range for the "Pending Verification" card's all-time query, and for jumping the main
+// table to "every pending item ever" when that card is clicked.
+const ALL_TIME_START = '2000-01-01'
+const ALL_TIME_END = '2999-12-31'
+
 const SOURCE_LABELS: Record<string, string> = {
     facebook: 'Facebook',
     whatsapp: 'WhatsApp',
@@ -159,6 +164,11 @@ export default function WorkLogPage() {
     const toast = useToast()
     const [entries, setEntries] = useState<WorkEntry[]>([])
     const [stats, setStats] = useState<Stats>({ totalOrders: 0, totalAmount: 0, totalAdvance: 0, sources: {}, orderTypes: {}, statusBreakdown: {}, verifiedAdvanceAmount: 0, verifiedAdvanceCount: 0, pendingAdvanceAmount: 0, pendingAdvanceCount: 0, advanceOrderCount: 0, paymentGatewaySummary: {} })
+    // The "Pending Verification" card intentionally ignores the Daily/Weekly/Monthly/Custom date
+    // filter above — a still-unverified advance from a previous day would otherwise disappear
+    // from view the moment "today" rolls over, silently hiding a real backlog. Fetched separately
+    // across all time so it always reflects the true outstanding total.
+    const [allTimePending, setAllTimePending] = useState({ amount: 0, count: 0 })
     const [loading, setLoading] = useState(true)
     const [date, setDate] = useState(getLocalDateString())
     const [dateRangeMode, setDateRangeMode] = useState<DateRangeMode>('today')
@@ -249,7 +259,18 @@ export default function WorkLogPage() {
         setLoading(false)
     }, [date, dateRangeMode, customStart, customEnd, filterEmployee, filterOrderType, filterSource, filterStatus, filterAdvanceStatus])
 
+    // Deliberately ignores every filter above (date range, member, type, source, status) — this
+    // is meant to be the one true count of everything still awaiting advance verification,
+    // regardless of what the rest of the page is currently scoped to.
+    const fetchAllTimePending = useCallback(async () => {
+        const params = new URLSearchParams({ start_date: ALL_TIME_START, end_date: ALL_TIME_END, advance_status: 'pending_verification' })
+        const res = await fetch(`/api/work-log?${params}`)
+        const data = await res.json()
+        if (data.stats) setAllTimePending({ amount: data.stats.pendingAdvanceAmount, count: data.stats.pendingAdvanceCount })
+    }, [])
+
     useEffect(() => { fetchEntries() }, [fetchEntries])
+    useEffect(() => { fetchAllTimePending() }, [fetchAllTimePending])
 
     useEffect(() => {
         const fetchEmp = async () => {
@@ -304,18 +325,29 @@ export default function WorkLogPage() {
 
     const isToday = date === getLocalDateString()
 
+    // Jumps the table below to every pending-verification entry ever logged, so clicking the
+    // "Pending Verification" card is a one-click way to actually see what it's counting.
+    const showAllPendingVerifications = () => {
+        setDateRangeMode('custom')
+        setCustomStart(ALL_TIME_START)
+        setCustomEnd(ALL_TIME_END)
+        setFilterAdvanceStatus('pending_verification')
+    }
+
     const handleDelete = async (id: string) => {
         if (!confirm('Delete this entry?')) return
         const res = await fetch(`/api/work-log/${id}`, { method: 'DELETE' })
         if (!res.ok) { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Failed to delete entry'); return }
         toast.success('Entry deleted')
         fetchEntries()
+        fetchAllTimePending()
     }
 
     const handleSave = () => {
         setShowModal(false)
         setEditingEntry(null)
         fetchEntries()
+        fetchAllTimePending()
     }
 
     const handleStatusChange = async (entryId: string, newStatus: string) => {
@@ -330,6 +362,7 @@ export default function WorkLogPage() {
             if (!res.ok) { setEntries(prevEntries); const e = await res.json().catch(() => ({})); toast.error(e.error || 'Failed to update status'); return }
         } catch { setEntries(prevEntries); toast.error('Failed to update status'); return }
         fetchEntries()
+        fetchAllTimePending()
     }
 
     const handleQuickSubmit = async () => {
@@ -356,6 +389,7 @@ export default function WorkLogPage() {
             if (res.ok) {
                 setQuickForm({ customer_phone: '', customer_name: '', invoice_no: '', courier_id: '', source: '', amount: '', order_type: '', delivery_status: 'confirmed', employee_id: quickForm.employee_id, payment_gateway: '', business_name: '' })
                 fetchEntries()
+                fetchAllTimePending()
             } else {
                 const e = await res.json().catch(() => ({}))
                 toast.error(e.error || 'Failed to add entry')
@@ -540,10 +574,10 @@ export default function WorkLogPage() {
                         <div style={{ fontSize: '0.6875rem', color: '#F59E0B', marginTop: '4px' }}>{suggestedTypeCount} order{suggestedTypeCount === 1 ? '' : 's'}</div>
                     </div>
 
-                    <div className="stat-card">
+                    <div className="stat-card" onClick={showAllPendingVerifications} title="View all pending verifications" style={{ cursor: 'pointer' }}>
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Pending Verification</span>
-                        <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{stats.pendingAdvanceAmount.toLocaleString()}</span>
-                        <div style={{ fontSize: '0.6875rem', color: '#DC2626', marginTop: '4px' }}>Pending: {stats.pendingAdvanceCount}</div>
+                        <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{allTimePending.amount.toLocaleString()}</span>
+                        <div style={{ fontSize: '0.6875rem', color: '#DC2626', marginTop: '4px' }}>Pending: {allTimePending.count}</div>
                     </div>
                      <div className="stat-card">
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconCheckCircle size={14} color="var(--color-text-tertiary)" /> Verified Advance Payment</span>
