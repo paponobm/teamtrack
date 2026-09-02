@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
-import { usePermissions } from '@/lib/PermissionsContext'
 import StarRating from '@/components/common/StarRating'
 import InfluencerProfileModal from '@/components/pr-management/InfluencerProfileModal'
 import { CONTACT_SOURCES, PLATFORMS } from '@/components/pr-management/influencerConstants'
@@ -84,9 +83,11 @@ function VideoStatusBadge({ status }: { status: string | null }) {
 const formatCardDate = (d: string | null) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '--'
 
 export default function InfluencersTab() {
-    const { data: perms } = usePermissions()
     const toast = useToast()
-    const isAdmin = perms.is_super || perms.role === 'Admin' || perms.role === 'Owner' || perms.role === 'Super Admin'
+    // Managing influencers (add/edit/rate/delete) is a base pr-sending action, same as sending a
+    // PR on the other tab — available to anyone who can reach this page at all (already gated by
+    // RequireFeature slugs={['pr-sending']} one level up), not just global Admins.
+    const isAdmin = true
 
     const [influencers, setInfluencers] = useState<InfluencerListItem[]>([])
     const [summary, setSummary] = useState<Summary | null>(null)
@@ -238,13 +239,11 @@ export default function InfluencersTab() {
                         <h1 className="page-title">Influencers</h1>
                         <p className="page-subtitle">Manage influencer partnerships and PR collaborations</p>
                     </div>
-                    {isAdmin && (
-                        <div style={{ display: 'flex', gap: '12px' }}>
-                            <button className="btn btn-primary btn-sm" onClick={() => { setForm(emptyForm); setShowAddModal(true) }}>
-                                <IconPlus size={16} /> Add Influencer
-                            </button>
-                        </div>
-                    )}
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                        <button className="btn btn-primary btn-sm" onClick={() => { setForm(emptyForm); setShowAddModal(true) }}>
+                            <IconPlus size={16} /> Add Influencer
+                        </button>
+                    </div>
                 </motion.div>
 
                 {/* Summary cards */}

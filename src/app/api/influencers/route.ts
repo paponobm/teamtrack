@@ -147,9 +147,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ data: list, summary })
 }
 
-// POST /api/influencers - manually add a new influencer profile (Admin+)
+// POST /api/influencers - manually add a new influencer profile. Same as sending a PR on the
+// other tab, this is a base pr-sending action available to anyone with access to the page
+// (gated by RequireFeature slugs={['pr-sending']} client-side) — not just global Admins.
 export async function POST(request: Request) {
-    const auth = await requireAuth(3) // Admin+
+    const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
     const db = auth.db
 
@@ -173,11 +175,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ data }, { status: 201 })
 }
 
-// PUT /api/influencers - update a profile, including the 5-criteria rating (Admin+).
+// PUT /api/influencers - update a profile, including the 5-criteria rating. Same base
+// pr-sending action as adding one — available to anyone with access to the page.
 // When any rating_* field is present, the overall `rating` is auto-averaged from all
 // five criteria server-side rather than trusting a client-computed value.
 export async function PUT(request: Request) {
-    const auth = await requireAuth(3) // Admin+
+    const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
     const db = auth.db
 
@@ -224,10 +227,11 @@ export async function PUT(request: Request) {
     return NextResponse.json({ data })
 }
 
-// DELETE /api/influencers?id=<uuid> - remove a profile (Admin+). Linked PR entries keep
+// DELETE /api/influencers?id=<uuid> - remove a profile. Same base pr-sending action as
+// adding/editing one — available to anyone with access to the page. Linked PR entries keep
 // their history but influencer_id is cleared (ON DELETE SET NULL).
 export async function DELETE(request: Request) {
-    const auth = await requireAuth(3) // Admin+
+    const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
     const db = auth.db
 
