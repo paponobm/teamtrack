@@ -31,7 +31,8 @@ export default function PayrollManagementPage() {
 
     if (isLoading) return null
 
-    if (!data.is_super) {
+    const hasGrantedAccess = !!(data.permissions?.['payroll-management'] && data.permissions['payroll-management'] !== 'no_access')
+    if (!data.is_super && !hasGrantedAccess) {
         return (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: '12px', color: 'var(--color-text-tertiary)' }}>
                 <IconShieldAlert size={32} />

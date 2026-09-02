@@ -72,6 +72,12 @@ const PAGE_DEFINITIONS = [
         section: 'Operations',
         pages: [
             { name: 'Courier', slug: 'courier', desc: 'Courier tracking and management' },
+            // Finance and Payroll Management expose salary/compensation data, so — unlike every
+            // other grantable page here — only a Super Admin can see or toggle these two when
+            // editing someone's Access tab; a plain Admin editor doesn't see them at all.
+            { name: 'Finance', slug: 'finance', desc: 'View and manage expenses and income', superOnly: true },
+            { name: 'Product Buy', slug: 'product-buy', desc: 'Track product purchases and payments' },
+            { name: 'Payroll Management', slug: 'payroll-management', desc: 'View and manage monthly salary sheets', superOnly: true },
             { name: 'Requisitions', slug: 'requisitions', desc: 'Submit requisition requests' },
             { name: 'Ideas', slug: 'idea-sharing', desc: 'Share and upvote ideas' },
             { name: 'Content', slug: 'content', desc: 'Draft and manage content' },
@@ -79,8 +85,6 @@ const PAGE_DEFINITIONS = [
         ]
     },
 ]
-
-const ALL_PAGE_SLUGS = PAGE_DEFINITIONS.flatMap(s => s.pages.map(p => p.slug))
 
 interface Feature {
     id: string
@@ -374,7 +378,11 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
         })
     }
 
-    const accessCount = ALL_PAGE_SLUGS.filter(slug => accessMap[slug] && accessMap[slug] !== 'no_access').length
+    // Scoped to whoever is currently editing — a plain Admin never sees the superOnly (Finance,
+    // Payroll Management) slugs at all, so they're excluded from every count shown to them too,
+    // not just hidden from the list below.
+    const visiblePageSlugs = PAGE_DEFINITIONS.flatMap(s => s.pages.filter(p => !p.superOnly || isSuperAdmin).map(p => p.slug))
+    const accessCount = visiblePageSlugs.filter(slug => accessMap[slug] && accessMap[slug] !== 'no_access').length
 
     const sectionStyle: React.CSSProperties = { marginBottom: '24px', paddingBottom: '24px', borderBottom: '1px solid var(--color-border-light)' }
     const sectionTitle: React.CSSProperties = { fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.04em' }
@@ -729,14 +737,14 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                         <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-tertiary)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Pages Accessible</div>
                                         <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
                                             <span style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--color-primary, #2563EB)', lineHeight: 1 }}>{accessCount}</span>
-                                            <span style={{ fontSize: '0.8125rem', fontWeight: 400, color: 'var(--color-text-tertiary)' }}>/ {ALL_PAGE_SLUGS.length} pages</span>
+                                            <span style={{ fontSize: '0.8125rem', fontWeight: 400, color: 'var(--color-text-tertiary)' }}>/ {visiblePageSlugs.length} pages</span>
                                         </div>
                                     </div>
                                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                                         {([
-                                            { label: 'No Access', color: '#94A3B8', count: ALL_PAGE_SLUGS.filter(s => !accessMap[s] || accessMap[s] === 'no_access').length },
-                                            { label: 'Member', color: '#2563EB', count: ALL_PAGE_SLUGS.filter(s => accessMap[s] === 'member').length },
-                                            { label: 'Admin', color: '#059669', count: ALL_PAGE_SLUGS.filter(s => accessMap[s] === 'admin').length },
+                                            { label: 'No Access', color: '#94A3B8', count: visiblePageSlugs.filter(s => !accessMap[s] || accessMap[s] === 'no_access').length },
+                                            { label: 'Member', color: '#2563EB', count: visiblePageSlugs.filter(s => accessMap[s] === 'member').length },
+                                            { label: 'Admin', color: '#059669', count: visiblePageSlugs.filter(s => accessMap[s] === 'admin').length },
                                         ] as const).map(stat => (
                                             <div key={stat.label} style={{
                                                 display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -776,7 +784,8 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                 ) : (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                                         {PAGE_DEFINITIONS.map(section => {
-                                            const sectionGranted = section.pages.filter(p => accessMap[p.slug] && accessMap[p.slug] !== 'no_access').length
+                                            const visiblePages = section.pages.filter(p => !p.superOnly || isSuperAdmin)
+                                            const sectionGranted = visiblePages.filter(p => accessMap[p.slug] && accessMap[p.slug] !== 'no_access').length
                                             return (
                                                 <div key={section.section}>
                                                     {/* Section Header */}
@@ -794,13 +803,13 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                                             color: sectionGranted > 0 ? 'var(--color-primary, #2563EB)' : 'var(--color-text-tertiary)',
                                                             border: `1px solid ${sectionGranted > 0 ? 'rgba(37,99,235,0.2)' : 'var(--color-border-light)'}`,
                                                         }}>
-                                                            {sectionGranted}/{section.pages.length}
+                                                            {sectionGranted}/{visiblePages.length}
                                                         </div>
                                                     </div>
 
                                                     {/* Page Cards - 2 per row */}
                                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                                        {section.pages.map(page => {
+                                                        {visiblePages.map(page => {
                                                             const level = accessMap[page.slug] || 'no_access'
                                                             const isOn = level !== 'no_access'
                                                             const isAdminLevel = level === 'admin'

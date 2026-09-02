@@ -67,6 +67,7 @@ export default function ProductBuyPage() {
     const [editing, setEditing] = useState<ProductBuy | null>(null)
 
     const isAdmin = data.is_admin || data.is_super
+    const hasGrantedAccess = !!(data.permissions?.['product-buy'] && data.permissions['product-buy'] !== 'no_access')
 
     const fetchProductBuys = useCallback(async () => {
         setLoading(true)
@@ -120,7 +121,7 @@ export default function ProductBuyPage() {
 
     if (permsLoading) return null
 
-    if (!isAdmin) {
+    if (!isAdmin && !hasGrantedAccess) {
         return (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: '12px', color: 'var(--color-text-tertiary)' }}>
                 <IconShieldAlert size={32} />

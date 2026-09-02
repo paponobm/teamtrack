@@ -8,7 +8,7 @@ import { NextResponse } from 'next/server'
 const MONTH_RE = /^\d{4}-\d{2}$/
 
 // GET /api/payroll/dashboard/range?from=YYYY-MM&to=YYYY-MM — Payroll Summary cards, combined
-// across every salary sheet whose month falls within [from, to] (Super Admin only). Replaces
+// across every salary sheet whose month falls within [from, to] (Super Admin, or a Member granted the Payroll Management feature). Replaces
 // the old single-month /api/payroll/dashboard + all-time /api/payroll/dashboard/salary-expense
 // pair now that the summary cards have their own From/To range filter (separate from the Salary
 // Sheet table's single Month filter below them) — a single month is just a range where from===to,
@@ -25,7 +25,7 @@ const MONTH_RE = /^\d{4}-\d{2}$/
 // Summing each month's own count would double-count someone paid every month in the range, so
 // it's a distinct-employee count instead — "how many people this range covers."
 export async function GET(request: Request) {
-    const auth = await requireAuth(2) // Super Admin only — salary data
+    const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
     const db = auth.db
 

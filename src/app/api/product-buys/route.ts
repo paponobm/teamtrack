@@ -10,7 +10,7 @@ const PB_JOINS = `LEFT JOIN employees e ON e.id = p.employee_id LEFT JOIN employ
 // date-filtered (Admin+). A separate table/endpoint from /api/advances — Product Buy and
 // Advance are independent deduction types, never merged.
 export async function GET(request: Request) {
-    const auth = await requireAuth(3)
+    const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
     const db = auth.db
 
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
 // actually reads) is computed here as product_price - discount_price so it can never drift
 // from the two inputs that produced it.
 export async function POST(request: Request) {
-    const auth = await requireAuth(3)
+    const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
     const db = auth.db
 

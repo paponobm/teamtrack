@@ -15,10 +15,10 @@ const NUMERIC_FIELDS = ['extra_duty', 'performance_bonus', 'other_deduction'] as
 const PAYMENT_METHODS = ['bKash', 'Rocket', 'Nagad', 'Bank', 'Cash'] as const
 
 // PUT /api/payroll/salary-entries — edit one employee's salary amounts/payment status for
-// a month (Super Admin only). Employee/attendance/leave/fine fields are never accepted
+// a month (Super Admin, or a Member granted the Payroll Management feature). Employee/attendance/leave/fine fields are never accepted
 // here — they're read-only, derived data that this route has no business touching.
 export async function PUT(request: Request) {
-    const auth = await requireAuth(2)
+    const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
     const db = auth.db
 

@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server'
 // belongs to (Admin+). Recomputes `amount` whenever product_price/discount_price changes —
 // same product_price - discount_price formula used at creation (see POST above).
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
-    const auth = await requireAuth(3)
+    const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
 
     const { id } = await params
@@ -86,7 +86,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
 // DELETE /api/product-buys/:id (Admin+).
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
-    const auth = await requireAuth(3)
+    const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
 
     const { id } = await params

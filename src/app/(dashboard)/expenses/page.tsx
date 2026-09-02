@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { usePermissions } from '@/lib/PermissionsContext'
+import { IconShieldAlert } from '@/components/icons/Icons'
 import ModernDatePicker from '@/components/ui/ModernDatePicker'
 import { useToast } from '@/lib/ToastContext'
 import FundPanel from '@/components/expenses/FundPanel'
@@ -104,7 +105,7 @@ interface IncomeEntry {
 }
 
 export default function ExpensesPage() {
-    const { data: perms } = usePermissions()
+    const { data: perms, isLoading: permsLoading } = usePermissions()
     const toast = useToast()
     const [expenses, setExpenses] = useState<Expense[]>([])
     const [stats, setStats] = useState({ total: 0, pending: 0, paid: 0, rejected: 0, count: 0 })
@@ -437,6 +438,22 @@ export default function ExpensesPage() {
             icon: (<svg width="17" height="17" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1H3a1 1 0 01-1-1v-6zM8 7a1 1 0 011-1h2a1 1 0 011 1v10a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 3a1 1 0 011-1h2a1 1 0 011 1v14a1 1 0 01-1 1h-2a1 1 0 01-1-1V3z" /></svg>),
         },
     ]
+
+    // Finance exposes company expense/income data, so — like Payroll Management — a plain Admin
+    // needs an explicit grant from a Super Admin (via Members → Edit Member → Access) to get in;
+    // only Owner/Super Admin have it automatically. `isAdmin` above stays the broad org-role flag
+    // used for the admin-only tabs/actions further down; this is just the entry gate.
+    if (permsLoading) return null
+
+    const hasFinanceAccess = perms.is_super || !!(perms.permissions?.['finance'] && perms.permissions['finance'] !== 'no_access')
+    if (!hasFinanceAccess) {
+        return (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: '12px', color: 'var(--color-text-tertiary)' }}>
+                <IconShieldAlert size={32} />
+                <div style={{ fontSize: '0.9375rem', fontWeight: 600 }}>Access restricted to Admins</div>
+            </div>
+        )
+    }
 
     return (
         <motion.div variants={container} animate="show">

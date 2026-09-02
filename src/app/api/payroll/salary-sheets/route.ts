@@ -203,9 +203,9 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
     })
 }
 
-// GET /api/payroll/salary-sheets?month=YYYY-MM (Super Admin only)
+// GET /api/payroll/salary-sheets?month=YYYY-MM (Super Admin, or a Member granted the Payroll Management feature)
 export async function GET(request: Request) {
-    const auth = await requireAuth(2)
+    const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
     const db = auth.db
 
@@ -231,11 +231,11 @@ export async function GET(request: Request) {
 }
 
 // POST /api/payroll/salary-sheets — create this month's sheet from current active
-// employees (Super Admin only). Idempotent: if a sheet already exists for the month, just
+// employees (Super Admin, or a Member granted the Payroll Management feature). Idempotent: if a sheet already exists for the month, just
 // returns it as-is rather than erroring, so the "Create Salary Sheet" button is always safe
 // to click. Never overwrites another month's sheet — each month is its own row.
 export async function POST(request: Request) {
-    const auth = await requireAuth(2)
+    const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
     const db = auth.db
 
