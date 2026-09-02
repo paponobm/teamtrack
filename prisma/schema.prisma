@@ -908,7 +908,7 @@ model work_entries {
   suggested_amount                                   Decimal?   @db.Decimal(10, 2)
   advance                                            Decimal?   @db.Decimal(10, 2)
   note                                               String?
-  order_type                                         String?
+  order_type                                         String[]
   delivery_status                                    String?
   management_check                                   String?    @db.Uuid
   authority_check                                    String?    @db.Uuid

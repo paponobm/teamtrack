@@ -61,15 +61,16 @@ export async function PUT(request: Request) {
 
     // Award auto-points when delivered
     if (delivery_status === 'delivered' && oldStatus !== 'delivered' && oldEntry?.employee_id) {
-        const orderType = oldEntry.order_type || 'normal'
-        const points = ORDER_POINTS[orderType] || 5
+        // order_type is multi-select — sum points across every type tagged on the order.
+        const orderTypes: string[] = (oldEntry.order_type && oldEntry.order_type.length > 0) ? oldEntry.order_type : ['normal']
+        const points = orderTypes.reduce((sum: number, ot: string) => sum + (ORDER_POINTS[ot] || 0), 0) || 5
         await awardPoints(
             db,
             oldEntry.employee_id,
             points,
             'order',
             entry_id,
-            `Order delivered (${orderType}) - ${points} pts`,
+            `Order delivered (${orderTypes.join(', ')}) - ${points} pts`,
             null
         )
     }

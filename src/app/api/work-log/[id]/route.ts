@@ -60,9 +60,11 @@ export async function PATCH(
             'upsell': 20,
             'incomplete': 10,
         }
-        const pts = pointMap[body.order_type || data.order_type || 'normal'] || 0
+        // order_type is multi-select — sum points across every type tagged on the order.
+        const orderTypes: string[] = (data.order_type && data.order_type.length > 0) ? data.order_type : ['normal']
+        const pts = orderTypes.reduce((sum, ot) => sum + (pointMap[ot] || 0), 0)
         if (pts > 0) {
-            await awardPoints(db, data.employee_id, pts, 'work_log', data.id, `Order delivered (${body.order_type || data.order_type || 'normal'})`, auth.employee.id)
+            await awardPoints(db, data.employee_id, pts, 'work_log', data.id, `Order delivered (${orderTypes.join(', ')})`, auth.employee.id)
             awardedPoints = pts
         }
     }

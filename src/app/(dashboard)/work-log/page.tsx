@@ -26,7 +26,7 @@ interface WorkEntry {
     suggested_amount: number | null
     advance: number | null
     note: string
-    order_type: string
+    order_type: string[]
     delivery_status: string
     payment_gateway: string | null
     transaction_id: string | null
@@ -384,6 +384,9 @@ export default function WorkLogPage() {
                     amount: Number(quickForm.amount) || 0,
                     date,
                     employee_id: resolvedEmployeeId,
+                    // order_type is stored as an array (multi-select in the full Add Entry
+                    // modal); the compact Quick row only picks one, so wrap it here.
+                    order_type: quickForm.order_type ? [quickForm.order_type] : [],
                 }),
             })
             if (res.ok) {
@@ -402,7 +405,7 @@ export default function WorkLogPage() {
 
     // Total Suggested Amount card — same per-entry total as "Total Amount" (base + suggested
     // amount), just scoped to orders whose type is specifically "Suggested".
-    const suggestedTypeEntries = entries.filter(e => e.order_type === 'suggested' && e.delivery_status === 'confirmed')
+    const suggestedTypeEntries = entries.filter(e => e.order_type.includes('suggested') && e.delivery_status === 'confirmed')
     const totalSuggestedAmount = suggestedTypeEntries.reduce((s, e) => s + (Number(e.suggested_amount) || 0), 0)
     const suggestedTypeCount = suggestedTypeEntries.length
 
@@ -712,7 +715,6 @@ export default function WorkLogPage() {
                                 )}
                                 {displayedEntries.map((entry) => {
                                     const statusCfg = STATUS_CONFIG[entry.delivery_status] || STATUS_CONFIG.pending
-                                    const otColor = ORDER_TYPE_COLORS[entry.order_type] || '#6B7280'
                                     return (
                                         <tr key={entry.id}>
                                             <td style={{ fontWeight: 600, color: 'var(--color-text-tertiary)' }}>{entry.sl}</td>
@@ -732,7 +734,18 @@ export default function WorkLogPage() {
                                                 </div>
                                             </td>
                                             <td><span className="badge badge-neutral" style={{ fontSize: '0.625rem' }}>{SOURCE_LABELS[entry.source] || entry.source}</span></td>
-                                            <td><span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.625rem', fontWeight: 600, color: otColor, background: `${otColor}15` }}>{ORDER_TYPE_LABELS[entry.order_type] || entry.order_type}</span></td>
+                                            <td>
+                                                <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                                    {(entry.order_type.length > 0 ? entry.order_type : ['normal']).map(ot => {
+                                                        const color = ORDER_TYPE_COLORS[ot] || '#6B7280'
+                                                        return (
+                                                            <span key={ot} style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.625rem', fontWeight: 600, color, background: `${color}15` }}>
+                                                                {ORDER_TYPE_LABELS[ot] || ot}
+                                                            </span>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </td>
                                             <td style={{ textAlign: 'right', fontWeight: 600 }}>৳{(Number(entry.amount) + Number(entry.suggested_amount || 0)).toLocaleString()}</td>
                                             <td>
                                                 {Number(entry.advance) > 0 ? (

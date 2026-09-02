@@ -43,7 +43,7 @@ export async function GET(request: Request) {
         }
         empMap[e.employee_id].totalOrders++
         empMap[e.employee_id].totalAmount += (Number(e.amount) || 0) + (Number(e.suggested_amount) || 0)
-        if (e.order_type === '2000_plus') empMap[e.employee_id].orders2000Plus++
+        if (e.order_type && e.order_type.includes('2000_plus')) empMap[e.employee_id].orders2000Plus++
     }
 
     // Fetch employee names

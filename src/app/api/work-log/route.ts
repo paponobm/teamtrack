@@ -39,7 +39,7 @@ export async function GET(request: Request) {
         params.push(employeeId); conditions.push(`w.employee_id = $${params.length}`)
     }
 
-    if (orderType && orderType !== 'all') { params.push(orderType); conditions.push(`w.order_type = $${params.length}`) }
+    if (orderType && orderType !== 'all') { params.push(orderType); conditions.push(`$${params.length} = ANY(w.order_type)`) }
     if (source && source !== 'all') { params.push(source); conditions.push(`w.source = $${params.length}`) }
     if (deliveryStatus && deliveryStatus !== 'all') { params.push(deliveryStatus); conditions.push(`w.delivery_status = $${params.length}`) }
     if (advanceStatus === 'with_advance') {
@@ -93,9 +93,11 @@ export async function GET(request: Request) {
         acc[src] = (acc[src] || 0) + 1
         return acc
     }, {})
+    // An order tagged with multiple types (e.g. both Suggested and 2000+) counts toward each
+    // type's bucket here, since it genuinely belongs to both.
     const orderTypes = entries.reduce((acc: Record<string, number>, e) => {
-        const ot = e.order_type || 'normal'
-        acc[ot] = (acc[ot] || 0) + 1
+        const types: string[] = (e.order_type && e.order_type.length > 0) ? e.order_type : ['normal']
+        for (const ot of types) acc[ot] = (acc[ot] || 0) + 1
         return acc
     }, {})
     const statusBreakdown = entries.reduce((acc: Record<string, number>, e) => {
@@ -153,6 +155,11 @@ export async function POST(request: Request) {
 
     const sl = (count || 0) + 1
 
+    // order_type is now multi-select (an order can be both e.g. "Suggested" and "2000+" at
+    // once) — accept either an array from the current UI or a bare string for safety.
+    const orderTypes: string[] = Array.isArray(order_type) ? order_type : (order_type ? [order_type] : [])
+    const orderTypesToStore = orderTypes.length > 0 ? orderTypes : ['normal']
+
     const { rows: [data] } = await db.query(
         `WITH ins AS (
             INSERT INTO work_entries (
@@ -167,7 +174,7 @@ export async function POST(request: Request) {
         [
             targetEmployeeId, date, sl, customer_phone, customer_name || null, invoice_no, courier_id,
             source || 'direct', amount || 0, suggested_amount || null, advance || null, note,
-            order_type || 'normal', delivery_status || 'confirmed', payment_gateway || null,
+            orderTypesToStore, delivery_status || 'confirmed', payment_gateway || null,
             business_name || null, transaction_id || null,
         ]
     )
@@ -185,9 +192,11 @@ export async function POST(request: Request) {
             'upsell': 20,
             'incomplete': 10,
         }
-        const pts = pointMap[order_type || 'normal'] || 0
+        // Points are summed across every type tagged on the order — being both e.g. Suggested
+        // and 2000+ earns both bonuses, not just one.
+        const pts = orderTypesToStore.reduce((sum, ot) => sum + (pointMap[ot] || 0), 0)
         if (pts > 0) {
-            await awardPoints(db, targetEmployeeId, pts, 'work_log', data.id, `Order delivered (${order_type || 'normal'})`, auth.employee.id)
+            await awardPoints(db, targetEmployeeId, pts, 'work_log', data.id, `Order delivered (${orderTypesToStore.join(', ')})`, auth.employee.id)
             awardedPoints = pts
         }
     }

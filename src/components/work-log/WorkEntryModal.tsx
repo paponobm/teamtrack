@@ -1,11 +1,21 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 
 const PAYMENT_GATEWAYS = ['bKash', 'Rocket', 'Nagad', 'Bank', 'Cash']
 const BUSINESS_NAMES = ['OBM BN', 'OBM EN', 'Adishad', 'PGM', 'Premium Shukti', 'Premium Achar']
+const ORDER_TYPES = [
+    { key: 'normal', label: 'Normal' },
+    { key: 'suggested', label: 'Suggested' },
+    { key: '2000_plus', label: '2000+ Order' },
+    { key: '3000_plus', label: '3000+ Order' },
+    { key: '5000_plus', label: '5000+ Order' },
+    { key: 'upsell', label: 'Upsell' },
+    { key: 'incomplete', label: 'Incomplete Order' },
+    { key: 'exchange', label: 'Exchange' },
+]
 
 interface WorkEntryModalProps {
     entry: {
@@ -19,7 +29,7 @@ interface WorkEntryModalProps {
         suggested_amount: number | null
         advance: number | null
         note: string
-        order_type: string
+        order_type: string[]
         delivery_status: string
         payment_gateway: string | null
         transaction_id: string | null
@@ -56,11 +66,13 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
         suggested_amount: entry?.suggested_amount?.toString() || '',
         advance: entry?.advance?.toString() || '',
         note: entry?.note || '',
-        order_type: entry?.order_type || '',
+        order_type: entry?.order_type || [] as string[],
         delivery_status: entry?.delivery_status || 'confirmed',
         payment_gateway: entry?.payment_gateway || '',
         transaction_id: entry?.transaction_id || '',
-        business_name: entry?.business_name || '',
+        // Defaults to the primary business page for a brand-new entry — editing an existing
+        // entry always keeps whatever it already has (even if that's blank).
+        business_name: entry ? (entry.business_name || '') : 'OBM BN',
     })
 
     const [loading, setLoading] = useState(false)
@@ -105,6 +117,64 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
     const totalAmount = (parseFloat(form.amount) || 0) + (parseFloat(form.suggested_amount) || 0)
     const hasAdvance = parseFloat(form.advance) > 0
 
+    const toggleOrderType = (key: string) => {
+        setForm(prev => ({
+            ...prev,
+            order_type: prev.order_type.includes(key)
+                ? prev.order_type.filter(k => k !== key)
+                : [...prev.order_type, key],
+        }))
+    }
+
+    // Typing a Suggested amount implies the order is (at least in part) a suggested one — kept
+    // in sync both ways, so clearing the amount back out un-ticks it again too.
+    useEffect(() => {
+        const shouldHave = (parseFloat(form.suggested_amount) || 0) > 0
+        setForm(prev => {
+            const has = prev.order_type.includes('suggested')
+            if (shouldHave === has) return prev
+            return { ...prev, order_type: shouldHave ? [...prev.order_type, 'suggested'] : prev.order_type.filter(t => t !== 'suggested') }
+        })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [form.suggested_amount])
+
+    // Same idea for the amount tiers — only the single highest tier that's cleared is tagged
+    // (not every lower one it also technically clears) — dropping back below a threshold
+    // un-tags it, same as Suggested above.
+    useEffect(() => {
+        const tier = totalAmount >= 5000 ? '5000_plus' : totalAmount >= 3000 ? '3000_plus' : totalAmount >= 2000 ? '2000_plus' : null
+        const shouldHave: Record<string, boolean> = {
+            '2000_plus': tier === '2000_plus',
+            '3000_plus': tier === '3000_plus',
+            '5000_plus': tier === '5000_plus',
+        }
+        setForm(prev => {
+            let next = prev.order_type
+            let changed = false
+            for (const key of Object.keys(shouldHave)) {
+                const has = next.includes(key)
+                if (shouldHave[key] && !has) { next = [...next, key]; changed = true }
+                else if (!shouldHave[key] && has) { next = next.filter(t => t !== key); changed = true }
+            }
+            return changed ? { ...prev, order_type: next } : prev
+        })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [totalAmount])
+
+    // "Normal" is the fallback baseline type — it's only meaningful when nothing more specific
+    // is tagged, so it's auto-added when the list would otherwise be empty and auto-removed the
+    // moment any other type (auto or manual) is present.
+    useEffect(() => {
+        setForm(prev => {
+            const hasOthers = prev.order_type.some(t => t !== 'normal')
+            const shouldHaveNormal = !hasOthers
+            const has = prev.order_type.includes('normal')
+            if (shouldHaveNormal === has) return prev
+            return { ...prev, order_type: shouldHaveNormal ? [...prev.order_type, 'normal'] : prev.order_type.filter(t => t !== 'normal') }
+        })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [form.order_type])
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         setLoading(true)
@@ -116,7 +186,7 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
         if (!form.customer_name.trim()) { setError('Customer Name is required'); setLoading(false); return }
         if (!form.source) { setError('Source is required'); setLoading(false); return }
         if (!form.amount || parseFloat(form.amount) <= 0) { setError('Base Amount is required'); setLoading(false); return }
-        if (!form.order_type) { setError('Order Type is required'); setLoading(false); return }
+        if (form.order_type.length === 0) { setError('Order Type is required'); setLoading(false); return }
         if (!form.delivery_status) { setError('Delivery Status is required'); setLoading(false); return }
         if (!form.business_name) { setError('Business / Page Name is required'); setLoading(false); return }
 
@@ -349,27 +419,13 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
                         </div>
                     )}
 
-                    {/* Business Name + Order Type + Delivery Status */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+                    {/* Business Name + Delivery Status */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
                         <div className="input-group">
                             <label className="input-label">Business / Page Name<RequiredStar /></label>
                             <select className="input" name="business_name" value={form.business_name} onChange={handleChange}>
                                 <option value="">Select business</option>
                                 {BUSINESS_NAMES.map(b => <option key={b} value={b}>{b}</option>)}
-                            </select>
-                        </div>
-                        <div className="input-group">
-                            <label className="input-label">Order Type<RequiredStar /></label>
-                            <select className="input" name="order_type" value={form.order_type} onChange={handleChange}>
-                                <option value="" disabled>Select order type</option>
-                                <option value="normal">Normal</option>
-                                <option value="suggested">Suggested</option>
-                                <option value="2000_plus">2000+ Order</option>
-                                <option value="3000_plus">3000+ Order</option>
-                                <option value="5000_plus">5000+ Order</option>
-                                <option value="upsell">Upsell</option>
-                                <option value="incomplete">Incomplete Order</option>
-                                <option value="exchange">Exchange</option>
                             </select>
                         </div>
                         <div className="input-group">
@@ -384,6 +440,22 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
                                 <option value="partial_refunded">Partial Refund</option>
                                 <option value="cancelled">Cancelled</option>
                             </select>
+                        </div>
+                    </div>
+
+                    {/* Order Type — multi-select: an order can be e.g. both Suggested and 2000+ */}
+                    <div className="input-group" style={{ marginBottom: '16px' }}>
+                        <label className="input-label">Order Type<RequiredStar /></label>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            {ORDER_TYPES.map(ot => {
+                                const checked = form.order_type.includes(ot.key)
+                                return (
+                                    <label key={ot.key} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '8px', border: `1px solid ${checked ? 'var(--color-primary)' : 'var(--color-border-light)'}`, background: checked ? 'rgba(37,99,235,0.08)' : 'transparent', cursor: 'pointer', fontSize: '0.8125rem' }}>
+                                        <input type="checkbox" checked={checked} onChange={() => toggleOrderType(ot.key)} />
+                                        {ot.label}
+                                    </label>
+                                )
+                            })}
                         </div>
                     </div>
 
