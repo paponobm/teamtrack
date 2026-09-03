@@ -39,8 +39,8 @@ export async function PUT(request: Request) {
         return NextResponse.json({ error: 'Work entry not found' }, { status: 404 })
     }
 
-    // Members may only change the status of their own entries; admins (<=3) may change any.
-    if (auth.employee.roleLevel > 3 && oldEntry.employee_id !== auth.employee.id) {
+    // Members may only change the status of their own entries; Admin+/Manager (<=4) may change any.
+    if (auth.employee.roleLevel > 4 && oldEntry.employee_id !== auth.employee.id) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 

@@ -116,6 +116,7 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
 
     const totalAmount = (parseFloat(form.amount) || 0) + (parseFloat(form.suggested_amount) || 0)
     const hasAdvance = parseFloat(form.advance) > 0
+    const hasTransactionId = !!form.transaction_id.trim()
 
     const toggleOrderType = (key: string) => {
         setForm(prev => ({
@@ -338,7 +339,7 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
                         <div className="input-group">
                             <label className="input-label">Advance (৳)</label>
-                            <input className="input" name="advance" type="number" step="0.01" value={form.advance} onChange={handleChange} placeholder="0" />
+                            <input className="input" name="advance" type="number" step="0.01" value={form.advance} onChange={handleChange} placeholder="0" disabled={advanceVerified} />
                         </div>
                         <div className="input-group">
                             <label className="input-label">
@@ -350,6 +351,7 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
                                 name="payment_gateway"
                                 value={form.payment_gateway}
                                 onChange={handleChange}
+                                disabled={advanceVerified}
                                 style={hasAdvance && !form.payment_gateway ? { borderColor: '#DC2626', background: 'rgba(220,38,38,0.04)' } : undefined}
                             >
                                 <option value="">Select gateway</option>
@@ -365,7 +367,7 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
                     {form.payment_gateway && (
                         <div className="input-group" style={{ marginBottom: '16px' }}>
                             <label className="input-label">Transaction ID / last 4 digits</label>
-                            <input className="input" name="transaction_id" type="text" value={form.transaction_id} onChange={handleChange} placeholder="e.g. 8N7A2K9XYZ" />
+                            <input className="input" name="transaction_id" type="text" value={form.transaction_id} onChange={handleChange} placeholder="e.g. 8N7A2K9XYZ" disabled={advanceVerified} />
                         </div>
                     )}
 
@@ -396,9 +398,14 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
                             {canVerifyAdvance && !advanceVerified && (parseFloat(form.advance) || 0) > 0 && (
                                 <div style={{ marginTop: '12px' }}>
                                     {!showVerifyConfirm ? (
-                                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowVerifyConfirm(true)}>
-                                            Verify Advance
-                                        </button>
+                                        <>
+                                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowVerifyConfirm(true)} disabled={!hasTransactionId}>
+                                                Verify Advance
+                                            </button>
+                                            {!hasTransactionId && (
+                                                <div style={{ fontSize: '0.6875rem', color: '#DC2626', marginTop: '6px' }}>Transaction ID is required before verifying</div>
+                                            )}
+                                        </>
                                     ) : (
                                         <div style={{ padding: '12px', background: 'rgba(37,99,235,0.05)', border: '1px solid rgba(37,99,235,0.15)', borderRadius: '8px' }}>
                                             <div style={{ fontSize: '0.8125rem', fontWeight: 600, marginBottom: '6px' }}>Verify this advance payment?</div>

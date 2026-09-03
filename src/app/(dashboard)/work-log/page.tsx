@@ -199,7 +199,7 @@ export default function WorkLogPage() {
     const [rankingLoading, setRankingLoading] = useState(false)
 
     const isMember = currentUser && !currentUser.is_super
-    const isAdmin = !!currentUser && (currentUser.is_super || ['Owner', 'Super Admin', 'Admin'].includes(currentUser.role))
+    const isAdmin = !!currentUser && (currentUser.is_super || ['Owner', 'Super Admin', 'Admin', 'Manager'].includes(currentUser.role))
 
     // Client-side search across customer, invoice, courier id, business (#7)
     const q = searchQuery.trim().toLowerCase()

@@ -9,7 +9,10 @@ export async function GET(request: Request) {
     const db = auth.db
 
     const { searchParams } = new URL(request.url)
-    const isAdmin = auth.employee.roleLevel <= 3
+    // Manager gets full Work Log parity with Admin (see everyone's entries, filter by member,
+    // etc.) — the one thing Manager can't do, verifying advance payments, is gated separately
+    // and more strictly (Admin+ only) in /api/work-log/[id]/verify-advance.
+    const isAdmin = auth.employee.roleLevel <= 4
 
     const date = searchParams.get('date')
     const startDate = searchParams.get('start_date')
@@ -123,7 +126,8 @@ export async function POST(request: Request) {
     const db = auth.db
 
     const body = await request.json()
-    const isAdmin = auth.employee.roleLevel <= 3
+    // Manager gets full Work Log parity with Admin here too — can log an entry for any member.
+    const isAdmin = auth.employee.roleLevel <= 4
 
     const {
         employee_id, date, customer_phone, customer_name, invoice_no, courier_id,

@@ -13,7 +13,8 @@ export async function PATCH(
 
     const { id } = await params
     const body = await request.json()
-    const isAdmin = auth.employee.roleLevel <= 3
+    // Manager gets full Work Log parity with Admin — can edit any member's entry.
+    const isAdmin = auth.employee.roleLevel <= 4
 
     // Fetch old entry (full row) to detect changes, status transitions and ownership
     const { rows: [oldEntry] } = await db.query(`SELECT * FROM work_entries WHERE id = $1`, [id])

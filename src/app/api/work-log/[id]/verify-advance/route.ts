@@ -15,7 +15,7 @@ export async function POST(
     const { id } = await params
 
     const { rows: [entryRow] } = await db.query(
-        `SELECT advance, advance_verified, sl, invoice_no, date, payment_gateway, business_name FROM work_entries WHERE id = $1`,
+        `SELECT advance, advance_verified, sl, invoice_no, date, payment_gateway, business_name, transaction_id FROM work_entries WHERE id = $1`,
         [id]
     )
 
@@ -26,6 +26,9 @@ export async function POST(
     }
     if (entryRow.advance_verified) {
         return NextResponse.json({ error: 'This advance payment is already verified' }, { status: 409 })
+    }
+    if (!entryRow.transaction_id || !entryRow.transaction_id.trim()) {
+        return NextResponse.json({ error: 'Transaction ID is required before verifying this advance payment' }, { status: 400 })
     }
 
     const now = new Date().toISOString()
