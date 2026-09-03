@@ -174,12 +174,19 @@ export async function PUT(request: Request) {
                 providentFundDetails[data.employee_id]?.total || 0,
             )
 
+            // Paid on time (within the sheet's own month, or even early) → book the expense on
+            // the actual date it was paid. Paid late (settled in a month after the one it's
+            // for) → book it on the sheet month's last day instead, so a late August payout
+            // still shows up as an August expense rather than leaking into whatever month it
+            // was actually settled in.
+            const paymentMonth = (data.payment_date || end).slice(0, 7)
+            const isLatePayment = paymentMonth > sheet.month
             const salaryExpenseId = await createOrSyncSalaryExpense(db, {
                 expenseId: data.expense_id,
                 employeeId: data.employee_id,
                 month: sheet.month,
                 amount: netPayable,
-                date: data.payment_date,
+                date: isLatePayment ? end : (data.payment_date || end),
                 submittedBy: auth.employee.id,
             })
             if (salaryExpenseId && salaryExpenseId !== data.expense_id) {

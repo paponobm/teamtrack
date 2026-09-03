@@ -792,7 +792,7 @@ export default function InfluencerProfileModal({ influencerId, isAdmin, onClose,
                                         </div>
 
                                         {prForm.payment_status === 'Unpaid' && (
-                                            <div className="form-group"><label className="form-label">Total Amount</label>
+                                            <div className="form-group"><label className="form-label">Payment Amount</label>
                                                 <input type="number" min="0" step="0.01" className="form-input" value={prForm.total_amount} onChange={e => setPrForm({ ...prForm, total_amount: e.target.value })} placeholder="৳0" />
                                             </div>
                                         )}

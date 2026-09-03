@@ -96,6 +96,7 @@ export default function InfluencersTab() {
 
     const [search, setSearch] = useState('')
     const [paymentFilter, setPaymentFilter] = useState('all')
+    const [statusFilter, setStatusFilter] = useState('Active')
     const [sortBy, setSortBy] = useState('recent')
     const [dateRangeMode, setDateRangeMode] = useState<DateRangeMode>('all')
     const [refDate, setRefDate] = useState(() => getLocalDateString())
@@ -210,6 +211,7 @@ export default function InfluencersTab() {
             if (!(i.name || '').toLowerCase().includes(q) && !(i.phone || '').toLowerCase().includes(q)) return false
         }
         if (paymentFilter !== 'all' && (i.payment_status || 'Unpaid') !== paymentFilter) return false
+        if (statusFilter !== 'all' && (i.status || 'Active') !== statusFilter) return false
         return true
     }).sort((a, b) => {
         if (sortBy === 'name') return (a.name || '').localeCompare(b.name || '')
@@ -314,6 +316,11 @@ export default function InfluencersTab() {
                         <option value="Paid">Paid</option>
                         <option value="Unpaid">Unpaid</option>
                         <option value="Free">Free</option>
+                    </select>
+                    <select className="form-input" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ height: '34px', fontSize: '0.8125rem', width: 'auto' }}>
+                        <option value="Active">Active</option>
+                        <option value="Inactive">Inactive</option>
+                        <option value="all">All</option>
                     </select>
                     <select className="form-input" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ height: '34px', fontSize: '0.8125rem', width: 'auto' }}>
                         <option value="recent">Sort: Recent</option>
