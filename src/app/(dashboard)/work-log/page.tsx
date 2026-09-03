@@ -190,6 +190,7 @@ export default function WorkLogPage() {
     const [historyLoading, setHistoryLoading] = useState(false)
     const [quickMode, setQuickMode] = useState(false)
     const [showAdvanceSources, setShowAdvanceSources] = useState(false)
+    const [showStatsCards, setShowStatsCards] = useState(true)
     const [quickForm, setQuickForm] = useState({ customer_phone: '', customer_name: '', invoice_no: '', courier_id: '', source: '', amount: '', order_type: '', delivery_status: 'confirmed', employee_id: '', payment_gateway: '', business_name: '' })
     const [quickSaving, setQuickSaving] = useState(false)
     const [currentUser, setCurrentUser] = useState<{ employee_id: string; name: string; is_super: boolean; role: string } | null>(null)
@@ -559,9 +560,16 @@ export default function WorkLogPage() {
                     <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginLeft: 'auto' }}>
                         {dateRangeMode === 'today' ? formatDate(date) : dateRangeMode === 'week' ? `Week of ${formatDate(getWeekRange(new Date(date)).start)}` : dateRangeMode === 'month' ? new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'long' }) : customStart && customEnd ? `${customStart} → ${customEnd}` : 'Select date range'}
                     </span>
+                    <button onClick={() => setShowStatsCards(v => !v)} title={showStatsCards ? 'Hide summary cards' : 'Show summary cards'}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '6px', border: '1px solid #f65cc8fb', background: '#8B5CF615', color: '#f6735cfa', cursor: 'pointer', flexShrink: 0 }}>
+                        <span style={{ display: 'flex', transform: showStatsCards ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>
+                            <IconChevronRight size={14} />
+                        </span>
+                    </button>
                 </motion.div>
 
                 {/* Stats Cards */}
+                {showStatsCards && (
                 <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '24px', alignItems: 'stretch' }}>
                     <div className="stat-card">
                         <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClipboard size={14} color="var(--color-text-tertiary)" /> Total Orders</span>
@@ -649,6 +657,7 @@ export default function WorkLogPage() {
                         </div>
                     </div>
                 </motion.div>
+                )}
 
                 {/* Entries Table */}
                 {loading ? (
