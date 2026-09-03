@@ -8,6 +8,7 @@ import { IconClipboard, IconUsers, IconMegaphone, IconPin, IconCheckCircle, Icon
 import React from 'react'
 import { useLanguage } from '@/lib/LanguageContext'
 import MemberDashboard from '@/components/dashboard/MemberDashboard'
+import BirthdayBanner from '@/components/dashboard/BirthdayBanner'
 import { usePermissions } from '@/lib/PermissionsContext'
 import DatePicker from '@/components/ui/DatePicker'
 
@@ -194,6 +195,7 @@ export default function DashboardPage() {
 
     return (
         <motion.div variants={container} animate="show">
+            <BirthdayBanner />
             <motion.div className="page-header" variants={item} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
                 <div>
                     <h1 className="page-title">{t('dash.title')}</h1>

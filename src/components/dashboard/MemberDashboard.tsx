@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useLanguage } from '@/lib/LanguageContext'
 import { useToast } from '@/lib/ToastContext'
 import { IconClipboard, IconUsers, IconPin, IconMegaphone, IconCheckCircle, IconClock, IconLayers, IconBanknote } from '@/components/icons/Icons'
+import BirthdayBanner from '@/components/dashboard/BirthdayBanner'
 
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.06 } } }
 const item = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] as const } } }
@@ -82,7 +83,8 @@ export default function MemberDashboard({ myStats, employeeId, notices, onDismis
 
     return (
         <motion.div variants={container} initial="hidden" animate="show" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-            
+            <BirthdayBanner />
+
             {/* Notices */}
             {notices && notices.length > 0 && (
                 <motion.div variants={item} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

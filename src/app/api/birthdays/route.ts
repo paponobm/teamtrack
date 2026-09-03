@@ -7,7 +7,7 @@ export async function GET() {
     if (!isAuthed(auth)) return auth
 
     const { rows } = await auth.db.query(
-        `SELECT id, name, photo_url, date_of_birth, designation
+        `SELECT id, name, photo_url, date_of_birth, designation, gender
          FROM employees
          WHERE is_active = true
            AND date_of_birth IS NOT NULL
