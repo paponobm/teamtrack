@@ -3,12 +3,12 @@ import { logAudit } from '@/lib/audit'
 import { NextResponse } from 'next/server'
 
 // POST /api/work-log/[id]/verify-advance - mark an entry's advance payment as verified.
-// Admin / Super Admin / Manager only (roleLevel <= 4).
+// Admin / Super Admin only (roleLevel <= 3) — Manager is deliberately excluded.
 export async function POST(
     request: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth(4)
+    const auth = await requireAuth(3)
     if (!isAuthed(auth)) return auth
     const db = auth.db
 

@@ -79,9 +79,9 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
     const [error, setError] = useState('')
     const toast = useToast()
 
-    // Advance payment verification — Admin/Super Admin/Manager only (Manager isn't
-    // included in the page's own `isAdmin`, so this is checked separately here).
-    const canVerifyAdvance = !!currentUser && (currentUser.is_super || ['Owner', 'Super Admin', 'Admin', 'Manager'].includes(currentUser.role))
+    // Advance payment verification — Admin/Super Admin only. Manager is deliberately excluded
+    // (not included in the page's own `isAdmin`, so this is checked separately here).
+    const canVerifyAdvance = !!currentUser && (currentUser.is_super || ['Owner', 'Super Admin', 'Admin'].includes(currentUser.role))
     const [advanceVerified, setAdvanceVerified] = useState(entry?.advance_verified || false)
     const [verifiedInfo, setVerifiedInfo] = useState<{ name: string; at: string | null }>(
         entry?.advance_verified ? { name: entry.verifier?.name || '', at: entry.verified_at || null } : { name: '', at: null }
