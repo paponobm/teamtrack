@@ -120,7 +120,7 @@ export default function ExpensesPage() {
     const [form, setForm] = useState(emptyForm)
     const [saving, setSaving] = useState(false)
     // Date filtering
-    const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'custom'>('today')
+    const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'lastMonth' | 'custom'>('today')
     const [refDate, setRefDate] = useState(() => getLocalDateString())
     const [customStart, setCustomStart] = useState('')
     const [customEnd, setCustomEnd] = useState('')
@@ -155,6 +155,11 @@ export default function ExpensesPage() {
         const end = new Date(d.getFullYear(), d.getMonth() + 1, 0)
         return { start: getLocalDateString(start), end: getLocalDateString(end) }
     }
+    const getLastMonthRange = () => {
+        const prevMonth = new Date()
+        prevMonth.setMonth(prevMonth.getMonth() - 1)
+        return getMonthRange(prevMonth)
+    }
 
     const fetchExpenses = useCallback(async () => {
         try {
@@ -168,6 +173,10 @@ export default function ExpensesPage() {
                 params.set('end_date', r.end)
             } else if (dateRange === 'month') {
                 const r = getMonthRange(new Date(refDate))
+                params.set('start_date', r.start)
+                params.set('end_date', r.end)
+            } else if (dateRange === 'lastMonth') {
+                const r = getLastMonthRange()
                 params.set('start_date', r.start)
                 params.set('end_date', r.end)
             } else if (dateRange === 'custom' && customStart && customEnd) {
@@ -607,7 +616,7 @@ export default function ExpensesPage() {
             {/* Date Range Filter */}
             <motion.div variants={item} style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', position: 'relative', background: 'rgba(118,118,128,0.08)', borderRadius: '10px', padding: '2px' }}>
-                    {([{ key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' }, { key: 'month', label: 'This Month' }, { key: 'custom', label: 'Custom' }] as const).map(opt => (
+                    {([{ key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' }, { key: 'month', label: 'This Month' }, { key: 'lastMonth', label: 'Last Month' }, { key: 'custom', label: 'Custom' }] as const).map(opt => (
                         <button key={opt.key} onClick={() => setDateRange(opt.key)}
                             style={{ position: 'relative', padding: '6px 14px', borderRadius: '8px', border: 'none', fontSize: '0.8125rem', fontWeight: 500, background: 'transparent', color: dateRange === opt.key ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)', cursor: 'pointer', transition: 'color 0.2s', zIndex: 1 }}>
                             {dateRange === opt.key && (
@@ -639,6 +648,13 @@ export default function ExpensesPage() {
                         <div style={{ width: '150px' }}><ModernDatePicker value={customStart} onChange={setCustomStart} placeholder="Start Date" /></div>
                         <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8125rem' }}>to</span>
                         <div style={{ width: '150px' }}><ModernDatePicker value={customEnd} onChange={setCustomEnd} placeholder="End Date" /></div>
+                    </div>
+                )}
+                {dateRange === 'lastMonth' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ width: '150px' }}><ModernDatePicker value={getLastMonthRange().start} onChange={() => {}} disabled /></div>
+                        <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8125rem' }}>to</span>
+                        <div style={{ width: '150px' }}><ModernDatePicker value={getLastMonthRange().end} onChange={() => {}} disabled /></div>
                     </div>
                 )}
             </motion.div>
@@ -1171,7 +1187,7 @@ export default function ExpensesPage() {
                         two independent ones that could drift apart. */}
                     <motion.div variants={item} style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
                         <div style={{ display: 'flex', position: 'relative', background: 'rgba(118,118,128,0.08)', borderRadius: '10px', padding: '2px' }}>
-                            {([{ key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' }, { key: 'month', label: 'This Month' }, { key: 'custom', label: 'Custom' }] as const).map(opt => (
+                            {([{ key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' }, { key: 'month', label: 'This Month' }, { key: 'lastMonth', label: 'Last Month' }, { key: 'custom', label: 'Custom' }] as const).map(opt => (
                                 <button key={opt.key} onClick={() => setDateRange(opt.key)}
                                     style={{ position: 'relative', padding: '6px 14px', borderRadius: '8px', border: 'none', fontSize: '0.8125rem', fontWeight: 500, background: 'transparent', color: dateRange === opt.key ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)', cursor: 'pointer', transition: 'color 0.2s', zIndex: 1 }}>
                                     {dateRange === opt.key && (
@@ -1203,6 +1219,13 @@ export default function ExpensesPage() {
                                 <div style={{ width: '150px' }}><ModernDatePicker value={customStart} onChange={setCustomStart} placeholder="Start Date" /></div>
                                 <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8125rem' }}>to</span>
                                 <div style={{ width: '150px' }}><ModernDatePicker value={customEnd} onChange={setCustomEnd} placeholder="End Date" /></div>
+                            </div>
+                        )}
+                        {dateRange === 'lastMonth' && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div style={{ width: '150px' }}><ModernDatePicker value={getLastMonthRange().start} onChange={() => {}} disabled /></div>
+                                <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8125rem' }}>to</span>
+                                <div style={{ width: '150px' }}><ModernDatePicker value={getLastMonthRange().end} onChange={() => {}} disabled /></div>
                             </div>
                         )}
                     </motion.div>
