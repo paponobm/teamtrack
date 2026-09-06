@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString } from '@/lib/dateRange'
-import { IconFileText, IconX, IconPrinter, IconCheckCircle } from '@/components/icons/Icons'
+import { IconFileText, IconX, IconPrinter, IconCheckCircle, IconEdit, IconTrash } from '@/components/icons/Icons'
 import PaySlipModal from './PaySlipModal'
 
 export interface SalaryEntry {
@@ -31,6 +31,8 @@ export interface SalaryEntry {
     payment_method: string | null
     payment_date: string | null
     attendance: { present: number; late: number; absent: number; leave: number }
+    attendance_present_override?: number | null
+    attendance_leave_override?: number | null
     fine: number
     net_payable: number
 }
@@ -100,6 +102,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
     const [loading, setLoading] = useState(true)
     const [creating, setCreating] = useState(false)
     const [editing, setEditing] = useState<SalaryEntry | null>(null)
+    const [editingAttendance, setEditingAttendance] = useState<SalaryEntry | null>(null)
     const [payslipEntry, setPayslipEntry] = useState<SalaryEntry | null>(null)
     const [markPaidEntry, setMarkPaidEntry] = useState<SalaryEntry | null>(null)
 
@@ -261,10 +264,20 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                     </td>
                                     <td>{e.employee.department || '—'}</td>
                                     <td>
-                                        <span style={{ fontWeight: 700, color: attendanceColor(e.attendance.present, totalDays) }}>{e.attendance.present}</span>
-                                        <span style={{ color: 'var(--color-text-tertiary)' }}> / {totalDays}</span>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                            <span style={{ fontWeight: 700, color: attendanceColor(e.attendance.present, totalDays) }}>{e.attendance.present}</span>
+                                            <span style={{ color: 'var(--color-text-tertiary)' }}> / {totalDays}</span>
+                                            <button className="btn btn-secondary btn-sm" title="Edit Present/Leave days"
+                                                style={{ padding: '2px 5px', color: '#7C3AED', flexShrink: 0 }}
+                                                onClick={(ev) => { ev.stopPropagation(); setEditingAttendance(e) }}>
+                                                <IconEdit size={12} />
+                                            </button>
+                                        </div>
                                         <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginTop: '2px' }}>
                                             Leave: {e.attendance.leave}
+                                            {(e.attendance_present_override != null || e.attendance_leave_override != null) && (
+                                                <span title="Manually adjusted for this month" style={{ marginLeft: '4px', color: '#7C3AED', fontWeight: 600 }}>•adjusted</span>
+                                            )}
                                         </div>
                                     </td>
                                     <td className="earn-col" style={{ color: e.basic_salary > 0 ? '#16A34A' : undefined }}>৳{e.basic_salary.toLocaleString()}</td>
@@ -364,6 +377,20 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                             setEntries(prev => prev.map(e => e.id === updated.id ? updated : e))
                             setEditing(null)
                             onPaymentUpdate?.()
+                        }}
+                    />
+                )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+                {editingAttendance && (
+                    <EditAttendanceModal
+                        entry={editingAttendance}
+                        totalDays={totalDays}
+                        onClose={() => setEditingAttendance(null)}
+                        onSaved={(updated) => {
+                            setEntries(prev => prev.map(e => e.id === updated.id ? updated : e))
+                            setEditingAttendance(null)
                         }}
                     />
                 )}
@@ -686,6 +713,149 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                 </div>
 
                 <div className="modal-footer">
+                    <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                    <button className="btn btn-primary" disabled={saving} onClick={handleSave}>{saving ? 'Saving...' : 'Save'}</button>
+                </div>
+            </motion.div>
+        </div>
+    )
+}
+
+// Dedicated small modal for the Attendance (Day) column's edit button — lets a Super Admin
+// manually correct Present/Leave days for this month's entry (e.g. the daily attendance log
+// missed something) without opening the full salary EditEntryModal. Late/Absent stay
+// read-only/computed since only Present/Leave were asked to be editable, and attendance never
+// feeds into net_payable (see computeNetPayable) so this can't accidentally change anyone's pay.
+function EditAttendanceModal({ entry, totalDays, onClose, onSaved }: { entry: SalaryEntry; totalDays: number; onClose: () => void; onSaved: (e: SalaryEntry) => void }) {
+    const { success: toastSuccess, error: toastError } = useToast()
+    const [present, setPresent] = useState(String(entry.attendance.present))
+    const [leave, setLeave] = useState(String(entry.attendance.leave))
+    const [saving, setSaving] = useState(false)
+    const [deleting, setDeleting] = useState(false)
+    const hasOverride = entry.attendance_present_override != null || entry.attendance_leave_override != null
+
+    const numPresent = Math.min(totalDays, Math.max(0, Number(present) || 0))
+    const numLeave = Math.min(totalDays, Math.max(0, Number(leave) || 0))
+
+    // Present and Leave are kept complementary against the month's total days — editing one
+    // auto-fills the other with the remainder, clamped so neither field can push the pair
+    // above totalDays. Left blank mid-typing (e.g. clearing the field to type a new number),
+    // the other field is left alone until a real number lands.
+    const clampToMonth = (n: number) => Math.max(0, Math.min(totalDays, n))
+    const handlePresentChange = (value: string) => {
+        setPresent(value)
+        if (value === '') return
+        const num = Number(value)
+        if (!Number.isFinite(num)) return
+        setLeave(String(clampToMonth(totalDays - num)))
+    }
+    const handleLeaveChange = (value: string) => {
+        setLeave(value)
+        if (value === '') return
+        const num = Number(value)
+        if (!Number.isFinite(num)) return
+        setPresent(String(clampToMonth(totalDays - num)))
+    }
+
+    const handleSave = async () => {
+        setSaving(true)
+        try {
+            const res = await fetch('/api/payroll/salary-entries', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: entry.id,
+                    attendance_present_override: numPresent,
+                    attendance_leave_override: numLeave,
+                }),
+            })
+            if (res.ok) {
+                onSaved({
+                    ...entry,
+                    attendance: { ...entry.attendance, present: numPresent, leave: numLeave },
+                    attendance_present_override: numPresent,
+                    attendance_leave_override: numLeave,
+                })
+                toastSuccess('Attendance updated')
+            } else {
+                const err = await res.json()
+                toastError(err.error || 'Failed to update attendance')
+            }
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    // Clears the manual override so this entry falls back to the live-computed attendance-log
+    // value again — the API recomputes and returns that value in the same response so the row
+    // updates immediately, without needing a full sheet reload.
+    const handleDelete = async () => {
+        setDeleting(true)
+        try {
+            const res = await fetch('/api/payroll/salary-entries', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: entry.id,
+                    attendance_present_override: null,
+                    attendance_leave_override: null,
+                }),
+            })
+            if (res.ok) {
+                const json = await res.json()
+                onSaved({
+                    ...entry,
+                    attendance: json.attendance || entry.attendance,
+                    attendance_present_override: null,
+                    attendance_leave_override: null,
+                })
+                toastSuccess('Adjustment deleted — showing actual attendance')
+            } else {
+                const err = await res.json()
+                toastError(err.error || 'Failed to delete adjustment')
+            }
+        } finally {
+            setDeleting(false)
+        }
+    }
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <motion.div initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 10 }}
+                className="modal" style={{ maxWidth: '380px' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                    <div className="modal-title">{entry.employee.name} — Attendance</div>
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: 'var(--color-text-tertiary)' }}><IconX size={18} /></button>
+                </div>
+
+                <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                        <div>
+                            <label className="form-label">Present Days</label>
+                            <input className="form-input" type="number" min={0} max={totalDays} value={present}
+                                onFocus={e => e.target.select()}
+                                onChange={e => handlePresentChange(e.target.value)} />
+                        </div>
+                        <div>
+                            <label className="form-label">Leave Days</label>
+                            <input className="form-input" type="number" min={0} max={totalDays} value={leave}
+                                onFocus={e => e.target.select()}
+                                onChange={e => handleLeaveChange(e.target.value)} />
+                        </div>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+                        Absent: {entry.attendance.absent} (computed from the attendance log, not editable here) · Out of {totalDays} days this month.
+                    </div>
+                </div>
+
+                <div className="modal-footer">
+                    {hasOverride && (
+                        <button className="btn btn-secondary" disabled={deleting || saving} onClick={handleDelete}
+                            title="Remove the manual adjustment and show the actual attendance-log value"
+                            style={{ marginRight: 'auto', display: 'flex', alignItems: 'center', gap: '6px', color: '#DC2626' }}>
+                            <IconTrash size={14} /> {deleting ? 'Deleting...' : 'Delete Record'}
+                        </button>
+                    )}
                     <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
                     <button className="btn btn-primary" disabled={saving} onClick={handleSave}>{saving ? 'Saving...' : 'Save'}</button>
                 </div>

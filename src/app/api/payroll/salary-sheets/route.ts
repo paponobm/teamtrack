@@ -123,7 +123,7 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
     const { rows: entries } = await db.query(
         `SELECT se.id, se.employee_id, se.basic_salary, se.extra_duty, se.transportation_bill, se.snacks_bill,
             se.performance_bonus, se.festival_bonus, se.other_deduction, se.payment_status, se.payment_method,
-            se.payment_date, se.updated_at,
+            se.payment_date, se.updated_at, se.attendance_present_override, se.attendance_leave_override,
             json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url,
                 'joining_date', e.joining_date, 'festival_bonus_percentage', e.festival_bonus_percentage,
                 'basic_salary_effective_month', e.basic_salary_effective_month,
@@ -195,7 +195,17 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
             payment_status: r.payment_status,
             payment_method: r.payment_method,
             payment_date: r.payment_date,
-            attendance: attendance[r.employee_id] || { present: 0, late: 0, absent: 0, leave: 0 },
+            // Present/Leave are computed live from the attendance table by default, but a Super
+            // Admin can override either one for this specific month (e.g. a correction the daily
+            // attendance log missed) — see EditEntryModal/attendance_present_override below.
+            // Late/Absent are never overridden, only ever shown as computed.
+            attendance: {
+                ...(attendance[r.employee_id] || { present: 0, late: 0, absent: 0, leave: 0 }),
+                present: r.attendance_present_override ?? (attendance[r.employee_id]?.present || 0),
+                leave: r.attendance_leave_override ?? (attendance[r.employee_id]?.leave || 0),
+            },
+            attendance_present_override: r.attendance_present_override,
+            attendance_leave_override: r.attendance_leave_override,
             fine,
             net_payable: computeNetPayable(r, fine, advanceDetail.total, productBuyDetail.total, emiDetail.total, providentFundDetail.total),
             updated_at: r.updated_at,

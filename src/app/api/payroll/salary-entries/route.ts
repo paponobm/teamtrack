@@ -1,6 +1,6 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { getMonthRangeFromString } from '@/lib/dateRange'
-import { getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, createOrSyncSalaryExpense } from '@/lib/payroll'
+import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, createOrSyncSalaryExpense } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
 import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
@@ -69,6 +69,22 @@ export async function PUT(request: Request) {
         update.payment_date = body.payment_date
     }
 
+    // Manual correction of the live-computed Present/Leave day counts for this month (e.g. the
+    // daily attendance log missed an entry) — null clears the override and falls back to the
+    // computed value again, same as every other nullable field here.
+    for (const field of ['attendance_present_override', 'attendance_leave_override'] as const) {
+        if (body[field] === undefined) continue
+        if (body[field] !== null) {
+            const num = Number(body[field])
+            if (!Number.isFinite(num) || num < 0) {
+                return NextResponse.json({ error: `${field} must be a non-negative number` }, { status: 400 })
+            }
+            update[field] = num
+        } else {
+            update[field] = null
+        }
+    }
+
     if (Object.keys(update).length === 0) {
         return NextResponse.json({ error: 'No editable fields provided' }, { status: 400 })
     }
@@ -80,11 +96,30 @@ export async function PUT(request: Request) {
     const { rows: [data] } = await db.query(
         `UPDATE salary_entries SET ${setClauses.join(', ')} WHERE id = $1
          RETURNING id, employee_id, salary_sheet_id, expense_id, payment_date,
-             basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus, other_deduction`,
+             basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus, other_deduction,
+             attendance_present_override, attendance_leave_override`,
         [id, ...keys.map(k => update[k])]
     )
 
     if (!data) return NextResponse.json({ error: 'Salary entry not found' }, { status: 404 })
+
+    // Present/Leave were touched (most notably "Delete Record" clearing an adjustment back to
+    // null) — recompute the live attendance-log value here so the client can show the real
+    // number immediately, instead of needing a full page reload to see what's left once the
+    // override is gone.
+    let attendance: { present: number; late: number; absent: number; leave: number } | undefined
+    if ('attendance_present_override' in update || 'attendance_leave_override' in update) {
+        const { rows: [sheet] } = await db.query(`SELECT month FROM salary_sheets WHERE id = $1`, [data.salary_sheet_id])
+        if (sheet) {
+            const stats = await getAttendanceStatsForMonth(db, [data.employee_id], sheet.month)
+            const computed = stats[data.employee_id] || { present: 0, late: 0, absent: 0, leave: 0 }
+            attendance = {
+                ...computed,
+                present: data.attendance_present_override ?? computed.present,
+                leave: data.attendance_leave_override ?? computed.leave,
+            }
+        }
+    }
 
     // Marking the salary as Paid means that month's advance was recovered through this
     // payout, so settle any still-Unpaid advance records for that employee/month too — keeps
@@ -195,5 +230,12 @@ export async function PUT(request: Request) {
         }
     }
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({
+        success: true,
+        ...(attendance ? {
+            attendance,
+            attendance_present_override: data.attendance_present_override,
+            attendance_leave_override: data.attendance_leave_override,
+        } : {}),
+    })
 }
