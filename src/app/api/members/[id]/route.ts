@@ -106,9 +106,10 @@ export async function PATCH(
         const { rows: [newRole] } = await db.query(`SELECT level FROM roles WHERE id = $1`, [body.role_id])
         newRoleLevel = newRole?.level ?? null
 
-        // Admins cannot assign Super Admin (or higher) roles to anyone.
-        if (!isSuperAdmin && newRoleLevel !== null && newRoleLevel <= 2) {
-            return NextResponse.json({ error: 'Admins cannot assign Super Admin roles' }, { status: 403 })
+        // Admins can only promote/assign people into Member or Manager — Admin (and above)
+        // roles are Super-Admin-only to grant, so an Admin can never create a peer or superior.
+        if (!isSuperAdmin && newRoleLevel !== null && newRoleLevel <= 3) {
+            return NextResponse.json({ error: 'Admins can only assign Member or Manager roles' }, { status: 403 })
         }
     }
 

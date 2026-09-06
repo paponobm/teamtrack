@@ -76,12 +76,27 @@ export async function POST(request: Request) {
         gender, date_of_birth, duty_start_time, duty_end_time, cv_url, avatar_url
     } = body
 
-    // Safety guard: Admins cannot create Super Admins
+    // Mirrors the `required` fields on the Add New Member form — enforced here too so a direct
+    // API call can't create a half-filled profile the UI wouldn't otherwise allow.
+    const REQUIRED_FIELDS: [unknown, string][] = [
+        [name, 'Full Name'], [empId, 'Employee ID'], [gender, 'Gender'], [date_of_birth, 'Date of Birth'],
+        [joining_date, 'Joining Date'], [email, 'Email'], [role_id, 'Role'], [department_id, 'Department'],
+        [designation, 'Designation'], [duty_start_time, 'Start Time'], [duty_end_time, 'End Time'],
+        [personal_contact, 'Phone'], [whatsapp_number, 'WhatsApp'], [address, 'Address'],
+    ]
+    const missing = REQUIRED_FIELDS.filter(([value]) => !value || !String(value).trim()).map(([, label]) => label)
+    if (missing.length > 0) {
+        return NextResponse.json({ error: `${missing.join(', ')} ${missing.length > 1 ? 'are' : 'is'} required` }, { status: 400 })
+    }
+
+    // Safety guard: Admins can only create Member/Manager accounts — Admin (and above) roles
+    // can only be granted by a Super Admin (or Owner), so an Admin can never mint a peer or
+    // superior who could then edit their own access/profile back.
     const isSuperAdmin = auth.employee.roleLevel <= 2
     if (!isSuperAdmin && role_id) {
         const { rows: [newRole] } = await db.query(`SELECT level FROM roles WHERE id = $1`, [role_id])
-        if (newRole && newRole.level <= 2) {
-            return NextResponse.json({ error: 'Admins cannot create Super Admin accounts' }, { status: 403 })
+        if (newRole && newRole.level <= 3) {
+            return NextResponse.json({ error: 'Admins can only create Member or Manager accounts' }, { status: 403 })
         }
     }
 

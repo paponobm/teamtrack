@@ -36,7 +36,7 @@ interface MemberModalProps {
         festival_bonus_months?: number[] | null
     } | null
     departments: { id: string; name: string }[]
-    roles: { id: string; name: string }[]
+    roles: { id: string; name: string; level: number }[]
     onClose: () => void
     onSave: () => void
     isAdmin?: boolean
@@ -62,8 +62,11 @@ const PAGE_DEFINITIONS = [
     {
         section: 'People',
         pages: [
-            { name: 'Members', slug: 'members', desc: 'View the team member directory' },
-            { name: 'Employee Attendance', slug: 'employee-attendance', desc: "View the team's daily attendance" },
+            // Super-Admin-only to grant (see the Finance/Payroll comment below) — a plain Admin
+            // can still use these pages themselves (seeded by default, see seedAdminPermissions),
+            // just can't turn them on/off for anyone else, including a Member or Manager.
+            { name: 'Members', slug: 'members', desc: 'View the team member directory', superOnly: true },
+            { name: 'Employee Attendance', slug: 'employee-attendance', desc: "View the team's daily attendance", superOnly: true },
         ]
     },
     {
@@ -79,11 +82,11 @@ const PAGE_DEFINITIONS = [
         section: 'Operations',
         pages: [
             { name: 'Courier', slug: 'courier', desc: 'Courier tracking and management' },
-            // Finance and Payroll Management expose salary/compensation data, so — unlike every
-            // other grantable page here — only a Super Admin can see or toggle these two when
-            // editing someone's Access tab; a plain Admin editor doesn't see them at all.
+            // Finance, Product Buy, and Payroll Management expose money/compensation data, so —
+            // unlike every other grantable page here — only a Super Admin can see or toggle these
+            // when editing someone's Access tab; a plain Admin editor doesn't see them at all.
             { name: 'Finance', slug: 'finance', desc: 'View and manage expenses and income', superOnly: true },
-            { name: 'Product Buy', slug: 'product-buy', desc: 'Track product purchases and payments' },
+            { name: 'Product Buy', slug: 'product-buy', desc: 'Track product purchases and payments', superOnly: true },
             { name: 'Payroll Management', slug: 'payroll-management', desc: 'View and manage monthly salary sheets', superOnly: true },
             { name: 'Requisitions', slug: 'requisitions', desc: 'Submit requisition requests' },
             { name: 'Ideas', slug: 'idea-sharing', desc: 'Share and upvote ideas' },
@@ -306,6 +309,33 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
             return
         }
 
+        // Mirrors the `required` attributes on the form below (backstop for select/date/time
+        // fields whose native browser validation can be bypassed, e.g. programmatic submit) —
+        // only enforced when creating a brand-new member, so editing an existing profile that
+        // predates this rule never gets blocked by fields it was never asked to fill in.
+        if (!isEdit) {
+            const REQUIRED_FIELDS: { key: keyof typeof form; label: string }[] = [
+                { key: 'employee_id', label: 'Employee ID' },
+                { key: 'gender', label: 'Gender' },
+                { key: 'date_of_birth', label: 'Date of Birth' },
+                { key: 'joining_date', label: 'Joining Date' },
+                { key: 'role_id', label: 'Role' },
+                { key: 'department_id', label: 'Department' },
+                { key: 'designation', label: 'Designation' },
+                { key: 'duty_start_time', label: 'Start Time' },
+                { key: 'duty_end_time', label: 'End Time' },
+                { key: 'personal_contact', label: 'Phone' },
+                { key: 'whatsapp_number', label: 'WhatsApp' },
+                { key: 'address', label: 'Address' },
+            ]
+            const missing = REQUIRED_FIELDS.filter(f => !form[f.key]?.toString().trim())
+            if (missing.length > 0) {
+                setError(`${missing.map(f => f.label).join(', ')} ${missing.length > 1 ? 'are' : 'is'} required`)
+                setLoading(false)
+                return
+            }
+        }
+
         try {
             const url = isEdit ? `/api/members/${member.id}` : '/api/members'
             const method = isEdit ? 'PATCH' : 'POST'
@@ -390,6 +420,18 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
     // not just hidden from the list below.
     const visiblePageSlugs = PAGE_DEFINITIONS.flatMap(s => s.pages.filter(p => !p.superOnly || isSuperAdmin).map(p => p.slug))
     const accessCount = visiblePageSlugs.filter(slug => accessMap[slug] && accessMap[slug] !== 'no_access').length
+
+    // This member's OWN role — Admin (or above) can never be touched by a plain Admin, whether
+    // that's another Admin's access/role or the acting Admin's own (self-granting access is the
+    // same hole as granting a peer). Only a Super Admin/Owner can cross this line. A brand-new
+    // (not-yet-saved) member has no role yet, so it's never protected.
+    const targetRoleLevel = member ? roles.find(r => r.id === member.role_id)?.level : undefined
+    const isTargetProtected = !isSuperAdmin && targetRoleLevel !== undefined && targetRoleLevel <= 3
+    // Admins may only assign Member/Manager roles — Admin (and above) stays Super-Admin-only to
+    // grant, mirroring the backend guard in POST/PATCH /api/members. The member's own current
+    // role is always kept in the list (even if it's Admin) so an Admin editing their own or
+    // another Admin's profile still sees an accurate, non-blank Role field.
+    const assignableRoles = isSuperAdmin ? roles : roles.filter(r => r.level > 3 || r.id === form.role_id)
 
     const sectionStyle: React.CSSProperties = { marginBottom: '24px', paddingBottom: '24px', borderBottom: '1px solid var(--color-border-light)' }
     const sectionTitle: React.CSSProperties = { fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.04em' }
@@ -573,14 +615,14 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                                 <input className="input" id="name" name="name" value={form.name} onChange={handleChange} placeholder="e.g. Fahmida Islam" required />
                                             </div>
                                             <div className="input-group">
-                                                <label className="input-label" htmlFor="employee_id">Employee ID</label>
-                                                <input className="input" id="employee_id" name="employee_id" value={form.employee_id} onChange={handleChange} placeholder="e.g. 101" />
+                                                <label className="input-label" htmlFor="employee_id">Employee ID {!isEdit && '*'}</label>
+                                                <input className="input" id="employee_id" name="employee_id" value={form.employee_id} onChange={handleChange} placeholder="e.g. 101" required={!isEdit} />
                                             </div>
                                         </div>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginTop: '12px' }}>
                                             <div className="input-group">
-                                                <label className="input-label" htmlFor="gender">Gender</label>
-                                                <select className="input" id="gender" name="gender" value={form.gender} onChange={handleChange}>
+                                                <label className="input-label" htmlFor="gender">Gender {!isEdit && '*'}</label>
+                                                <select className="input" id="gender" name="gender" value={form.gender} onChange={handleChange} required={!isEdit}>
                                                     <option value="">Select</option>
                                                     <option value="male">Male</option>
                                                     <option value="female">Female</option>
@@ -588,12 +630,12 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                                 </select>
                                             </div>
                                             <div className="input-group">
-                                                <label className="input-label" htmlFor="date_of_birth">Date of Birth</label>
-                                                <input className="input" id="date_of_birth" name="date_of_birth" type="date" value={form.date_of_birth} onChange={handleChange} />
+                                                <label className="input-label" htmlFor="date_of_birth">Date of Birth {!isEdit && '*'}</label>
+                                                <input className="input" id="date_of_birth" name="date_of_birth" type="date" value={form.date_of_birth} onChange={handleChange} required={!isEdit} />
                                             </div>
                                             <div className="input-group">
-                                                <label className="input-label" htmlFor="joining_date">Joining Date</label>
-                                                <input className="input" id="joining_date" name="joining_date" type="date" value={form.joining_date} onChange={handleChange} />
+                                                <label className="input-label" htmlFor="joining_date">Joining Date {!isEdit && '*'}</label>
+                                                <input className="input" id="joining_date" name="joining_date" type="date" value={form.joining_date} onChange={handleChange} required={!isEdit} />
                                             </div>
                                         </div>
                                     </div>
@@ -620,22 +662,22 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                         <div style={sectionTitle}>Organization</div>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
                                             <div className="input-group">
-                                                <label className="input-label" htmlFor="role_id">Role</label>
-                                                <select className="input" id="role_id" name="role_id" value={form.role_id} onChange={handleChange}>
+                                                <label className="input-label" htmlFor="role_id">Role {!isEdit && '*'}</label>
+                                                <select className="input" id="role_id" name="role_id" value={form.role_id} onChange={handleChange} required={!isEdit}>
                                                     <option value="">Select</option>
-                                                    {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                                                    {assignableRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                                                 </select>
                                             </div>
                                             <div className="input-group">
-                                                <label className="input-label" htmlFor="department_id">Department</label>
-                                                <select className="input" id="department_id" name="department_id" value={form.department_id} onChange={handleChange}>
+                                                <label className="input-label" htmlFor="department_id">Department {!isEdit && '*'}</label>
+                                                <select className="input" id="department_id" name="department_id" value={form.department_id} onChange={handleChange} required={!isEdit}>
                                                     <option value="">Select</option>
                                                     {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                                                 </select>
                                             </div>
                                             <div className="input-group">
-                                                <label className="input-label" htmlFor="designation">Designation</label>
-                                                <input className="input" id="designation" name="designation" value={form.designation} onChange={handleChange} placeholder="e.g. Sr. Sales" />
+                                                <label className="input-label" htmlFor="designation">Designation {!isEdit && '*'}</label>
+                                                <input className="input" id="designation" name="designation" value={form.designation} onChange={handleChange} placeholder="e.g. Sr. Sales" required={!isEdit} />
                                             </div>
                                         </div>
                                     </div>
@@ -645,12 +687,12 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                         <div style={sectionTitle}>Duty Schedule</div>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                             <div className="input-group">
-                                                <label className="input-label" htmlFor="duty_start_time">Start Time</label>
-                                                <input className="input" id="duty_start_time" name="duty_start_time" type="time" value={form.duty_start_time} onChange={handleChange} />
+                                                <label className="input-label" htmlFor="duty_start_time">Start Time {!isEdit && '*'}</label>
+                                                <input className="input" id="duty_start_time" name="duty_start_time" type="time" value={form.duty_start_time} onChange={handleChange} required={!isEdit} />
                                             </div>
                                             <div className="input-group">
-                                                <label className="input-label" htmlFor="duty_end_time">End Time</label>
-                                                <input className="input" id="duty_end_time" name="duty_end_time" type="time" value={form.duty_end_time} onChange={handleChange} />
+                                                <label className="input-label" htmlFor="duty_end_time">End Time {!isEdit && '*'}</label>
+                                                <input className="input" id="duty_end_time" name="duty_end_time" type="time" value={form.duty_end_time} onChange={handleChange} required={!isEdit} />
                                             </div>
                                         </div>
                                     </div>
@@ -660,16 +702,16 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                         <div style={sectionTitle}>Contact</div>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                             <div className="input-group">
-                                                <label className="input-label" htmlFor="personal_contact">Phone</label>
-                                                <input className="input" id="personal_contact" name="personal_contact" value={form.personal_contact} onChange={handleChange} placeholder="01XXXXXXXXX" />
+                                                <label className="input-label" htmlFor="personal_contact">Phone {!isEdit && '*'}</label>
+                                                <input className="input" id="personal_contact" name="personal_contact" value={form.personal_contact} onChange={handleChange} placeholder="01XXXXXXXXX" required={!isEdit} />
                                             </div>
                                             <div className="input-group">
-                                                <label className="input-label" htmlFor="whatsapp_number">WhatsApp</label>
-                                                <input className="input" id="whatsapp_number" name="whatsapp_number" value={form.whatsapp_number} onChange={handleChange} placeholder="01XXXXXXXXX" />
+                                                <label className="input-label" htmlFor="whatsapp_number">WhatsApp {!isEdit && '*'}</label>
+                                                <input className="input" id="whatsapp_number" name="whatsapp_number" value={form.whatsapp_number} onChange={handleChange} placeholder="01XXXXXXXXX" required={!isEdit} />
                                             </div>
                                             <div className="input-group" style={{ gridColumn: '1 / -1' }}>
-                                                <label className="input-label" htmlFor="address">Address</label>
-                                                <input className="input" id="address" name="address" value={form.address} onChange={handleChange} placeholder="Full address" />
+                                                <label className="input-label" htmlFor="address">Address {!isEdit && '*'}</label>
+                                                <input className="input" id="address" name="address" value={form.address} onChange={handleChange} placeholder="Full address" required={!isEdit} />
                                             </div>
                                         </div>
                                     </div>
@@ -778,6 +820,18 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                     <span><strong>Reports</strong> is admin-only , not configurable per member.</span>
                                 </div>
 
+                                {isTargetProtected && (
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: '8px',
+                                        padding: '9px 12px', borderRadius: '9px', marginBottom: '18px',
+                                        background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.18)',
+                                        fontSize: '0.75rem', color: '#B91C1C',
+                                    }}>
+                                        <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" style={{ flexShrink: 0 }}><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
+                                        <span>This member is an Admin (or higher) — only a Super Admin can change their access.</span>
+                                    </div>
+                                )}
+
                                 {accessLoading ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => (
@@ -820,7 +874,7 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                                             const level = accessMap[page.slug] || 'no_access'
                                                             const isOn = level !== 'no_access'
                                                             const isAdminLevel = level === 'admin'
-                                                            const canEdit = isAdmin || isSuperAdmin
+                                                            const canEdit = isSuperAdmin || (isAdmin && !isTargetProtected)
                                                             const accentColor = isAdminLevel ? '#059669' : 'var(--color-primary, #2563EB)'
                                                             const accentRgb = isAdminLevel ? '5,150,105' : '37,99,235'
 

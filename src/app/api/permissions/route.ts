@@ -43,18 +43,38 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'permissions array required' }, { status: 400 })
     }
 
-    // Safety guard: Admins cannot modify permissions of Super Admins
+    // Safety guards for a non-Super-Admin actor (Admin, since this route already requires
+    // level ≤ 3) — mirrors the superOnly flags in MemberModal's PAGE_DEFINITIONS:
+    //
+    // 1. Members, Employee Attendance, Finance, Product Buy, and Payroll Management can only be
+    //    granted by a Super Admin/Owner — for ANY target, including a Member or Manager. An
+    //    Admin can still use these pages themselves (seeded by default), just can't toggle them
+    //    for anyone else.
+    // 2. An Admin cannot modify the access of anyone at their own level or higher — this covers
+    //    Super Admins/Owner and another Admin (peer-to-peer access changes), and their own
+    //    record (self-granting access). Only a Super Admin/Owner can touch an Admin's
+    //    permissions at all, same tier included.
+    const SUPER_ADMIN_ONLY_SLUGS = ['members', 'employee-attendance', 'finance', 'product-buy', 'payroll-management']
     const isSuperAdmin = auth.employee.roleLevel <= 2
     if (!isSuperAdmin) {
         const employeeIds = [...new Set(permissions.map(p => p.employee_id))]
+        const featureIds = [...new Set(permissions.map(p => p.feature_id))]
         if (employeeIds.length > 0) {
-            const { rows: targets } = await db.query(
-                `SELECT r.level FROM employees e LEFT JOIN roles r ON r.id = e.role_id WHERE e.id = ANY($1)`,
-                [employeeIds]
-            )
-            const attemptingSuperAdminMod = targets.some(t => (t.level ?? 99) <= 2)
-            if (attemptingSuperAdminMod) {
-                return NextResponse.json({ error: 'Admins cannot modify permissions of Super Admins' }, { status: 403 })
+            const [{ rows: targets }, { rows: featureRows }] = await Promise.all([
+                db.query(`SELECT e.id, r.level FROM employees e LEFT JOIN roles r ON r.id = e.role_id WHERE e.id = ANY($1)`, [employeeIds]),
+                db.query(`SELECT id, slug FROM features WHERE id = ANY($1)`, [featureIds]),
+            ])
+            const targetLevelById = new Map(targets.map((t: { id: string; level: number | null }) => [t.id, t.level ?? 99]))
+            const slugByFeatureId = new Map(featureRows.map((f: { id: string; slug: string }) => [f.id, f.slug]))
+
+            const attemptingSuperAdminOnlySlug = permissions.some(p => SUPER_ADMIN_ONLY_SLUGS.includes(slugByFeatureId.get(p.feature_id) || ''))
+            if (attemptingSuperAdminOnlySlug) {
+                return NextResponse.json({ error: 'This page can only be managed by a Super Admin' }, { status: 403 })
+            }
+
+            const attemptingProtectedTarget = permissions.some(p => (targetLevelById.get(p.employee_id) ?? 99) <= auth.employee.roleLevel)
+            if (attemptingProtectedTarget) {
+                return NextResponse.json({ error: 'You cannot modify the access of a user at your own or a higher access level' }, { status: 403 })
             }
         }
     }
