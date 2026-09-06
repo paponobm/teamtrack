@@ -204,7 +204,11 @@ export default function WorkEntryModal({ entry, date, employees, currentUser, on
 
             const body = {
                 ...form,
-                date,
+                // `date` is the currently-viewed page filter, only meaningful as the default
+                // date for a brand-new entry — sending it on an edit would silently overwrite
+                // the entry's real order date with whatever day the page happens to be showing
+                // (e.g. saving a Transaction ID before verifying an older order's advance).
+                ...(isEdit ? {} : { date }),
                 amount: parseFloat(form.amount) || 0,
                 suggested_amount: form.suggested_amount ? parseFloat(form.suggested_amount) : null,
                 advance: form.advance ? parseFloat(form.advance) : null,
