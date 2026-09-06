@@ -1,6 +1,6 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { getMonthRangeFromString } from '@/lib/dateRange'
-import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, createOrSyncSalaryExpense } from '@/lib/payroll'
+import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, createOrSyncSalaryExpense } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
 import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
@@ -106,8 +106,11 @@ export async function PUT(request: Request) {
     // Present/Leave were touched (most notably "Delete Record" clearing an adjustment back to
     // null) — recompute the live attendance-log value here so the client can show the real
     // number immediately, instead of needing a full page reload to see what's left once the
-    // override is gone.
+    // override is gone. Leave Deduction and Net Payable are recomputed alongside it since both
+    // depend directly on the effective Leave count (see computeLeaveDeduction).
     let attendance: { present: number; late: number; absent: number; leave: number } | undefined
+    let leaveDeductionForResponse: number | undefined
+    let netPayableForResponse: number | undefined
     if ('attendance_present_override' in update || 'attendance_leave_override' in update) {
         const { rows: [sheet] } = await db.query(`SELECT month FROM salary_sheets WHERE id = $1`, [data.salary_sheet_id])
         if (sheet) {
@@ -118,6 +121,25 @@ export async function PUT(request: Request) {
                 present: data.attendance_present_override ?? computed.present,
                 leave: data.attendance_leave_override ?? computed.leave,
             }
+            leaveDeductionForResponse = computeLeaveDeduction(Number(data.basic_salary) || 0, attendance.leave)
+
+            const employeeIds = [data.employee_id]
+            const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails] = await Promise.all([
+                getFineTotalsForMonth(db, employeeIds, sheet.month),
+                getAdvanceDetailsForMonth(db, employeeIds, sheet.month),
+                getProductBuyDetailsForMonth(db, employeeIds, sheet.month),
+                getEmiLoanDetailsForMonth(db, employeeIds, sheet.month),
+                getProvidentFundDetailsForMonth(db, employeeIds, sheet.month),
+            ])
+            netPayableForResponse = computeNetPayable(
+                data,
+                fineTotals[data.employee_id] || 0,
+                advanceDetails[data.employee_id]?.total || 0,
+                productBuyDetails[data.employee_id]?.total || 0,
+                emiDetails[data.employee_id]?.total || 0,
+                providentFundDetails[data.employee_id]?.total || 0,
+                leaveDeductionForResponse,
+            )
         }
     }
 
@@ -193,13 +215,18 @@ export async function PUT(request: Request) {
             // and Payroll Summary already use, so the linked amount can never drift from what
             // the sheet shows for this entry.
             const employeeIds = [data.employee_id]
-            const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails] = await Promise.all([
+            const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails, attendanceStats] = await Promise.all([
                 getFineTotalsForMonth(db, employeeIds, sheet.month),
                 getAdvanceDetailsForMonth(db, employeeIds, sheet.month),
                 getProductBuyDetailsForMonth(db, employeeIds, sheet.month),
                 getEmiLoanDetailsForMonth(db, employeeIds, sheet.month),
                 getProvidentFundDetailsForMonth(db, employeeIds, sheet.month),
+                getAttendanceStatsForMonth(db, employeeIds, sheet.month),
             ])
+            // Same effective Leave count the Attendance (Day) column shows (override, else
+            // computed) — the linked Finance expense amount must match Payable Salary exactly.
+            const effectiveLeave = data.attendance_leave_override ?? (attendanceStats[data.employee_id]?.leave || 0)
+            const leaveDeduction = computeLeaveDeduction(Number(data.basic_salary) || 0, effectiveLeave)
             const netPayable = computeNetPayable(
                 data,
                 fineTotals[data.employee_id] || 0,
@@ -207,6 +234,7 @@ export async function PUT(request: Request) {
                 productBuyDetails[data.employee_id]?.total || 0,
                 emiDetails[data.employee_id]?.total || 0,
                 providentFundDetails[data.employee_id]?.total || 0,
+                leaveDeduction,
             )
 
             // Paid on time (within the sheet's own month, or even early) → book the expense on
@@ -236,6 +264,8 @@ export async function PUT(request: Request) {
             attendance,
             attendance_present_override: data.attendance_present_override,
             attendance_leave_override: data.attendance_leave_override,
+            leave_deduction: leaveDeductionForResponse,
+            net_payable: netPayableForResponse,
         } : {}),
     })
 }

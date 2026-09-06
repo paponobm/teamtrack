@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString } from '@/lib/dateRange'
+import { MONTHLY_FREE_LEAVE_DAYS } from '@/lib/payroll'
 import { IconFileText, IconX, IconPrinter, IconCheckCircle, IconEdit, IconTrash } from '@/components/icons/Icons'
 import PaySlipModal from './PaySlipModal'
 
@@ -34,6 +35,10 @@ export interface SalaryEntry {
     attendance_present_override?: number | null
     attendance_leave_override?: number | null
     fine: number
+    // Leave days beyond the monthly free quota (see MONTHLY_FREE_LEAVE_DAYS in
+    // src/lib/payroll.ts), docked at Basic Salary / days-in-month per excess day. Live-computed
+    // from attendance.leave, never stored/typed in directly.
+    leave_deduction: number
     net_payable: number
 }
 
@@ -232,7 +237,8 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                 <th className="earn-col">Extra Duty</th>
                                 <th className="earn-col">Performance Bonus</th>
                                 <th className="earning-highlight-col" style={{ fontWeight: 800,color: "#f81dd4"  }}>Total Earning</th>
-                                <th className="deduct-col deduct-col-first">Salary Advance</th>
+                                <th className="deduct-col deduct-col-first">Leave Deduction</th>
+                                <th className="deduct-col">Salary Advance</th>
                                 <th className="deduct-col">Loan</th>
                                 <th className="deduct-col">Provident Fund</th>
                                 <th className="deduct-col">Product Buy</th>
@@ -294,7 +300,15 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                     <td className="earning-highlight-col" style={{ color: '#16A34A', fontWeight: 600 }}>
                                         ৳{(e.basic_salary + e.extra_duty + e.transportation_bill + e.snacks_bill + e.performance_bonus + e.festival_bonus).toLocaleString()}
                                     </td>
-                                    <td className="deduct-col deduct-col-first" style={{ color: e.advance > 0 ? '#DC2626' : undefined }}>
+                                    <td className="deduct-col deduct-col-first" style={{ color: e.leave_deduction > 0 ? '#DC2626' : undefined }}>
+                                        ৳{e.leave_deduction.toLocaleString()}
+                                        {e.leave_deduction > 0 && (
+                                            <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
+                                                ({e.attendance.leave} Leave, {MONTHLY_FREE_LEAVE_DAYS} free)
+                                            </div>
+                                        )}
+                                    </td>
+                                    <td className="deduct-col" style={{ color: e.advance > 0 ? '#DC2626' : undefined }}>
                                         ৳{e.advance.toLocaleString()}
                                     </td>
                                     <td className="deduct-col" style={{ color: e.loan > 0 ? '#DC2626' : undefined }}>
@@ -318,7 +332,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                     </td>
                                     <td className="deduct-col" style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
                                     <td className="deduction-highlight-col" style={{ color: '#DC2626', fontWeight: 600 }}>
-                                        ৳{(e.fine + e.advance + e.product_buy + e.loan + e.provident_fund + e.other_deduction).toLocaleString()}
+                                        ৳{(e.fine + e.advance + e.product_buy + e.loan + e.provident_fund + e.leave_deduction + e.other_deduction).toLocaleString()}
                                     </td>
                                     <td className="payable-highlight">
                                         <span style={{ display: 'inline-block', padding: '4px 12px', borderRadius: '6px', border: '2px solid #16A34A', background: 'rgba(22, 163, 74, 0.12)', boxShadow: '0 1px 3px rgba(22, 163, 74, 0.3)', fontWeight: 800, fontSize: '0.9375rem', color: '#16A34A' }}>
@@ -355,7 +369,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                 </tr>
                             ))}
                             {filteredEntries.length === 0 && (
-                                <tr><td colSpan={21} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>{q ? 'No employees match your search.' : 'No active employees found.'}</td></tr>
+                                <tr><td colSpan={22} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>{q ? 'No employees match your search.' : 'No active employees found.'}</td></tr>
                             )}
                         </tbody>
                     </table>
@@ -610,7 +624,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
     }
 
     const netPayable = entry.basic_salary + numAmounts.extra_duty + entry.transportation_bill + entry.snacks_bill
-        + numAmounts.performance_bonus + entry.festival_bonus - entry.fine - entry.advance - entry.product_buy - entry.loan - entry.provident_fund - entry.other_deduction
+        + numAmounts.performance_bonus + entry.festival_bonus - entry.fine - entry.advance - entry.product_buy - entry.loan - entry.provident_fund - entry.leave_deduction - entry.other_deduction
 
     const handleSave = async () => {
         setSaving(true)
@@ -657,6 +671,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                         <ReadOnlyField label="Department" value={entry.employee.department || '—'} />
                         <ReadOnlyField label="Attendance" value={`${entry.attendance.present} present, ${entry.attendance.absent} absent`} />
                         <ReadOnlyField label="Leave Days" value={String(entry.attendance.leave)} />
+                        <ReadOnlyField label="Leave Deduction" value={`৳${entry.leave_deduction.toLocaleString()}${entry.leave_deduction > 0 ? ` (${entry.attendance.leave - MONTHLY_FREE_LEAVE_DAYS} beyond ${MONTHLY_FREE_LEAVE_DAYS} free)` : ''}`} />
                         <ReadOnlyField label="Basic Salary" value={`৳${entry.basic_salary.toLocaleString()}`} />
                         <ReadOnlyField label="Transportation Bill" value={`৳${entry.transportation_bill.toLocaleString()}`} />
                         <ReadOnlyField label="Snacks Bill" value={`৳${entry.snacks_bill.toLocaleString()}`} />
@@ -770,11 +785,17 @@ function EditAttendanceModal({ entry, totalDays, onClose, onSaved }: { entry: Sa
                 }),
             })
             if (res.ok) {
+                const json = await res.json()
                 onSaved({
                     ...entry,
                     attendance: { ...entry.attendance, present: numPresent, leave: numLeave },
                     attendance_present_override: numPresent,
                     attendance_leave_override: numLeave,
+                    // Leave Deduction (and therefore Payable Salary) depends on the Leave count
+                    // just saved — the API recomputes both in the same response so the row
+                    // reflects them immediately, without a full sheet reload.
+                    ...(json.leave_deduction !== undefined ? { leave_deduction: json.leave_deduction } : {}),
+                    ...(json.net_payable !== undefined ? { net_payable: json.net_payable } : {}),
                 })
                 toastSuccess('Attendance updated')
             } else {
@@ -808,6 +829,8 @@ function EditAttendanceModal({ entry, totalDays, onClose, onSaved }: { entry: Sa
                     attendance: json.attendance || entry.attendance,
                     attendance_present_override: null,
                     attendance_leave_override: null,
+                    ...(json.leave_deduction !== undefined ? { leave_deduction: json.leave_deduction } : {}),
+                    ...(json.net_payable !== undefined ? { net_payable: json.net_payable } : {}),
                 })
                 toastSuccess('Adjustment deleted — showing actual attendance')
             } else {

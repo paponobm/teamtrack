@@ -1,5 +1,5 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable } from '@/lib/payroll'
+import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
 import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
@@ -161,6 +161,10 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
         const productBuyDetail = productBuys[r.employee_id] || { total: 0, records: [] }
         const emiDetail = emis[r.employee_id] || { total: 0, records: [] }
         const providentFundDetail = providentFunds[r.employee_id] || { total: 0, records: [] }
+        // Same effective Leave count the Attendance (Day) column shows — override if a Super
+        // Admin has set one, otherwise the live-computed value.
+        const effectiveLeave = r.attendance_leave_override ?? (attendance[r.employee_id]?.leave || 0)
+        const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectiveLeave)
         return {
             id: r.id,
             employee_id: r.employee_id,
@@ -207,7 +211,8 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
             attendance_present_override: r.attendance_present_override,
             attendance_leave_override: r.attendance_leave_override,
             fine,
-            net_payable: computeNetPayable(r, fine, advanceDetail.total, productBuyDetail.total, emiDetail.total, providentFundDetail.total),
+            leave_deduction: leaveDeduction,
+            net_payable: computeNetPayable(r, fine, advanceDetail.total, productBuyDetail.total, emiDetail.total, providentFundDetail.total, leaveDeduction),
             updated_at: r.updated_at,
         }
     })

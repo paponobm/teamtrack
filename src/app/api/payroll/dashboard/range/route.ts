@@ -1,5 +1,5 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable } from '@/lib/payroll'
+import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
 import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
@@ -78,6 +78,7 @@ export async function GET(request: Request) {
         const { rows: entries } = await db.query(
             `SELECT se.employee_id, se.basic_salary, se.extra_duty, se.transportation_bill, se.snacks_bill,
                 se.performance_bonus, se.festival_bonus, se.other_deduction, se.payment_status,
+                se.attendance_leave_override,
                 json_build_object('basic_salary_effective_month', e.basic_salary_effective_month) AS employee
              FROM salary_entries se LEFT JOIN employees e ON e.id = se.employee_id
              WHERE se.salary_sheet_id = $1`,
@@ -97,12 +98,13 @@ export async function GET(request: Request) {
         const employeeIds = rows.map((r: { employee_id: string }) => r.employee_id)
         employeeIds.forEach((id: string) => distinctEmployeeIds.add(id))
 
-        const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails] = await Promise.all([
+        const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails, attendanceStats] = await Promise.all([
             getFineTotalsForMonth(db, employeeIds, sheet.month),
             getAdvanceDetailsForMonth(db, employeeIds, sheet.month),
             getProductBuyDetailsForMonth(db, employeeIds, sheet.month),
             getEmiLoanDetailsForMonth(db, employeeIds, sheet.month),
             getProvidentFundDetailsForMonth(db, employeeIds, sheet.month),
+            getAttendanceStatsForMonth(db, employeeIds, sheet.month),
         ])
 
         rows.forEach((r) => {
@@ -111,7 +113,10 @@ export async function GET(request: Request) {
             const loan = emiDetails[r.employee_id]?.total || 0
             const providentFund = providentFundDetails[r.employee_id]?.total || 0
             const fine = fineTotals[r.employee_id] || 0
-            const net = computeNetPayable(r, fine, advance, productBuy, loan, providentFund)
+            // Same effective Leave count the Salary Sheet's Attendance (Day) column shows.
+            const effectiveLeave = r.attendance_leave_override ?? (attendanceStats[r.employee_id]?.leave || 0)
+            const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectiveLeave)
+            const net = computeNetPayable(r, fine, advance, productBuy, loan, providentFund, leaveDeduction)
             const isPaid = r.payment_status === 'Paid'
 
             // Basic Salary/Transportation Bill/Snacks Bill/Festival Bonus/Extra Duty/Performance

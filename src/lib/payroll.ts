@@ -117,15 +117,42 @@ export interface SalaryAmounts {
     other_deduction: number
 }
 
+// Every employee gets this many paid Leave days per month for free — any beyond that is
+// deducted from salary at a per-day rate (see computeLeaveDeduction below).
+export const MONTHLY_FREE_LEAVE_DAYS = 4
+
+// Standard payroll month length used for the per-day salary rate — a fixed 30 days every month
+// (the usual payroll convention), not the calendar's actual 28-31, so the same Basic Salary
+// docks the same amount per excess Leave day in February as it does in August.
+export const STANDARD_MONTH_DAYS = 30
+
+// Leave Deduction: days taken beyond the free monthly quota are docked at Basic Salary / 30 per
+// excess day (e.g. 6 Leave days with ৳30,000 Basic Salary docks (6-4) × ৳1,000 = ৳2,000).
+// `leaveDays` should be the same effective value shown in the Attendance (Day) column —
+// attendance_leave_override when a Super Admin has set one, otherwise the live-computed count
+// from the attendance log (see getAttendanceStatsForMonth and EditAttendanceModal in
+// src/components/payroll/SalarySheet.tsx) — so this can never silently disagree with what the
+// sheet displays. Kept to 2 decimal places (paisa), same precision every salary_entries amount
+// column is stored at (Decimal(10,2)) — a per-day rate rarely divides evenly, so rounding to a
+// whole taka here would silently over/under-charge the employee by a few paisa.
+export function computeLeaveDeduction(basicSalary: number, leaveDays: number): number {
+    const excessLeave = leaveDays - MONTHLY_FREE_LEAVE_DAYS
+    if (excessLeave <= 0) return 0
+    const perDayRate = (Number(basicSalary) || 0) / STANDARD_MONTH_DAYS
+    return Math.round(excessLeave * perDayRate * 100) / 100
+}
+
 // Net Payable = Basic Salary + Extra Duty + Transportation Bill + Snacks Bill + Performance Bonus
-// + Festival Bonus - Fine - Advance - Product Buy - Loan - Provident Fund - Other Deduction.
-// The one place this formula lives — every API route imports it, so the dashboard totals
-// and the salary sheet rows can never disagree with each other. Fine, Advance, Product Buy,
-// Loan, and Provident Fund are all live-computed (never stored per salary entry), so they're
-// passed in explicitly. Loan comes from active EMIs (src/lib/emis.ts), Provident Fund from
-// active Provident Fund records (src/lib/providentFunds.ts) — neither is ever manually typed
-// once the corresponding record exists for that employee/month.
-export function computeNetPayable(entry: SalaryAmounts, fine: number, advance: number, productBuy: number, loan: number, providentFund: number): number {
+// + Festival Bonus - Fine - Advance - Product Buy - Loan - Provident Fund - Leave Deduction -
+// Other Deduction. The one place this formula lives — every API route imports it, so the
+// dashboard totals and the salary sheet rows can never disagree with each other. Fine, Advance,
+// Product Buy, Loan, Provident Fund, and Leave Deduction are all live-computed (never stored
+// per salary entry), so they're passed in explicitly. Loan comes from active EMIs
+// (src/lib/emis.ts), Provident Fund from active Provident Fund records
+// (src/lib/providentFunds.ts) — neither is ever manually typed once the corresponding record
+// exists for that employee/month. leaveDeduction defaults to 0 so older callers that haven't
+// been updated yet don't silently break.
+export function computeNetPayable(entry: SalaryAmounts, fine: number, advance: number, productBuy: number, loan: number, providentFund: number, leaveDeduction: number = 0): number {
     return (Number(entry.basic_salary) || 0)
         + (Number(entry.extra_duty) || 0)
         + (Number(entry.transportation_bill) || 0)
@@ -137,6 +164,7 @@ export function computeNetPayable(entry: SalaryAmounts, fine: number, advance: n
         - productBuy
         - loan
         - providentFund
+        - leaveDeduction
         - (Number(entry.other_deduction) || 0)
 }
 
