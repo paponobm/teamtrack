@@ -41,8 +41,8 @@ const navItems = [
     {
         sectionKey: 'nav.people',
         items: [
-            { labelKey: 'nav.members', href: '/members', icon: 'members', slugs: null, adminOnly: true },
-            { labelKey: 'nav.attendance', href: '/attendance', icon: 'attendance', slugs: null, adminOnly: true },
+            { labelKey: 'nav.members', href: '/members', icon: 'members', slugs: ['members'], adminOnly: false },
+            { labelKey: 'nav.attendance', href: '/attendance', icon: 'attendance', slugs: ['employee-attendance'], adminOnly: false },
             { labelKey: 'nav.reports', href: '/reports', icon: 'reports', slugs: null, adminOnly: true },
             { labelKey: 'Fines', href: '/fines', icon: 'expense', slugs: null, adminOnly: false },
         ]

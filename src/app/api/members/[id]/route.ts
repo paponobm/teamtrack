@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { requireAuth, isAuthed } from '@/lib/auth'
+import { seedAdminPermissions } from '@/lib/permissions'
 
 const FULL_SELECT = `e.*,
     json_build_object('id', r.id, 'name', r.name, 'level', r.level) AS role,
@@ -97,10 +98,16 @@ export async function PATCH(
         return NextResponse.json({ error: 'You cannot change your own role' }, { status: 403 })
     }
 
-    // Admins cannot assign Super Admin (or higher) roles to anyone.
-    if (!isSuperAdmin && body.role_id) {
+    // Look up the role actually being assigned, if any — reused below both for the Super-Admin
+    // guard and to seed default access when someone is promoted to Admin.
+    const isRoleChange = !!body.role_id && body.role_id !== target?.role_id
+    let newRoleLevel: number | null = null
+    if (isRoleChange) {
         const { rows: [newRole] } = await db.query(`SELECT level FROM roles WHERE id = $1`, [body.role_id])
-        if (newRole && newRole.level <= 2) {
+        newRoleLevel = newRole?.level ?? null
+
+        // Admins cannot assign Super Admin (or higher) roles to anyone.
+        if (!isSuperAdmin && newRoleLevel !== null && newRoleLevel <= 2) {
             return NextResponse.json({ error: 'Admins cannot assign Super Admin roles' }, { status: 403 })
         }
     }
@@ -131,6 +138,14 @@ export async function PATCH(
 
     if (!data) {
         return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+    }
+
+    // Promoted to Admin — seed default full access (see seedAdminPermissions) so they don't
+    // suddenly land with zero visible pages under the grant-based model /api/permissions/me
+    // now uses for Admin. Only fills in gaps, so it never touches a Super Admin's own
+    // customization if this employee was already an Admin with some pages restricted.
+    if (isRoleChange && newRoleLevel === 3) {
+        await seedAdminPermissions(db, id)
     }
 
     return NextResponse.json(data)

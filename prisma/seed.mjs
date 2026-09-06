@@ -103,6 +103,8 @@ async function main() {
             ['Finance', 'ফাইনান্স', 'All Department', 'finance', 30],
             ['Product Buy', 'প্রোডাক্ট বাই', 'All Department', 'product-buy', 31],
             ['Payroll Management', 'পে-রোল ম্যানেজমেন্ট', 'All Department', 'payroll-management', 32],
+            ['Members', 'সদস্য', 'All Department', 'members', 33],
+            ['Employee Attendance', 'কর্মচারী উপস্থিতি', 'All Department', 'employee-attendance', 34],
         ]
         for (const [name, name_bn, category, slug, sort_order] of features) {
             await client.query(

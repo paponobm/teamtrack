@@ -9,44 +9,28 @@ export async function GET() {
 
     const roleLevel = auth.employee.roleLevel
 
-    // Finance and Payroll Management expose salary/compensation data, so — unlike every other
-    // feature — a plain Admin (level 3) does NOT get automatic access to these two; only Owner/
-    // Super Admin (level ≤ 2) do. A plain Admin needs an explicit grant from a Super Admin via
-    // Members → Edit Member → Access, same as any Member/Manager would.
-    const SUPER_ADMIN_ONLY_SLUGS = ['finance', 'payroll-management']
-
-    // Check if user is Owner, Super Admin, or Admin (level 1–3) - they get full access
-    if (roleLevel && roleLevel <= 3) {
-        const { rows: features } = await db.query(`SELECT id, slug FROM features`)
-
+    // Owner/Super Admin (level ≤ 2) always have full access to every page, including
+    // Finance/Payroll Management — this tier can never be restricted per-member.
+    if (roleLevel && roleLevel <= 2) {
+        const { rows: features } = await db.query(`SELECT slug FROM features`)
         const allAdmin: Record<string, string> = {}
-        features.forEach(f => {
-            if (roleLevel > 2 && SUPER_ADMIN_ONLY_SLUGS.includes(f.slug)) return
-            allAdmin[f.slug] = 'admin'
-        })
-
-        // A plain Admin still needs their own explicit grant (if any) for the slugs excluded
-        // above — Owner/Super Admin already got them all via the loop and skip this.
-        if (roleLevel > 2) {
-            const { rows: grantedOverrides } = await db.query(
-                `SELECT ep.access_level, f.slug
-                 FROM employee_permissions ep LEFT JOIN features f ON f.id = ep.feature_id
-                 WHERE ep.employee_id = $1 AND f.slug = ANY($2)`,
-                [auth.employee.id, SUPER_ADMIN_ONLY_SLUGS]
-            )
-            grantedOverrides.forEach(p => { if (p.slug) allAdmin[p.slug] = p.access_level })
-        }
+        features.forEach(f => { allAdmin[f.slug] = 'admin' })
 
         return NextResponse.json({
             employee_id: auth.employee.id,
             role: auth.employee.roleName,
             permissions: allAdmin,
-            is_super: roleLevel <= 2,
+            is_super: true,
             is_admin: true,
         })
     }
 
-    // For regular users, get their specific permissions
+    // Everyone else — Admin, Manager, Member — gets exactly what's been explicitly granted via
+    // Members → Edit Member → Access. A plain Admin no longer gets a blanket runtime bypass: a
+    // Super Admin can turn off an individual page for one specific Admin the same way they can
+    // for anyone else, and it actually hides it from that Admin's sidebar. New/promoted Admins
+    // are seeded with full access by default (see seedAdminPermissions in lib/permissions.ts),
+    // so this only changes anything once a Super Admin deliberately restricts something.
     const { rows: perms } = await db.query(
         `SELECT ep.access_level, f.slug
          FROM employee_permissions ep LEFT JOIN features f ON f.id = ep.feature_id
@@ -62,6 +46,6 @@ export async function GET() {
         role: auth.employee.roleName,
         permissions: permMap,
         is_super: false,
-        is_admin: false,
+        is_admin: roleLevel === 3,
     })
 }

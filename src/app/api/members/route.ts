@@ -1,4 +1,5 @@
 import { requireAuth, isAuthed, escapeLikePattern } from '@/lib/auth'
+import { seedAdminPermissions } from '@/lib/permissions'
 import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 
@@ -133,23 +134,30 @@ export async function POST(request: Request) {
     }
 
     // 3. Auto-assign default permissions based on features.
-    // NOTE: courier & content are intentionally NOT seeded — they must be granted explicitly
-    // per the client's request (otherwise every new member sees those pages by default).
-    const defaultFeatureSlugs = [
-        'whatsapp-group', 'main-group', 'notice-board', 'problem-box', 'idea-sharing',
-    ]
+    if (data.role?.level === 3) {
+        // A new Admin no longer gets a blanket runtime bypass (see /api/permissions/me) — seed
+        // full access to every page except Finance/Payroll Management so they start out with
+        // the same access an Admin has always had, restrictable afterward per-member.
+        await seedAdminPermissions(db, data.id)
+    } else {
+        // NOTE: courier & content are intentionally NOT seeded — they must be granted explicitly
+        // per the client's request (otherwise every new member sees those pages by default).
+        const defaultFeatureSlugs = [
+            'whatsapp-group', 'main-group', 'notice-board', 'problem-box', 'idea-sharing',
+        ]
 
-    const { rows: defaultFeatures } = await db.query(
-        `SELECT id FROM features WHERE slug = ANY($1)`,
-        [defaultFeatureSlugs]
-    )
-
-    if (defaultFeatures.length > 0) {
-        await db.query(
-            `INSERT INTO employee_permissions (employee_id, feature_id, access_level)
-             SELECT $1, * , 'member' FROM UNNEST($2::uuid[])`,
-            [data.id, defaultFeatures.map((f: { id: string }) => f.id)]
+        const { rows: defaultFeatures } = await db.query(
+            `SELECT id FROM features WHERE slug = ANY($1)`,
+            [defaultFeatureSlugs]
         )
+
+        if (defaultFeatures.length > 0) {
+            await db.query(
+                `INSERT INTO employee_permissions (employee_id, feature_id, access_level)
+                 SELECT $1, * , 'member' FROM UNNEST($2::uuid[])`,
+                [data.id, defaultFeatures.map((f: { id: string }) => f.id)]
+            )
+        }
     }
 
     return NextResponse.json(data, { status: 201 })

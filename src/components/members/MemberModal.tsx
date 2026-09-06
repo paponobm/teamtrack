@@ -51,12 +51,19 @@ const MONTHS = [
 ]
 
 // Page definitions - configurable pages for member access control.
-// Admin-only pages (Members, Attendance, Reports, Expenses, Settings) are NEVER shown here.
+// Admin-only pages (Reports, Settings) are NEVER shown here.
 const PAGE_DEFINITIONS = [
     {
         section: 'Overview',
         pages: [
             { name: 'Notice Board', slug: 'notice-board', desc: 'View company notices and announcements' },
+        ]
+    },
+    {
+        section: 'People',
+        pages: [
+            { name: 'Members', slug: 'members', desc: 'View the team member directory' },
+            { name: 'Employee Attendance', slug: 'employee-attendance', desc: "View the team's daily attendance" },
         ]
     },
     {
@@ -768,7 +775,7 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                     fontSize: '0.75rem', color: '#B45309',
                                 }}>
                                     <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" style={{ flexShrink: 0 }}><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
-                                    <span><strong>Members, Attendance, Reports</strong> are admin-only , not configurable per member.</span>
+                                    <span><strong>Reports</strong> is admin-only , not configurable per member.</span>
                                 </div>
 
                                 {accessLoading ? (
