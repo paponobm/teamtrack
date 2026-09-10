@@ -22,6 +22,15 @@ interface WorkReportEntry {
     created_at: string
     employee: { id: string; name: string; employee_id: string; avatar_url: string | null; department: string | null }
     evaluation: { points: number; note: string | null; evaluated_at: string } | null
+    // Management Check: a role-hierarchy verification chain (Manager verifies Member, Admin
+    // verifies Manager/Member, Super Admin/Owner verifies anyone) — separate from the points
+    // evaluation above. can_verify is computed server-side from the viewer's own role vs this
+    // report's owner, so the UI never has to re-derive the hierarchy rule itself.
+    management_check: 'yes' | 'no' | null
+    checked_by: { id: string; name: string; designation: string | null } | null
+    checked_at: string | null
+    checked_note: string | null
+    can_verify: boolean
 }
 
 const item = { hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } }
@@ -39,6 +48,31 @@ function getAvatarColor(name: string) {
 
 function formatSubmittedAt(ts: string) {
     return new Date(ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+// Small pill for the Management Check verification chain (see the work_reports comment in
+// schema.prisma) — Pending until a superior records Yes/No, then names who decided. Shown on
+// both the card and the detail modal so the two never show conflicting states.
+function ManagementCheckBadge({ report }: { report: WorkReportEntry }) {
+    if (report.management_check === 'yes') {
+        return (
+            <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: '#16A34A', background: 'rgba(22,163,74,0.08)' }}>
+                ✓ Checked{report.checked_by ? ` — ${report.checked_by.name}` : ''}
+            </span>
+        )
+    }
+    if (report.management_check === 'no') {
+        return (
+            <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: '#DC2626', background: 'rgba(220,38,38,0.08)' }}>
+                ✗ Not OK{report.checked_by ? ` — ${report.checked_by.name}` : ''}
+            </span>
+        )
+    }
+    return (
+        <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: '#6B7280', background: 'rgba(107,114,128,0.08)' }}>
+            Check Pending
+        </span>
+    )
 }
 
 // Grows a Work Description row's textarea to fit its content (instead of scrolling
@@ -83,6 +117,7 @@ export default function DailyWorkReport() {
     const [form, setForm] = useState(emptyReportForm)
     const [saving, setSaving] = useState(false)
     const [viewingReport, setViewingReport] = useState<WorkReportEntry | null>(null)
+    const [verifyNote, setVerifyNote] = useState('')
 
     // Work Description on the Create form: numbered rows, same pattern as the Task
     // creation modal's Description section. form.description stays a single string
@@ -315,7 +350,14 @@ export default function DailyWorkReport() {
 
     // Once an admin has accepted/scored a report via Work Comparison, it's locked from
     // further edits (by anyone) so the evaluation stays tied to what was actually reviewed.
-    const canEdit = (report: WorkReportEntry) => !report.evaluation && (isAdmin || report.date === getLocalDateString())
+    // Editing someone else's report is Super Admin/Owner-only (matches this app's established
+    // pattern of reserving cross-employee actions for Super Admin+); Admin/Manager can only edit
+    // their own report, and only on the day it was submitted, same as everyone else.
+    const canEdit = (report: WorkReportEntry) => {
+        if (report.evaluation) return false
+        if (report.employee.id === perms.employee_id) return report.date === getLocalDateString()
+        return !!perms.is_super
+    }
 
     const openEditModal = (report: WorkReportEntry) => {
         setEditingReport(report)
@@ -380,6 +422,32 @@ export default function DailyWorkReport() {
         } else {
             const e = await res.json().catch(() => ({}))
             toast.error(e.error || 'Failed to delete report')
+        }
+    }
+
+    // Management Check: records a superior's Yes/No decision on a subordinate's report (see
+    // can_verify in the API — the button that calls this is only ever shown when the backend
+    // would actually accept the request). Updates both the list and an open detail modal
+    // in-place from the response so the badge/verifier name appear immediately.
+    const handleVerify = async (id: string, decision: 'yes' | 'no') => {
+        const res = await fetch(`/api/work-reports/${id}/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ management_check: decision, note: verifyNote }),
+        })
+        if (res.ok) {
+            const data = await res.json()
+            // can_verify flips to false immediately (the decision is now final — see the 409 the
+            // backend returns if a second attempt is made) so the Yes/No controls disappear
+            // without waiting on a refetch.
+            const patch = { management_check: data.management_check, checked_by: data.checked_by, checked_at: data.checked_at, checked_note: data.checked_note, can_verify: false }
+            setEntries(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e))
+            setViewingReport(prev => (prev && prev.id === id ? { ...prev, ...patch } : prev))
+            setVerifyNote('')
+            toast.success(decision === 'yes' ? 'Marked as checked — Yes' : 'Marked as checked — No')
+        } else {
+            const e = await res.json().catch(() => ({}))
+            toast.error(e.error || 'Failed to update management check')
         }
     }
 
@@ -562,12 +630,12 @@ export default function DailyWorkReport() {
                             const sc = statusConfig[r.status] || statusConfig.pending
                             return (
                                 <motion.div key={r.id} className="card"
-                                    style={{ cursor: 'pointer', position: 'relative', overflow: 'hidden' }}
+                                    style={{ cursor: 'pointer', position: 'relative', overflow: 'hidden', height: '280px', display: 'flex', flexDirection: 'column' }}
                                     whileHover={{ y: -2, boxShadow: '0 8px 30px rgba(0,0,0,0.08)' }}
-                                    onClick={() => setViewingReport(r)}>
+                                    onClick={() => { setViewingReport(r); setVerifyNote('') }}>
                                     <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '4px', background: sc.color }} />
-                                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                                        <div style={{ flex: 1, minWidth: 0, minHeight: 0, alignSelf: 'stretch', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
                                                 <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>{r.project}</h3>
                                                 {/* <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: sc.bg }}>{sc.label}</span> */}
@@ -576,9 +644,10 @@ export default function DailyWorkReport() {
                                                         ✓ Accepted
                                                     </span>
                                                 )}
+                                                <ManagementCheckBadge report={r} />
                                             </div>
-                                            {isAdmin && (
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                            {(isAdmin || r.employee.id !== perms.employee_id) && (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexShrink: 0 }}>
                                                     <div className="avatar avatar-sm" style={{ background: getAvatarColor(r.employee.name), overflow: 'hidden' }}>
                                                         {r.employee.avatar_url ? (
                                                             <img src={r.employee.avatar_url} alt="" onError={(ev) => { ev.currentTarget.style.display = 'none' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -591,28 +660,36 @@ export default function DailyWorkReport() {
                                                 </div>
                                             )}
                                             {r.description && (
-                                                <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '0 0 8px', lineHeight: 1.5, whiteSpace: 'pre-line' }}>{r.description}</p>
+                                                <p style={{
+                                                    fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '0 0 8px', lineHeight: 1.5,
+                                                    whiteSpace: 'pre-line', overflowWrap: 'anywhere', wordBreak: 'break-word',
+                                                    display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                                                }}>{r.description}</p>
                                             )}
                                             {r.evaluation && (
-                                                <div style={{ padding: '8px 10px', background: 'rgba(22,163,74,0.06)', border: '1px solid rgba(22,163,74,0.15)', borderRadius: '8px', marginBottom: '8px' }}>
+                                                <div style={{ padding: '8px 10px', background: 'rgba(22,163,74,0.06)', border: '1px solid rgba(22,163,74,0.15)', borderRadius: '8px', marginBottom: '8px', flexShrink: 0 }}>
                                                     <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#16A34A', marginBottom: r.evaluation.note ? '4px' : 0 }}>
                                                         ⭐ {r.evaluation.points} pts awarded
                                                     </div>
                                                     {r.evaluation.note && (
-                                                        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>{r.evaluation.note}</div>
+                                                        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', overflowWrap: 'anywhere' }}>{r.evaluation.note}</div>
                                                     )}
                                                 </div>
                                             )}
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.75rem', color: 'var(--color-text-tertiary)', flexWrap: 'wrap' }}>
-                                                {/* <span>{new Date(`${r.date}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                                                <span>{r.hours}h</span>
-                                                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                    <div style={{ width: '40px', height: '5px', borderRadius: '3px', background: 'rgba(118,118,128,0.15)', overflow: 'hidden' }}>
-                                                        <div style={{ width: `${r.progress}%`, height: '100%', background: '#2563EB' }} />
-                                                    </div>
-                                                    {r.progress}%
-                                                </span> */}
-                                                <span>{formatSubmittedAt(r.created_at)}</span>
+                                            {/* Note + date grouped into one footer box at the bottom of the card, matching the
+                                                boxed "Note:" style used on PR Management cards. */}
+                                            <div style={{
+                                                marginTop: 'auto', flexShrink: 0, padding: '6px 10px', borderRadius: '8px',
+                                                background: 'rgba(118,118,128,0.05)', display: 'flex', flexDirection: 'column', gap: '4px',
+                                            }}>
+                                                {r.checked_note && (
+                                                    <div style={{
+                                                        fontSize: '0.75rem', color: '#DC2626',
+                                                        overflowWrap: 'anywhere', wordBreak: 'break-word',
+                                                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                                                    }}><strong>Note:</strong> {r.checked_note}</div>
+                                                )}
+                                                <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{formatSubmittedAt(r.created_at)}</span>
                                             </div>
                                         </div>
                                         {canEdit(r) && (
@@ -637,13 +714,13 @@ export default function DailyWorkReport() {
                 {viewingReport && (
                     <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setViewingReport(null)}>
                         <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                            onClick={e => e.stopPropagation()} style={{ maxWidth: '480px', width: '100%' }}>
+                            onClick={e => e.stopPropagation()} style={{ maxWidth: '600px', width: '100%' }}>
                             <div className="modal-header">
                                 <h2 className="modal-title">{viewingReport.project}</h2>
                                 <button className="btn btn-ghost btn-sm" onClick={() => setViewingReport(null)}>✕</button>
                             </div>
-                            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                                {isAdmin && (
+                            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                {(isAdmin || viewingReport.employee.id !== perms.employee_id) && (
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                         <div className="avatar avatar-sm" style={{ background: getAvatarColor(viewingReport.employee.name), overflow: 'hidden' }}>
                                             {viewingReport.employee.avatar_url ? (
@@ -683,6 +760,39 @@ export default function DailyWorkReport() {
                                         )}
                                     </div>
                                 )}
+                                <div style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--color-border-light)' }}>
+                                    <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: '6px' }}>Management Check</div>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                                        <ManagementCheckBadge report={viewingReport} />
+                                        {viewingReport.checked_by && (
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+                                                {viewingReport.checked_by.name}{viewingReport.checked_by.designation ? ` (${viewingReport.checked_by.designation})` : ''}
+                                            </span>
+                                        )}
+                                    </div>
+                                    {viewingReport.checked_note && (
+                                        <p style={{ fontSize: '0.8125rem', color: '#DC2626', marginTop: '8px', marginBottom: 0, whiteSpace: 'pre-line' }}>
+                                            {viewingReport.checked_note}
+                                        </p>
+                                    )}
+                                    {viewingReport.can_verify && (
+                                        <>
+                                            <textarea value={verifyNote} onChange={e => setVerifyNote(e.target.value)} placeholder="Add a verification note (optional)"
+                                                className="form-input" rows={2}
+                                                style={{ width: '100%', marginTop: '10px', fontSize: '0.8125rem', resize: 'vertical' }} />
+                                            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                                                <button className="btn btn-sm" onClick={() => handleVerify(viewingReport.id, 'yes')}
+                                                    style={{ flex: 1, background: 'rgba(22,163,74,0.1)', color: '#16A34A', border: '1px solid rgba(22,163,74,0.25)' }}>
+                                                    Yes
+                                                </button>
+                                                <button className="btn btn-sm" onClick={() => handleVerify(viewingReport.id, 'no')}
+                                                    style={{ flex: 1, background: 'rgba(220,38,38,0.1)', color: '#DC2626', border: '1px solid rgba(220,38,38,0.25)' }}>
+                                                    No
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
                                 {viewingReport.notes && (
                                     <div>
                                         <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: '4px' }}>Notes</div>
@@ -697,7 +807,9 @@ export default function DailyWorkReport() {
                             </div>
                             <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
                                 <div>
-                                    {isAdmin && (
+                                    {/* Deleting someone else's report is Super Admin/Owner-only, same as editing above —
+                                        Admin/Manager can still delete their own. */}
+                                    {(perms.is_super || viewingReport.employee.id === perms.employee_id) && (
                                         <button className="btn btn-sm" onClick={() => handleDelete(viewingReport.id)} style={{ background: '#DC2626', color: '#fff', border: 'none' }}>Delete</button>
                                     )}
                                 </div>

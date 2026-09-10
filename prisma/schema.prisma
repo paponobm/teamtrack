@@ -360,7 +360,8 @@ model employees {
   work_entries_work_entries_verified_byToemployees                       work_entries[]            @relation("work_entries_verified_byToemployees")
   work_evaluations_work_evaluations_employee_idToemployees               work_evaluations[]        @relation("work_evaluations_employee_idToemployees")
   work_evaluations_work_evaluations_evaluated_byToemployees              work_evaluations[]        @relation("work_evaluations_evaluated_byToemployees")
-  work_reports                                                           work_reports[]
+  work_reports_work_reports_employee_idToemployees                       work_reports[]            @relation("work_reports_employee_idToemployees")
+  work_reports_work_reports_checked_byToemployees                        work_reports[]            @relation("work_reports_checked_byToemployees")
 
   @@index([department_id], map: "idx_employees_department")
   @@index([date_of_birth], map: "idx_employees_dob")
@@ -995,8 +996,17 @@ model work_reports {
   notes                 String?
   created_at            DateTime?               @default(now()) @db.Timestamptz(6)
   updated_at            DateTime?               @default(now()) @db.Timestamptz(6)
+  // Management Check: a role-hierarchy verification chain (Manager verifies Member, Admin
+  // verifies Manager/Member, Super Admin/Owner verifies anyone) — separate from the points-based
+  // Work Comparison evaluation above. null = not yet checked, 'yes'/'no' once a superior records
+  // a decision; checked_by/checked_at record who and when.
+  management_check      String?
+  checked_by            String?                 @db.Uuid
+  checked_at            DateTime?               @db.Timestamptz(6)
+  checked_note          String?
   work_evaluation_items work_evaluation_items[]
-  employees             employees               @relation(fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  employees_work_reports_employee_idToemployees employees  @relation("work_reports_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  employees_work_reports_checked_byToemployees  employees? @relation("work_reports_checked_byToemployees", fields: [checked_by], references: [id], onUpdate: NoAction)
 
   @@index([date], map: "idx_work_reports_date")
   @@index([employee_id], map: "idx_work_reports_employee")

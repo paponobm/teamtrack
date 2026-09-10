@@ -96,11 +96,21 @@ export async function GET(request: Request) {
         if (startDate && endDate) { params.push(startDate); conditions.push(`wr.date >= $${params.length}`); params.push(endDate); conditions.push(`wr.date <= $${params.length}`) }
         if (employeeId) { params.push(employeeId); conditions.push(`wr.employee_id = $${params.length}`) }
         if (status) { params.push(status); conditions.push(`wr.status = $${params.length}`) }
+        // Same role-hierarchy visibility rule as GET /api/work-reports — an Admin exporting CSV
+        // can't see more than they can see in the app itself (Manager/Member only); Super
+        // Admin/Owner are unrestricted.
+        if (auth.employee.roleLevel > 2) {
+            params.push(auth.employee.id, auth.employee.roleLevel)
+            conditions.push(`(wr.employee_id = $${params.length - 1} OR er.level > $${params.length})`)
+        }
 
         const { rows: data } = await db.query(
             `SELECT wr.date, wr.project, wr.description, wr.hours, wr.progress, wr.status, wr.notes,
                 json_build_object('name', e.name, 'employee_id', e.employee_id, 'department', json_build_object('name', d.name)) AS employee
-             FROM work_reports wr LEFT JOIN employees e ON e.id = wr.employee_id LEFT JOIN departments d ON d.id = e.department_id
+             FROM work_reports wr
+             LEFT JOIN employees e ON e.id = wr.employee_id
+             LEFT JOIN roles er ON er.id = e.role_id
+             LEFT JOIN departments d ON d.id = e.department_id
              ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
              ORDER BY wr.date DESC`,
             params

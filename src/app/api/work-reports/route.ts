@@ -12,13 +12,17 @@ function getWeekStart(d: Date) {
 }
 
 // GET /api/work-reports?start_date&end_date&employee_id&department_id&status&search&page&limit
-// Members see only their own reports; admins see everyone's, with employee/department filters.
+// Visibility follows the same role-hierarchy chain as verification (see the Management Check
+// comment on work_reports in schema.prisma): a Member sees only their own reports; a Manager
+// also sees Members'; an Admin also sees Managers' and Members'; a Super Admin/Owner sees
+// everyone's. The employee/department filter dropdowns remain an Admin+-only convenience.
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
     const db = auth.db
 
     const isAdmin = auth.employee.roleLevel <= 3
+    const isSuperAdmin = auth.employee.roleLevel <= 2
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get('start_date')
     const endDate = searchParams.get('end_date')
@@ -36,20 +40,27 @@ export async function GET(request: Request) {
     const conditions = [`wr.date >= $1`, `wr.date <= $2`]
     const params: unknown[] = [startDate, endDate]
 
-    if (isAdmin) {
-        if (employeeId) { params.push(employeeId); conditions.push(`wr.employee_id = $${params.length}`) }
-    } else {
-        params.push(auth.employee.id); conditions.push(`wr.employee_id = $${params.length}`)
+    // Own reports are always visible; anyone whose role sits strictly below the viewer's in the
+    // hierarchy (higher `level` number = lower rank) is visible too. Super Admin/Owner skip this
+    // filter entirely and see every report, matching "super admin can see all".
+    if (!isSuperAdmin) {
+        params.push(auth.employee.id, auth.employee.roleLevel)
+        conditions.push(`(wr.employee_id = $${params.length - 1} OR er.level > $${params.length})`)
     }
+    if (isAdmin && employeeId) { params.push(employeeId); conditions.push(`wr.employee_id = $${params.length}`) }
     if (status) { params.push(status); conditions.push(`wr.status = $${params.length}`) }
 
     const { rows: data } = await db.query(
-        `SELECT wr.id, wr.date, wr.project, wr.description, wr.hours, wr.progress, wr.status, wr.attachment_url, wr.notes, wr.created_at,
+        `SELECT wr.id, wr.employee_id, wr.date, wr.project, wr.description, wr.hours, wr.progress, wr.status, wr.attachment_url, wr.notes, wr.created_at,
+            wr.management_check, wr.checked_at, wr.checked_note, er.level AS employee_role_level,
             json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url,
-                'department', json_build_object('id', d.id, 'name', d.name)) AS employee
+                'department', json_build_object('id', d.id, 'name', d.name)) AS employee,
+            CASE WHEN checker.id IS NOT NULL THEN json_build_object('id', checker.id, 'name', checker.name, 'designation', checker.designation) END AS checked_by
          FROM work_reports wr
          LEFT JOIN employees e ON e.id = wr.employee_id
+         LEFT JOIN roles er ON er.id = e.role_id
          LEFT JOIN departments d ON d.id = e.department_id
+         LEFT JOIN employees checker ON checker.id = wr.checked_by
          WHERE ${conditions.join(' AND ')}
          ORDER BY wr.date DESC, wr.created_at DESC`,
         params
@@ -117,6 +128,16 @@ export async function GET(request: Request) {
             department: r.employee?.department?.name || null,
         },
         evaluation: evaluationByReport[r.id] || null,
+        management_check: r.management_check || null,
+        checked_by: r.checked_by || null,
+        checked_at: r.checked_at || null,
+        checked_note: r.checked_note || null,
+        // Same role-hierarchy rule as the visibility filter above — a viewer can verify a report
+        // if it isn't their own and the owner's role sits strictly below theirs (Super Admin/
+        // Owner can verify anyone's). Once a decision is recorded it's final, so an already-
+        // checked report never offers Yes/No again, even to someone who could otherwise verify it.
+        can_verify: !r.management_check && r.employee_id !== auth.employee.id
+            && (isSuperAdmin || (r.employee_role_level != null && r.employee_role_level > auth.employee.roleLevel)),
     }))
 
     // Dashboard cards reflect fixed periods (today/this week/this month), independent of
@@ -128,10 +149,30 @@ export async function GET(request: Request) {
 
     let summary: Record<string, number>
     if (isAdmin) {
+        // Same hierarchy scope as the list above (Admin: self + Manager/Member; Super Admin/
+        // Owner: unrestricted) — otherwise these cards would show system-wide totals while the
+        // list beneath only shows what's actually visible, which would just be confusing.
+        const scopeSql = isSuperAdmin ? '' : `AND (wr.employee_id = $2 OR er.level > $3)`
+        const scopeParams = isSuperAdmin ? [] : [auth.employee.id, auth.employee.roleLevel]
+        const activeEmployeesSql = isSuperAdmin
+            ? `SELECT COUNT(*)::int AS count FROM employees WHERE is_active = true`
+            : `SELECT COUNT(*)::int AS count FROM employees e LEFT JOIN roles er ON er.id = e.role_id WHERE e.is_active = true AND (e.id = $1 OR er.level > $2)`
+        const activeEmployeesParams = isSuperAdmin ? [] : [auth.employee.id, auth.employee.roleLevel]
+
         const [{ rows: [{ count: reportsToday }] }, { rows: todayRows }, { rows: [{ count: activeEmployees }] }] = await Promise.all([
-            db.query(`SELECT COUNT(*)::int AS count FROM work_reports WHERE date = $1`, [today]),
-            db.query(`SELECT employee_id FROM work_reports WHERE date = $1`, [today]),
-            db.query(`SELECT COUNT(*)::int AS count FROM employees WHERE is_active = true`),
+            db.query(
+                `SELECT COUNT(*)::int AS count FROM work_reports wr
+                 LEFT JOIN employees e ON e.id = wr.employee_id LEFT JOIN roles er ON er.id = e.role_id
+                 WHERE wr.date = $1 ${scopeSql}`,
+                [today, ...scopeParams]
+            ),
+            db.query(
+                `SELECT wr.employee_id FROM work_reports wr
+                 LEFT JOIN employees e ON e.id = wr.employee_id LEFT JOIN roles er ON er.id = e.role_id
+                 WHERE wr.date = $1 ${scopeSql}`,
+                [today, ...scopeParams]
+            ),
+            db.query(activeEmployeesSql, activeEmployeesParams),
         ])
         const submittedToday = new Set(todayRows.map(r => r.employee_id)).size
         summary = {
