@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { usePermissions } from '@/lib/PermissionsContext'
 import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString, getWeekRange, getMonthRange } from '@/lib/dateRange'
-import { IconChevronLeft, IconChevronRight, IconSearch, IconX, IconDownload, IconPlus } from '@/components/icons/Icons'
+import { IconChevronLeft, IconChevronRight, IconSearch, IconX, IconDownload, IconPlus, IconEdit, IconTrash } from '@/components/icons/Icons'
 
 type DateRangeMode = 'today' | 'week' | 'month' | 'custom'
 
@@ -39,6 +39,14 @@ function getAvatarColor(name: string) {
 
 function formatSubmittedAt(ts: string) {
     return new Date(ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+// Grows a Work Description row's textarea to fit its content (instead of scrolling
+// horizontally inside a fixed single line) so a long line is fully visible while typing.
+function autoGrowTextarea(el: HTMLTextAreaElement | null) {
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
 }
 
 const LIMIT = 20
@@ -81,6 +89,22 @@ export default function DailyWorkReport() {
     // (joined "1. ...\n2. ...") so the rest of the save/edit flow is untouched.
     const [descRows, setDescRows] = useState<{ id: string; val: string }[]>([{ id: 'desc-init', val: '' }])
 
+    // Common Report picker — an employee's own saved snippets, shown in their own modal with a
+    // checkbox per snippet plus edit/delete icons and an "Add Common Report" button, so the
+    // whole library is managed right there instead of a separate page section. Checking several
+    // and pressing Add inserts each checked one as its own Work Description row, in the order
+    // they're listed, so a multi-line report can be assembled from a few clicks instead of
+    // retyping the same lines every day.
+    const [commonReports, setCommonReports] = useState<{ id: string; text: string }[]>([])
+    const [loadingCommonReports, setLoadingCommonReports] = useState(false)
+    const [showCommonPicker, setShowCommonPicker] = useState(false)
+    const [selectedCommonIds, setSelectedCommonIds] = useState<Set<string>>(new Set())
+    // Nested "Add/Edit Common Report" sub-modal, opened from inside the picker above.
+    const [showCommonEditModal, setShowCommonEditModal] = useState(false)
+    const [editingCommonId, setEditingCommonId] = useState<string | null>(null)
+    const [commonText, setCommonText] = useState('')
+    const [savingCommon, setSavingCommon] = useState(false)
+
     const range = dateRangeMode === 'today' ? { start: refDate, end: refDate }
         : dateRangeMode === 'week' ? getWeekRange(new Date(`${refDate}T00:00:00`))
         : dateRangeMode === 'month' ? getMonthRange(new Date(`${refDate}T00:00:00`))
@@ -97,6 +121,15 @@ export default function DailyWorkReport() {
         fetch('/api/members?status=active').then(r => r.json()).then(d => { if (Array.isArray(d)) setEmployees(d) }).catch(() => { })
         fetch('/api/departments').then(r => r.json()).then(d => { if (Array.isArray(d)) setDepartments(d) }).catch(() => { })
     }, [isAdmin])
+
+    // Re-measures every Work Description row's height whenever its text changes programmatically
+    // (a Common Report pick reusing/filling a row, opening the edit modal with existing lines,
+    // adding/removing a row) — the row's own onChange already grows it instantly while typing,
+    // but that handler never fires for these other paths.
+    useEffect(() => {
+        if (!showModal) return
+        document.querySelectorAll<HTMLTextAreaElement>('.daily-report-desc-textarea').forEach(autoGrowTextarea)
+    }, [descRows, showModal])
 
     const fetchReports = useCallback(async () => {
         if (!rangeReady) return
@@ -139,8 +172,10 @@ export default function DailyWorkReport() {
         setEditingReport(null)
         setForm({ ...emptyReportForm, date: getLocalDateString() })
         setDescRows([{ id: Math.random().toString(), val: '' }])
+        setShowCommonPicker(false)
         setShowModal(true)
     }
+
 
     const syncDescription = (rows: { id: string; val: string }[]) => {
         const joined = rows.filter(r => r.val.trim()).map((r, i) => `${i + 1}. ${r.val.trim()}`).join('\n')
@@ -157,6 +192,116 @@ export default function DailyWorkReport() {
 
     const handleAddDescRow = () => {
         setDescRows(prev => [...prev, { id: Math.random().toString(), val: '' }])
+    }
+
+    // Always fetches fresh (rather than caching) so a snippet just added/edited elsewhere
+    // shows up right away.
+    const fetchCommonReportsList = async () => {
+        setLoadingCommonReports(true)
+        try {
+            const res = await fetch('/api/common-reports')
+            const data = await res.json()
+            if (Array.isArray(data)) setCommonReports(data)
+        } finally {
+            setLoadingCommonReports(false)
+        }
+    }
+
+    const openCommonPicker = () => {
+        setSelectedCommonIds(new Set())
+        setShowCommonPicker(true)
+        fetchCommonReportsList()
+    }
+
+    const toggleCommonSelection = (id: string) => {
+        setSelectedCommonIds(prev => {
+            const next = new Set(prev)
+            if (next.has(id)) next.delete(id); else next.add(id)
+            return next
+        })
+    }
+
+    const openAddCommonModal = () => {
+        setEditingCommonId(null)
+        setCommonText('')
+        setShowCommonEditModal(true)
+    }
+
+    const openEditCommonModal = (cr: { id: string; text: string }) => {
+        setEditingCommonId(cr.id)
+        setCommonText(cr.text)
+        setShowCommonEditModal(true)
+    }
+
+    const handleSaveCommon = async () => {
+        if (!commonText.trim()) { toast.error('Text is required'); return }
+        setSavingCommon(true)
+        try {
+            const res = editingCommonId
+                ? await fetch('/api/common-reports', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: editingCommonId, text: commonText }),
+                })
+                : await fetch('/api/common-reports', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: commonText }),
+                })
+            if (!res.ok) {
+                const e = await res.json().catch(() => ({}))
+                toast.error(e.error || 'Failed to save')
+                return
+            }
+            toast.success(editingCommonId ? 'Common report updated' : 'Common report added')
+            setShowCommonEditModal(false)
+            fetchCommonReportsList()
+        } finally {
+            setSavingCommon(false)
+        }
+    }
+
+    const handleDeleteCommon = async (id: string) => {
+        if (!confirm('Delete this common report? This cannot be undone.')) return
+        const res = await fetch(`/api/common-reports?id=${id}`, { method: 'DELETE' })
+        if (res.ok) {
+            toast.success('Common report deleted')
+            setCommonReports(prev => prev.filter(r => r.id !== id))
+            setSelectedCommonIds(prev => {
+                const next = new Set(prev)
+                next.delete(id)
+                return next
+            })
+        } else {
+            toast.error('Failed to delete')
+        }
+    }
+
+    // Adds every checked Common Report snippet as its own Work Description row, in the order
+    // they're listed — the first one fills the last row if it's still empty, everything after
+    // that adds a new row underneath, same shape as typing them in manually one at a time.
+    const handleAddSelectedCommonReports = () => {
+        const textsToAdd = commonReports.filter(cr => selectedCommonIds.has(cr.id)).map(cr => cr.text)
+        if (textsToAdd.length > 0) {
+            // Opened standalone from the toolbar (no report form open yet) — start a fresh one
+            // so there's somewhere for the picked lines to land. openCreateModal's setDescRows
+            // reset runs first in this same batch, so the functional update below always builds
+            // on top of that fresh single empty row rather than a stale form's leftovers.
+            if (!showModal) openCreateModal()
+            setDescRows(prev => {
+                let rows = prev
+                for (const text of textsToAdd) {
+                    const last = rows[rows.length - 1]
+                    rows = last && !last.val.trim()
+                        ? rows.map(r => r.id === last.id ? { ...r, val: text } : r)
+                        : [...rows, { id: Math.random().toString(), val: text }]
+                }
+                syncDescription(rows)
+                return rows
+            })
+        }
+        setShowCommonPicker(false)
+        setSelectedCommonIds(new Set())
     }
 
     const handleRemoveDescRow = (id: string) => {
@@ -189,6 +334,7 @@ export default function DailyWorkReport() {
         // so this stays a pure function of its argument.
         const lines = (report.description || '').split('\n').map(l => l.replace(/^\d+\.\s*/, '')).filter(l => l.trim())
         setDescRows(lines.length > 0 ? lines.map((val, i) => ({ id: `${report.id}-${i}`, val })) : [{ id: report.id, val: '' }])
+        setShowCommonPicker(false)
         setViewingReport(null)
         setShowModal(true)
     }
@@ -321,7 +467,10 @@ export default function DailyWorkReport() {
                     </div>
                 )}
 
-                <button className="btn btn-primary" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px' }} onClick={openCreateModal}>
+                <button className="btn btn-secondary" style={{ marginLeft: 'auto' }} onClick={openCommonPicker}>
+                    Common Report
+                </button>
+                <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={openCreateModal}>
                     <IconPlus size={16} /> Create Daily Report
                 </button>
             </motion.div>
@@ -569,7 +718,7 @@ export default function DailyWorkReport() {
                 {showModal && (
                     <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowModal(false)}>
                         <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                            onClick={e => e.stopPropagation()} style={{ maxWidth: '520px', width: '100%', maxHeight: '85vh', overflow: 'auto' }}>
+                            onClick={e => e.stopPropagation()} style={{ maxWidth: '860px', width: '100%', maxHeight: '92vh', overflow: 'auto' }}>
                             <div className="modal-header">
                                 <h2 className="modal-title">{editingReport ? 'Edit Daily Report' : 'Create Daily Report'}</h2>
                                 <button className="btn btn-ghost btn-sm" onClick={() => setShowModal(false)}>✕</button>
@@ -584,7 +733,13 @@ export default function DailyWorkReport() {
                                     <input type="text" className="input" value={form.project} onChange={e => setForm({ ...form, project: e.target.value })} placeholder="e.g. Website Redesign" />
                                 </div>
                                 <div className="input-group" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                    <label className="input-label" style={{ marginBottom: 0 }}>Work Description</label>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <label className="input-label" style={{ marginBottom: 0 }}>Work Description</label>
+                                        <button type="button" onClick={openCommonPicker}
+                                            style={{ padding: '4px 10px', borderRadius: '7px', border: '1px solid var(--color-border-light)', background: 'transparent', color: 'var(--color-primary)', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer' }}>
+                                            Common Report
+                                        </button>
+                                    </div>
                                     <AnimatePresence initial={false}>
                                         {descRows.map((row, i) => (
                                             <motion.div
@@ -593,33 +748,34 @@ export default function DailyWorkReport() {
                                                 animate={{ opacity: 1, height: 'auto', y: 0 }}
                                                 exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
                                                 transition={{ duration: 0.2 }}
-                                                style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                                                style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}
                                             >
-                                                <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6875rem', fontWeight: 600, flexShrink: 0 }}>
+                                                <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6875rem', fontWeight: 600, flexShrink: 0, marginTop: '3px' }}>
                                                     {i + 1}
                                                 </div>
-                                                <input
-                                                    type="text"
-                                                    className="input"
+                                                <textarea
+                                                    className="input daily-report-desc-textarea"
+                                                    rows={1}
                                                     placeholder="What did you work on?"
                                                     value={row.val}
-                                                    onChange={e => handleDescRowChange(row.id, e.target.value)}
-                                                    style={{ flex: 1 }}
+                                                    ref={autoGrowTextarea}
+                                                    onChange={e => { handleDescRowChange(row.id, e.target.value); autoGrowTextarea(e.target) }}
+                                                    style={{ flex: 1, resize: 'none', overflow: 'hidden', lineHeight: 1.5, minHeight: '40px' }}
                                                     disabled={saving}
                                                     onKeyDown={e => {
-                                                        if (e.key === 'Enter' && row.val.trim()) {
+                                                        if (e.key === 'Enter' && !e.shiftKey && row.val.trim()) {
                                                             e.preventDefault()
                                                             if (i === descRows.length - 1) handleAddDescRow()
                                                         }
                                                     }}
                                                 />
                                                 {descRows.length > 1 && (
-                                                    <button onClick={() => handleRemoveDescRow(row.id)} className="btn btn-ghost btn-icon" style={{ color: 'var(--color-text-tertiary)', flexShrink: 0, padding: '6px' }}>
+                                                    <button onClick={() => handleRemoveDescRow(row.id)} className="btn btn-ghost btn-icon" style={{ color: 'var(--color-text-tertiary)', flexShrink: 0, padding: '6px', marginTop: '2px' }}>
                                                         <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
                                                     </button>
                                                 )}
                                                 {i === descRows.length - 1 && (
-                                                    <button onClick={handleAddDescRow} className="btn btn-ghost btn-icon" style={{ color: 'var(--color-primary)', background: 'var(--color-primary-light)', flexShrink: 0, padding: '6px' }}>
+                                                    <button onClick={handleAddDescRow} className="btn btn-ghost btn-icon" style={{ color: 'var(--color-primary)', background: 'var(--color-primary-light)', flexShrink: 0, padding: '6px', marginTop: '2px' }}>
                                                         <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" /></svg>
                                                     </button>
                                                 )}
@@ -633,6 +789,89 @@ export default function DailyWorkReport() {
                                 <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
                                     {saving ? 'Saving...' : editingReport ? 'Save Changes' : 'Submit Report'}
                                 </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Common Report Picker — the whole library lives here: check any number of saved
+                snippets and press Add to insert each one as its own Work Description row above
+                (in the order listed), or use the edit/delete icons and "Add Common Report" to
+                manage the library itself, all from the same popup. */}
+            <AnimatePresence>
+                {showCommonPicker && (
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowCommonPicker(false)} style={{ zIndex: 1100 }}>
+                        <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                            onClick={e => e.stopPropagation()} style={{ maxWidth: '900px', width: '100%', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}>
+                            <div className="modal-header">
+                                <h2 className="modal-title">Common Report</h2>
+                                <button className="btn btn-ghost btn-sm" onClick={() => setShowCommonPicker(false)}>✕</button>
+                            </div>
+                            <div className="modal-body" style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                {loadingCommonReports ? (
+                                    [1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: '38px', borderRadius: '8px' }} />)
+                                ) : commonReports.length === 0 ? (
+                                    <div style={{ padding: '20px 10px', textAlign: 'center', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>
+                                        No common reports yet. Add one below.
+                                    </div>
+                                ) : (
+                                    commonReports.map(cr => {
+                                        const checked = selectedCommonIds.has(cr.id)
+                                        return (
+                                            <div key={cr.id}
+                                                style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '10px', borderRadius: '8px', border: `1px solid ${checked ? 'var(--color-primary)' : 'var(--color-border-light)'}`, background: checked ? 'var(--color-primary-light)' : 'transparent' }}>
+                                                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', flex: 1, minWidth: 0, cursor: 'pointer' }}>
+                                                    <input type="checkbox" checked={checked} onChange={() => toggleCommonSelection(cr.id)} style={{ marginTop: '3px', flexShrink: 0 }} />
+                                                    <span style={{ fontSize: '0.8125rem', whiteSpace: 'pre-line', overflowWrap: 'anywhere', flex: 1, minWidth: 0 }}>{cr.text}</span>
+                                                </label>
+                                                <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
+                                                    <button onClick={() => openEditCommonModal(cr)} className="btn btn-ghost btn-icon" style={{ color: 'var(--color-text-tertiary)', padding: '4px' }} title="Edit">
+                                                        <IconEdit size={14} />
+                                                    </button>
+                                                    <button onClick={() => handleDeleteCommon(cr.id)} className="btn btn-ghost btn-icon" style={{ color: '#DC2626', padding: '4px' }} title="Delete">
+                                                        <IconTrash size={14} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )
+                                    })
+                                )}
+                            </div>
+                            <div className="modal-footer">
+                                <button className="btn btn-primary btn-sm" style={{ marginRight: 'auto', display: 'flex', alignItems: 'center', gap: '6px' }} onClick={openAddCommonModal}>
+                                    <IconPlus size={14} /> Add Common Report
+                                </button>
+                                <button className="btn btn-secondary btn-sm" onClick={() => setShowCommonPicker(false)}>Cancel</button>
+                                <button className="btn btn-primary btn-sm" onClick={handleAddSelectedCommonReports} disabled={selectedCommonIds.size === 0}>
+                                    Add{selectedCommonIds.size > 0 ? ` (${selectedCommonIds.size})` : ''}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Nested Add/Edit Common Report sub-modal, stacked on top of the picker above. */}
+            <AnimatePresence>
+                {showCommonEditModal && (
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowCommonEditModal(false)} style={{ zIndex: 1200 }}>
+                        <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                            onClick={e => e.stopPropagation()} style={{ maxWidth: '480px', width: '100%' }}>
+                            <div className="modal-header">
+                                <h2 className="modal-title">{editingCommonId ? 'Edit Common Report' : 'Add Common Report'}</h2>
+                                <button className="btn btn-ghost btn-sm" onClick={() => setShowCommonEditModal(false)}>✕</button>
+                            </div>
+                            <div className="modal-body">
+                                <div className="input-group">
+                                    <label className="input-label">Report Text</label>
+                                    <textarea className="input" rows={4} value={commonText} onChange={e => setCommonText(e.target.value)}
+                                        placeholder="e.g. Followed up with pending customer orders" autoFocus />
+                                </div>
+                            </div>
+                            <div className="modal-footer">
+                                <button className="btn btn-secondary btn-sm" onClick={() => setShowCommonEditModal(false)}>Cancel</button>
+                                <button className="btn btn-primary btn-sm" onClick={handleSaveCommon} disabled={savingCommon}>{savingCommon ? 'Saving...' : 'Save'}</button>
                             </div>
                         </motion.div>
                     </motion.div>
