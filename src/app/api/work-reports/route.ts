@@ -213,6 +213,18 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Project/Task is required' }, { status: 400 })
     }
 
+    const reportDate = date || new Date().toISOString().split('T')[0]
+
+    // One report per employee per day — editing the existing one is the only way to change
+    // that day's report once submitted.
+    const { rows: [existing] } = await db.query(
+        `SELECT id FROM work_reports WHERE employee_id = $1 AND date = $2`,
+        [auth.employee.id, reportDate]
+    )
+    if (existing) {
+        return NextResponse.json({ error: 'You have already submitted a work report for this date. Edit your existing report instead.' }, { status: 409 })
+    }
+
     const { rows: [data] } = await db.query(
         `WITH ins AS (
             INSERT INTO work_reports (employee_id, date, project, description, hours, progress, status, attachment_url, notes)
@@ -224,7 +236,7 @@ export async function POST(request: Request) {
                 'department', json_build_object('id', d.id, 'name', d.name)) AS employee
          FROM ins wr LEFT JOIN employees e ON e.id = wr.employee_id LEFT JOIN departments d ON d.id = e.department_id`,
         [
-            auth.employee.id, date || new Date().toISOString().split('T')[0], project.trim(),
+            auth.employee.id, reportDate, project.trim(),
             description || null, typeof hours === 'number' ? hours : 0, typeof progress === 'number' ? progress : 0,
             status || 'in_progress', attachment_url || null, notes || null,
         ]

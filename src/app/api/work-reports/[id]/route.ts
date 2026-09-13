@@ -57,12 +57,13 @@ export async function PATCH(
     return NextResponse.json(data)
 }
 
-// DELETE /api/work-reports/[id] - admin only
+// DELETE /api/work-reports/[id] - Super Admin/Owner only; not even the report's own author can
+// delete it (they can edit it instead — see PATCH above).
 export async function DELETE(
     request: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    const auth = await requireAuth(3)
+    const auth = await requireAuth(2)
     if (!isAuthed(auth)) return auth
     const db = auth.db
 

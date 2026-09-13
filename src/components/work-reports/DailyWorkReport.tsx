@@ -807,9 +807,9 @@ export default function DailyWorkReport() {
                             </div>
                             <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
                                 <div>
-                                    {/* Deleting someone else's report is Super Admin/Owner-only, same as editing above —
-                                        Admin/Manager can still delete their own. */}
-                                    {(perms.is_super || viewingReport.employee.id === perms.employee_id) && (
+                                    {/* Deleting is Super Admin/Owner-only — an employee can edit their own same-day
+                                        report (see canEdit) but never delete it, even their own. */}
+                                    {perms.is_super && (
                                         <button className="btn btn-sm" onClick={() => handleDelete(viewingReport.id)} style={{ background: '#DC2626', color: '#fff', border: 'none' }}>Delete</button>
                                     )}
                                 </div>
