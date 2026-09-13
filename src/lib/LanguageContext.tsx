@@ -52,6 +52,7 @@ const translations: Record<string, Record<Language, string>> = {
     'nav.todo': { en: 'To Do', bn: 'টু-ডু' },
     'nav.leaderboard': { en: 'Leaderboard', bn: 'লিডারবোর্ড' },
     'nav.memories': { en: 'Memories', bn: 'স্মৃতি' },
+    'nav.aboutUs': { en: 'About Us', bn: 'আমাদের সম্পর্কে' },
     'nav.permissions': { en: 'Permissions', bn: 'একসেস' },
     'nav.reports': { en: 'Reports', bn: 'রিপোর্ট' },
     'nav.commission': { en: 'Points', bn: 'পয়েন্ট' },

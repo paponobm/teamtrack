@@ -1,0 +1,538 @@
+'use client'
+
+import { useState, useEffect, useCallback, Fragment } from 'react'
+import type { CSSProperties } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { usePermissions } from '@/lib/PermissionsContext'
+import { useToast } from '@/lib/ToastContext'
+import { IconEdit, IconPlus, IconTrash } from '@/components/icons/Icons'
+
+interface PolicyItem { title: string; description: string }
+interface JourneyItem { year: string; title: string; description: string }
+
+interface AboutUsContent {
+    story_title: string | null
+    story_body: string | null
+    story_image_url: string | null
+    policies: PolicyItem[]
+    policies_title: string | null
+    policies_icon_url: string | null
+    team_title: string | null
+    journey: JourneyItem[]
+    journey_title: string | null
+    banner_tagline: string | null
+    banner_image_url: string | null
+}
+
+interface TeamMember {
+    id: string
+    name: string
+    designation: string | null
+    avatar_url: string | null
+    photo_url: string | null
+    department: { id: string; name: string } | null
+}
+
+const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }
+const item = { hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } }
+
+const emptyContent: AboutUsContent = {
+    story_title: '', story_body: '', story_image_url: '',
+    policies: [], policies_title: '', policies_icon_url: '', team_title: '', journey: [], journey_title: '',
+    banner_tagline: '', banner_image_url: '',
+}
+
+// Every section heading shares this bold, orange, larger-than-body style.
+const SECTION_TITLE_STYLE: CSSProperties = { fontSize: '1.5rem', fontWeight: 800, color: '#EA580C' }
+
+// A light pastel background + matching accent color per policy card, cycling by index so
+// neighboring cards never repeat the same color for a reasonable-sized list.
+const POLICY_COLORS = [
+    { bg: '#EFF6FF', accent: '#2563EB' },
+    { bg: '#F0FDF4', accent: '#16A34A' },
+    { bg: '#FDF4FF', accent: '#A21CAF' },
+    { bg: '#FFF7ED', accent: '#EA580C' },
+    { bg: '#FDF2F8', accent: '#DB2777' },
+    { bg: '#F0FDFA', accent: '#0D9488' },
+    { bg: '#FEFCE8', accent: '#CA8A04' },
+    { bg: '#EEF2FF', accent: '#4F46E5' },
+]
+
+function getAvatarColor(name: string) {
+    const colors = ['#2563EB', '#1D4ED8', '#1E40AF', '#3B82F6', '#60A5FA', '#1E3A5F', '#172554', '#93C5FD']
+    return colors[(name || '?').charCodeAt(0) % colors.length]
+}
+
+export default function AboutUsPage() {
+    const { data: perms } = usePermissions()
+    const toast = useToast()
+    const isAdmin = !!(perms.is_super || perms.is_admin)
+
+    const [content, setContent] = useState<AboutUsContent>(emptyContent)
+    const [team, setTeam] = useState<TeamMember[]>([])
+    const [loading, setLoading] = useState(true)
+    const [editing, setEditing] = useState(false)
+    const [draft, setDraft] = useState<AboutUsContent>(emptyContent)
+    const [saving, setSaving] = useState(false)
+    const [storyUploading, setStoryUploading] = useState(false)
+    const [viewingPolicyIdx, setViewingPolicyIdx] = useState<number | null>(null)
+    const [bannerUploading, setBannerUploading] = useState(false)
+    const [policyIconUploading, setPolicyIconUploading] = useState(false)
+
+    const fetchData = useCallback(async () => {
+        setLoading(true)
+        try {
+            const res = await fetch('/api/about-us')
+            if (res.ok) {
+                const data = await res.json()
+                const c: AboutUsContent = {
+                    story_title: data.content?.story_title || '',
+                    story_body: data.content?.story_body || '',
+                    story_image_url: data.content?.story_image_url || '',
+                    policies: Array.isArray(data.content?.policies) ? data.content.policies : [],
+                    policies_title: data.content?.policies_title || '',
+                    policies_icon_url: data.content?.policies_icon_url || '',
+                    team_title: data.content?.team_title || '',
+                    journey: Array.isArray(data.content?.journey) ? data.content.journey : [],
+                    journey_title: data.content?.journey_title || '',
+                    banner_tagline: data.content?.banner_tagline || '',
+                    banner_image_url: data.content?.banner_image_url || '',
+                }
+                setContent(c)
+                setTeam(data.team || [])
+            }
+        } finally {
+            setLoading(false)
+        }
+    }, [])
+
+    useEffect(() => { fetchData() }, [fetchData])
+
+    const startEditing = () => { setDraft(content); setEditing(true) }
+    const cancelEditing = () => { setDraft(content); setEditing(false) }
+
+    // Same upload flow as the employee photo uploader (MemberModal) — POST to the shared
+    // /api/upload endpoint under a dedicated 'about-us' bucket, get back a public URL.
+    const uploadImage = async (file: File, folder: string): Promise<string | null> => {
+        const fd = new FormData()
+        fd.append('file', file)
+        fd.append('bucket', 'about-us')
+        fd.append('folder', folder)
+        const res = await fetch('/api/upload', { method: 'POST', body: fd })
+        const data = await res.json().catch(() => ({}))
+        if (data.url) return data.url
+        toast.error(data.error || 'Upload failed')
+        return null
+    }
+    const handleStoryImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        e.target.value = ''
+        if (!file) return
+        setStoryUploading(true)
+        const url = await uploadImage(file, 'story')
+        if (url) setDraft(prev => ({ ...prev, story_image_url: url }))
+        setStoryUploading(false)
+    }
+    const handleBannerImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        e.target.value = ''
+        if (!file) return
+        setBannerUploading(true)
+        const url = await uploadImage(file, 'banner')
+        if (url) setDraft(prev => ({ ...prev, banner_image_url: url }))
+        setBannerUploading(false)
+    }
+    // One shared icon for every policy card, rather than a separate upload per card.
+    const handlePolicyIconChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        e.target.value = ''
+        if (!file) return
+        setPolicyIconUploading(true)
+        const url = await uploadImage(file, 'policy-icons')
+        if (url) setDraft(prev => ({ ...prev, policies_icon_url: url }))
+        setPolicyIconUploading(false)
+    }
+
+    const handleSave = async () => {
+        setSaving(true)
+        try {
+            const res = await fetch('/api/about-us', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(draft),
+            })
+            if (!res.ok) {
+                const e = await res.json().catch(() => ({}))
+                toast.error(e.error || 'Failed to save changes')
+                return
+            }
+            setContent(draft)
+            setEditing(false)
+            toast.success('About Us page updated')
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    const updatePolicy = (idx: number, field: keyof PolicyItem, value: string) => {
+        setDraft(prev => ({ ...prev, policies: prev.policies.map((p, i) => i === idx ? { ...p, [field]: value } : p) }))
+    }
+    const addPolicy = () => setDraft(prev => ({ ...prev, policies: [...prev.policies, { title: '', description: '' }] }))
+    const removePolicy = (idx: number) => setDraft(prev => ({ ...prev, policies: prev.policies.filter((_, i) => i !== idx) }))
+    const movePolicy = (idx: number, dir: -1 | 1) => {
+        setDraft(prev => {
+            const next = [...prev.policies]
+            const target = idx + dir
+            if (target < 0 || target >= next.length) return prev
+            ;[next[idx], next[target]] = [next[target], next[idx]]
+            return { ...prev, policies: next }
+        })
+    }
+
+    const updateJourney = (idx: number, field: keyof JourneyItem, value: string) => {
+        setDraft(prev => ({ ...prev, journey: prev.journey.map((j, i) => i === idx ? { ...j, [field]: value } : j) }))
+    }
+    const addJourney = () => setDraft(prev => ({ ...prev, journey: [...prev.journey, { year: '', title: '', description: '' }] }))
+    const removeJourney = (idx: number) => setDraft(prev => ({ ...prev, journey: prev.journey.filter((_, i) => i !== idx) }))
+    const moveJourney = (idx: number, dir: -1 | 1) => {
+        setDraft(prev => {
+            const next = [...prev.journey]
+            const target = idx + dir
+            if (target < 0 || target >= next.length) return prev
+            ;[next[idx], next[target]] = [next[target], next[idx]]
+            return { ...prev, journey: next }
+        })
+    }
+
+    const c = editing ? draft : content
+
+    if (loading) {
+        return (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+                <span className="spinner" style={{ width: '32px', height: '32px' }} />
+            </div>
+        )
+    }
+
+    return (
+        <motion.div variants={container} initial="hidden" animate="show">
+            <motion.div className="page-header" variants={item}>
+                <div>
+                    <h1 className="page-title">About Us</h1>
+                    <p className="page-subtitle">Our story, policies, team, and journey.</p>
+                </div>
+                {isAdmin && !editing && (
+                    <button className="btn btn-primary" onClick={startEditing}>
+                        <IconEdit size={16} /> Edit Page
+                    </button>
+                )}
+                {editing && (
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        <button className="btn btn-secondary" onClick={cancelEditing} disabled={saving}>Cancel</button>
+                        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save Changes'}</button>
+                    </div>
+                )}
+            </motion.div>
+
+            {/* Our Story */}
+            <motion.div variants={item} style={{ marginTop: '100px', marginBottom: '130px', display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+                    {editing ? (
+                        <>
+                            <input className="input" value={draft.story_title || ''} onChange={e => setDraft({ ...draft, story_title: e.target.value })}
+                                placeholder="Story title" style={{ ...SECTION_TITLE_STYLE, marginBottom: '10px' }} />
+                            <textarea className="input" value={draft.story_body || ''} onChange={e => setDraft({ ...draft, story_body: e.target.value })}
+                                placeholder="Tell your story..." rows={8} style={{ width: '100%', resize: 'vertical' }} />
+                        </>
+                    ) : (
+                        <>
+                            <h2 style={{ ...SECTION_TITLE_STYLE, marginBottom: '10px' }}>{c.story_title || 'Our Story'}</h2>
+                            <p style={{ whiteSpace: 'pre-line', color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
+                                {c.story_body || 'No story added yet.'}
+                            </p>
+                        </>
+                    )}
+                </div>
+                {(editing || c.story_image_url) && (
+                    <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+                        {editing ? (
+                            storyUploading ? (
+                                <div style={{ height: '160px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px dashed var(--color-border-light)', borderRadius: '12px' }}>
+                                    <span className="spinner" style={{ width: '24px', height: '24px' }} />
+                                </div>
+                            ) : draft.story_image_url ? (
+                                <div>
+                                    <img src={draft.story_image_url} alt="" style={{ width: '100%', height: 'auto', borderRadius: '12px', display: 'block' }} />
+                                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                                        <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+                                            Replace
+                                            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} onChange={handleStoryImageChange} />
+                                        </label>
+                                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDraft({ ...draft, story_image_url: '' })} style={{ color: '#DC2626' }}>Remove</button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '160px', border: '2px dashed var(--color-border-light)', borderRadius: '12px', cursor: 'pointer', gap: '8px', color: 'var(--color-text-tertiary)' }}>
+                                    <IconPlus size={20} />
+                                    <span style={{ fontSize: '0.8125rem' }}>Upload image</span>
+                                    <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} onChange={handleStoryImageChange} />
+                                </label>
+                            )
+                        ) : (
+                            <img src={c.story_image_url || ''} alt="" style={{ width: '100%', height: 'auto', borderRadius: '12px', display: 'block' }} />
+                        )}
+                    </div>
+                )}
+            </motion.div>
+
+            {/* Our Policies */}
+            <motion.div variants={item} style={{ marginBottom: '130px' }}>
+                {editing ? (
+                    <input className="input" value={draft.policies_title || ''} onChange={e => setDraft({ ...draft, policies_title: e.target.value })}
+                        placeholder="Our Policies" style={{ ...SECTION_TITLE_STYLE, marginBottom: '16px', width: '100%' }} />
+                ) : (
+                    <h2 style={{ ...SECTION_TITLE_STYLE, marginBottom: '60px' }}>{c.policies_title || 'Our Policies'}</h2>
+                )}
+                {editing && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+                        {policyIconUploading ? (
+                            <span className="spinner" style={{ width: '18px', height: '18px' }} />
+                        ) : draft.policies_icon_url ? (
+                            <img src={draft.policies_icon_url} alt="" style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover' }} />
+                        ) : null}
+                        <label className="btn btn-secondary btn-sm" style={{ cursor: policyIconUploading ? 'wait' : 'pointer' }}>
+                            {draft.policies_icon_url ? 'Replace icon (used on every card)' : 'Upload icon (used on every card)'}
+                            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} disabled={policyIconUploading} onChange={handlePolicyIconChange} />
+                        </label>
+                        {draft.policies_icon_url && (
+                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDraft({ ...draft, policies_icon_url: '' })} style={{ color: '#DC2626' }}>Remove</button>
+                        )}
+                    </div>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '12px' }}>
+                    {c.policies.map((p, idx) => {
+                        const pc = POLICY_COLORS[idx % POLICY_COLORS.length]
+                        return (
+                        <div key={idx} onClick={() => !editing && setViewingPolicyIdx(idx)} style={{
+                            padding: '16px', borderRadius: '14px', border: '1px solid var(--color-border-light)', background: pc.bg,
+                            position: 'relative', minWidth: 0, overflow: 'hidden', height: editing ? undefined : '260px', display: 'flex', flexDirection: 'column',
+                            cursor: editing ? 'default' : 'pointer',
+                        }}>
+                            {/* Header row: two-digit number badge (top-left) + the one shared icon (top-right),
+                                uploaded once for all cards from the section header below. */}
+                            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '10px' }}>
+                                <span style={{
+                                    padding: '8px 16px', borderRadius: '10px', background: '#fff', color: pc.accent,
+                                    fontSize: '1.375rem', fontWeight: 800, flexShrink: 0,
+                                }}>
+                                    {String(idx + 1).padStart(2, '0')}
+                                </span>
+                                {c.policies_icon_url && (
+                                    <div style={{
+                                        width: '40px', height: '40px', borderRadius: '50%', background: '#fff', flexShrink: 0,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                                    }}>
+                                        <img src={c.policies_icon_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    </div>
+                                )}
+                            </div>
+                            {editing ? (
+                                <input className="input" value={p.title} onChange={e => updatePolicy(idx, 'title', e.target.value)} placeholder="Policy title"
+                                    style={{ fontSize: '1.0625rem', fontWeight: 700, marginBottom: '8px' }} />
+                            ) : (
+                                <strong style={{ fontSize: '1.0625rem', fontWeight: 800, marginBottom: '6px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{p.title}</strong>
+                            )}
+                            {editing ? (
+                                <>
+                                    <textarea className="input" value={p.description} onChange={e => updatePolicy(idx, 'description', e.target.value)}
+                                        placeholder="Description" rows={2} style={{ width: '100%', fontSize: '0.8125rem', resize: 'vertical' }} />
+                                    <div style={{ display: 'flex', gap: '4px', marginTop: '8px', justifyContent: 'flex-end' }}>
+                                        <button className="btn btn-ghost btn-icon" onClick={() => movePolicy(idx, -1)} title="Move up" style={{ padding: '4px', fontSize: '0.75rem' }}>↑</button>
+                                        <button className="btn btn-ghost btn-icon" onClick={() => movePolicy(idx, 1)} title="Move down" style={{ padding: '4px', fontSize: '0.75rem' }}>↓</button>
+                                        <button className="btn btn-ghost btn-icon" onClick={() => removePolicy(idx)} title="Remove" style={{ padding: '4px', color: '#DC2626' }}><IconTrash size={14} /></button>
+                                    </div>
+                                </>
+                            ) : (
+                                <p style={{
+                                    fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: 0, whiteSpace: 'pre-line',
+                                    overflowWrap: 'anywhere', wordBreak: 'break-word', flex: 1, minHeight: 0,
+                                    display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                                }}>{p.description}</p>
+                            )}
+                        </div>
+                        )
+                    })}
+                    {c.policies.length === 0 && !editing && (
+                        <div style={{ gridColumn: '1 / -1', textAlign: 'center', color: 'var(--color-text-tertiary)', fontSize: '0.875rem', padding: '20px' }}>No policies added yet.</div>
+                    )}
+                </div>
+                {editing && (
+                    <button className="btn btn-secondary btn-sm" onClick={addPolicy} style={{ marginTop: '14px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <IconPlus size={14} /> Add Policy
+                    </button>
+                )}
+            </motion.div>
+
+            {/* Our Team — an auto-sliding carousel (right to left) rather than a static grid;
+                the member list is duplicated once so the looping animation has no visible seam. */}
+            <motion.div variants={item} style={{ marginBottom: '130px' }}>
+                {editing ? (
+                    <input className="input" value={draft.team_title || ''} onChange={e => setDraft({ ...draft, team_title: e.target.value })}
+                        placeholder="Our Team" style={{ ...SECTION_TITLE_STYLE, marginBottom: '4px', width: '100%' }} />
+                ) : (
+                    <h2 style={{ ...SECTION_TITLE_STYLE, marginBottom: '4px' }}>{c.team_title || 'Our Team'}</h2>
+                )}
+                <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', marginBottom: '50px' }}>Meet the people behind the team.</p>
+                {team.length === 0 ? (
+                    <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', fontSize: '0.875rem', padding: '20px' }}>No active members yet.</div>
+                ) : (
+                    <div style={{ overflow: 'hidden' }}>
+                        <div className="about-us-team-track" style={{ display: 'flex', gap: '24px', width: 'max-content' }}>
+                            {[...team, ...team].map((m, i) => (
+                                <div key={`${m.id}-${i}`} style={{ textAlign: 'center', width: '140px', flexShrink: 0 }}>
+                                    <div style={{
+                                        width: '110px', height: '110px', borderRadius: '16px', margin: '0 auto 10px', overflow: 'hidden',
+                                        background: getAvatarColor(m.name), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontSize: '2rem', fontWeight: 600,
+                                    }}>
+                                        {(m.avatar_url || m.photo_url) ? (
+                                            <img src={m.avatar_url || m.photo_url || ''} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                        ) : (m.name || '?')[0]?.toUpperCase()}
+                                    </div>
+                                    <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#1E293B' }}>{m.name}</div>
+                                    <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: '#2563EB' }}>{m.designation || m.department?.name || ''}</div>
+                                </div>
+                            ))}
+                        </div>
+                        <style dangerouslySetInnerHTML={{
+                            __html: `
+                                @keyframes aboutUsTeamSlideRTL { from { transform: translateX(0%); } to { transform: translateX(-50%); } }
+                                .about-us-team-track { animation: aboutUsTeamSlideRTL 30s linear infinite; }
+                                .about-us-team-track:hover { animation-play-state: paused; }
+                            `
+                        }} />
+                    </div>
+                )}
+            </motion.div>
+
+            {/* Our Journey — a horizontal timeline in view mode (colored circle per year, bold
+                title/description, arrows flowing left to right); edit mode keeps the simpler
+                vertical form since typing into small circles would be unusable. */}
+            <motion.div variants={item} style={{ marginBottom: '48px' }}>
+                {editing ? (
+                    <input className="input" value={draft.journey_title || ''} onChange={e => setDraft({ ...draft, journey_title: e.target.value })}
+                        placeholder="Our Journey" style={{ ...SECTION_TITLE_STYLE, marginBottom: '16px', width: '100%' }} />
+                ) : (
+                    <h2 style={{ ...SECTION_TITLE_STYLE, marginBottom: '16px' }}>{c.journey_title || 'Our Journey'}</h2>
+                )}
+                {editing ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        {c.journey.map((j, idx) => (
+                            <div key={idx} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', paddingBottom: '12px', borderBottom: idx < c.journey.length - 1 ? '1px solid var(--color-border-light)' : 'none' }}>
+                                <input className="input" value={j.year} onChange={e => updateJourney(idx, 'year', e.target.value)} placeholder="Year"
+                                    style={{ width: '90px', flexShrink: 0, fontWeight: 700, fontSize: '0.8125rem' }} />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <input className="input" value={j.title} onChange={e => updateJourney(idx, 'title', e.target.value)} placeholder="Milestone title"
+                                        style={{ width: '100%', marginBottom: '6px', fontSize: '0.875rem', fontWeight: 600 }} />
+                                    <textarea className="input" value={j.description} onChange={e => updateJourney(idx, 'description', e.target.value)} placeholder="Description"
+                                        rows={2} style={{ width: '100%', fontSize: '0.8125rem', resize: 'vertical' }} />
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flexShrink: 0 }}>
+                                    <button className="btn btn-ghost btn-icon" onClick={() => moveJourney(idx, -1)} title="Move up" style={{ padding: '4px', fontSize: '0.75rem' }}>↑</button>
+                                    <button className="btn btn-ghost btn-icon" onClick={() => moveJourney(idx, 1)} title="Move down" style={{ padding: '4px', fontSize: '0.75rem' }}>↓</button>
+                                    <button className="btn btn-ghost btn-icon" onClick={() => removeJourney(idx)} title="Remove" style={{ padding: '4px', color: '#DC2626' }}><IconTrash size={14} /></button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : c.journey.length === 0 ? (
+                    <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', fontSize: '0.875rem', padding: '20px' }}>No journey milestones added yet.</div>
+                ) : (
+                    /* Each milestone gets an equal flex share of the full row width (not a fixed
+                       width packed to the left), so 2 items land one-left/one-right, 3 items land
+                       start/middle/end, and so on — the row always fills the whole available width. */
+                    <div style={{ display: 'flex', alignItems: 'flex-start', width: '100%' }}>
+                        {c.journey.map((j, idx) => {
+                            const jc = POLICY_COLORS[idx % POLICY_COLORS.length]
+                            return (
+                                <Fragment key={idx}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: '1 1 0', minWidth: 0, textAlign: 'center', padding: '0 10px' }}>
+                                        <div style={{
+                                            width: '64px', height: '64px', borderRadius: '50%', background: jc.accent, color: '#fff',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.9375rem', flexShrink: 0,
+                                        }}>
+                                            {j.year}
+                                        </div>
+                                        <div style={{ fontWeight: 700, marginTop: '12px', fontSize: '0.875rem' }}>{j.title}</div>
+                                        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginTop: '4px', whiteSpace: 'pre-line', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                            {j.description}
+                                        </div>
+                                    </div>
+                                    {idx < c.journey.length - 1 && (
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '64px', flexShrink: 0 }}>
+                                            <span style={{ fontSize: '1.75rem', fontWeight: 800, color: jc.accent, lineHeight: 1 }}>→</span>
+                                        </div>
+                                    )}
+                                </Fragment>
+                            )
+                        })}
+                    </div>
+                )}
+                {editing && (
+                    <button className="btn btn-secondary btn-sm" onClick={addJourney} style={{ marginTop: '14px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <IconPlus size={14} /> Add Milestone
+                    </button>
+                )}
+            </motion.div>
+
+            {/* Footer Banner */}
+            <motion.div className="card" variants={item} style={{
+                padding: '24px', textAlign: 'center',
+                background: c.banner_image_url ? `linear-gradient(rgba(15,23,42,0.55), rgba(15,23,42,0.55)), url(${c.banner_image_url}) center/cover` : 'linear-gradient(135deg, #0f172a 0%, #1e3a5f 60%, #1d4ed8 100%)',
+                color: '#fff',
+            }}>
+                {editing ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '480px', margin: '0 auto' }}>
+                        <input className="input" value={draft.banner_tagline || ''} onChange={e => setDraft({ ...draft, banner_tagline: e.target.value })}
+                            placeholder="Banner tagline" style={{ color: '#111' }} />
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center' }}>
+                            <label className="btn btn-secondary btn-sm" style={{ cursor: bannerUploading ? 'wait' : 'pointer' }}>
+                                {bannerUploading ? 'Uploading...' : draft.banner_image_url ? 'Replace background image' : 'Upload background image'}
+                                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} disabled={bannerUploading} onChange={handleBannerImageChange} />
+                            </label>
+                            {draft.banner_image_url && (
+                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDraft({ ...draft, banner_image_url: '' })} style={{ color: '#DC2626' }}>Remove</button>
+                            )}
+                        </div>
+                    </div>
+                ) : (
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>{c.banner_tagline || ''}</h2>
+                )}
+            </motion.div>
+
+            {/* Policy detail modal — cards show a clamped preview; clicking one opens the full text. */}
+            <AnimatePresence>
+                {viewingPolicyIdx !== null && content.policies[viewingPolicyIdx] && (
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setViewingPolicyIdx(null)}>
+                        <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                            onClick={e => e.stopPropagation()} style={{ maxWidth: '520px', width: '100%' }}>
+                            <div className="modal-header">
+                                <h2 className="modal-title">{content.policies[viewingPolicyIdx].title}</h2>
+                                <button className="btn btn-ghost btn-sm" onClick={() => setViewingPolicyIdx(null)}>✕</button>
+                            </div>
+                            <div className="modal-body">
+                                <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', whiteSpace: 'pre-line', overflowWrap: 'anywhere', wordBreak: 'break-word', margin: 0 }}>
+                                    {content.policies[viewingPolicyIdx].description}
+                                </p>
+                            </div>
+                            <div className="modal-footer">
+                                <button className="btn btn-secondary btn-sm" onClick={() => setViewingPolicyIdx(null)}>Close</button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </motion.div>
+    )
+}

@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     }
 
     // Only allow known bucket names to prevent arbitrary directory creation
-    const allowedBuckets = ['avatars', 'memories', 'attachments']
+    const allowedBuckets = ['avatars', 'memories', 'attachments', 'about-us']
     if (!allowedBuckets.includes(bucket)) {
         return NextResponse.json({ error: 'Invalid storage bucket' }, { status: 400 })
     }

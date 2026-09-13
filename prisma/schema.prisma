@@ -40,6 +40,26 @@ model advances {
   @@index([employee_id], map: "idx_advances_employee")
 }
 
+// Singleton content for the public-facing "About Us" page (story, policies, journey timeline,
+// footer banner) — visible to every employee, editable only by Admin/Super Admin. Team members
+// are NOT stored here; that section is rendered live from `employees` ordered by sort_order.
+model about_us_content {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  story_title       String?
+  story_body        String?
+  story_image_url   String?
+  policies          Json?     @default("[]")
+  policies_title    String?
+  policies_icon_url String?
+  team_title        String?
+  journey           Json?     @default("[]")
+  journey_title     String?
+  banner_tagline    String?
+  banner_image_url  String?
+  updated_at        DateTime? @default(now()) @db.Timestamptz(6)
+  updated_by        String?   @db.Uuid
+}
+
 model app_settings {
   id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   whatsapp_enabled     Boolean?  @default(false)
