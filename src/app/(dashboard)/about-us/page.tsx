@@ -1,11 +1,11 @@
 'use client'
 
 import { useState, useEffect, useCallback, Fragment } from 'react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactElement } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { usePermissions } from '@/lib/PermissionsContext'
 import { useToast } from '@/lib/ToastContext'
-import { IconEdit, IconPlus, IconTrash } from '@/components/icons/Icons'
+import { IconEdit, IconPlus, IconTrash, IconGlobe, IconShieldAlert, IconUsers, IconRocket } from '@/components/icons/Icons'
 
 interface PolicyItem { title: string; description: string }
 interface JourneyItem { year: string; title: string; description: string }
@@ -57,6 +57,21 @@ const POLICY_COLORS = [
     { bg: '#FEFCE8', accent: '#CA8A04' },
     { bg: '#EEF2FF', accent: '#4F46E5' },
 ]
+
+// A colored gradient icon badge in front of every section title, so each section reads as its
+// own distinct block at a glance instead of just another orange heading in a long scroll.
+function SectionIcon({ icon, color }: { icon: ReactElement; color: string }) {
+    return (
+        <div style={{
+            width: '48px', height: '48px', borderRadius: '14px', flexShrink: 0,
+            background: `linear-gradient(135deg, ${color}, ${color}99)`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: `0 6px 16px ${color}40`,
+        }}>
+            {icon}
+        </div>
+    )
+}
 
 function getAvatarColor(name: string) {
     const colors = ['#2563EB', '#1D4ED8', '#1E40AF', '#3B82F6', '#60A5FA', '#1E3A5F', '#172554', '#93C5FD']
@@ -239,14 +254,20 @@ export default function AboutUsPage() {
                 <div style={{ flex: '1 1 320px', minWidth: 0 }}>
                     {editing ? (
                         <>
-                            <input className="input" value={draft.story_title || ''} onChange={e => setDraft({ ...draft, story_title: e.target.value })}
-                                placeholder="Story title" style={{ ...SECTION_TITLE_STYLE, marginBottom: '10px' }} />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '10px' }}>
+                                <SectionIcon icon={<IconGlobe size={22} color="#fff" />} color="#EA580C" />
+                                <input className="input" value={draft.story_title || ''} onChange={e => setDraft({ ...draft, story_title: e.target.value })}
+                                    placeholder="Story title" style={{ ...SECTION_TITLE_STYLE, flex: 1 }} />
+                            </div>
                             <textarea className="input" value={draft.story_body || ''} onChange={e => setDraft({ ...draft, story_body: e.target.value })}
                                 placeholder="Tell your story..." rows={8} style={{ width: '100%', resize: 'vertical' }} />
                         </>
                     ) : (
                         <>
-                            <h2 style={{ ...SECTION_TITLE_STYLE, marginBottom: '10px' }}>{c.story_title || 'Our Story'}</h2>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '10px' }}>
+                                <SectionIcon icon={<IconGlobe size={22} color="#fff" />} color="#EA580C" />
+                                <h2 style={SECTION_TITLE_STYLE}>{c.story_title || 'Our Story'}</h2>
+                            </div>
                             <p style={{ whiteSpace: 'pre-line', color: 'var(--color-text-secondary)', lineHeight: 1.7 }}>
                                 {c.story_body || 'No story added yet.'}
                             </p>
@@ -279,7 +300,7 @@ export default function AboutUsPage() {
                                 </label>
                             )
                         ) : (
-                            <img src={c.story_image_url || ''} alt="" style={{ width: '100%', height: 'auto', borderRadius: '12px', display: 'block' }} />
+                            <img src={c.story_image_url || ''} alt="" style={{ width: '100%', height: 'auto', borderRadius: '16px', display: 'block', boxShadow: '0 16px 36px rgba(0,0,0,0.14)' }} />
                         )}
                     </div>
                 )}
@@ -288,10 +309,16 @@ export default function AboutUsPage() {
             {/* Our Policies */}
             <motion.div variants={item} style={{ marginBottom: '130px' }}>
                 {editing ? (
-                    <input className="input" value={draft.policies_title || ''} onChange={e => setDraft({ ...draft, policies_title: e.target.value })}
-                        placeholder="Our Policies" style={{ ...SECTION_TITLE_STYLE, marginBottom: '16px', width: '100%' }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '16px' }}>
+                        <SectionIcon icon={<IconShieldAlert size={22} color="#fff" />} color="#2563EB" />
+                        <input className="input" value={draft.policies_title || ''} onChange={e => setDraft({ ...draft, policies_title: e.target.value })}
+                            placeholder="Our Policies" style={{ ...SECTION_TITLE_STYLE, flex: 1 }} />
+                    </div>
                 ) : (
-                    <h2 style={{ ...SECTION_TITLE_STYLE, marginBottom: '60px' }}>{c.policies_title || 'Our Policies'}</h2>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '60px' }}>
+                        <SectionIcon icon={<IconShieldAlert size={22} color="#fff" />} color="#2563EB" />
+                        <h2 style={SECTION_TITLE_STYLE}>{c.policies_title || 'Our Policies'}</h2>
+                    </div>
                 )}
                 {editing && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
@@ -313,10 +340,10 @@ export default function AboutUsPage() {
                     {c.policies.map((p, idx) => {
                         const pc = POLICY_COLORS[idx % POLICY_COLORS.length]
                         return (
-                        <div key={idx} onClick={() => !editing && setViewingPolicyIdx(idx)} style={{
+                        <div key={idx} className={editing ? undefined : 'about-us-policy-card'} onClick={() => !editing && setViewingPolicyIdx(idx)} style={{
                             padding: '16px', borderRadius: '14px', border: '1px solid var(--color-border-light)', background: pc.bg,
                             position: 'relative', minWidth: 0, overflow: 'hidden', height: editing ? undefined : '260px', display: 'flex', flexDirection: 'column',
-                            cursor: editing ? 'default' : 'pointer',
+                            cursor: editing ? 'default' : 'pointer', transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                         }}>
                             {/* Header row: two-digit number badge (top-left) + the one shared icon (top-right),
                                 uploaded once for all cards from the section header below. */}
@@ -378,23 +405,33 @@ export default function AboutUsPage() {
                 the member list is duplicated once so the looping animation has no visible seam. */}
             <motion.div variants={item} style={{ marginBottom: '130px' }}>
                 {editing ? (
-                    <input className="input" value={draft.team_title || ''} onChange={e => setDraft({ ...draft, team_title: e.target.value })}
-                        placeholder="Our Team" style={{ ...SECTION_TITLE_STYLE, marginBottom: '4px', width: '100%' }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '4px' }}>
+                        <SectionIcon icon={<IconUsers size={22} color="#fff" />} color="#16A34A" />
+                        <input className="input" value={draft.team_title || ''} onChange={e => setDraft({ ...draft, team_title: e.target.value })}
+                            placeholder="Our Team" style={{ ...SECTION_TITLE_STYLE, flex: 1 }} />
+                    </div>
                 ) : (
-                    <h2 style={{ ...SECTION_TITLE_STYLE, marginBottom: '4px' }}>{c.team_title || 'Our Team'}</h2>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '4px' }}>
+                        <SectionIcon icon={<IconUsers size={22} color="#fff" />} color="#16A34A" />
+                        <h2 style={SECTION_TITLE_STYLE}>{c.team_title || 'Our Team'}</h2>
+                    </div>
                 )}
                 <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', marginBottom: '50px' }}>Meet the people behind the team.</p>
                 {team.length === 0 ? (
                     <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', fontSize: '0.875rem', padding: '20px' }}>No active members yet.</div>
                 ) : (
-                    <div style={{ overflow: 'hidden' }}>
+                    <div style={{ position: 'relative', overflow: 'hidden' }}>
+                        {/* Fade masks at both edges so the infinite carousel appears to dissolve into
+                            the page background instead of cutting members off with a hard edge. */}
+                        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '80px', zIndex: 1, pointerEvents: 'none', background: 'linear-gradient(to right, var(--color-bg-primary), transparent)' }} />
+                        <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '80px', zIndex: 1, pointerEvents: 'none', background: 'linear-gradient(to left, var(--color-bg-primary), transparent)' }} />
                         <div className="about-us-team-track" style={{ display: 'flex', gap: '24px', width: 'max-content' }}>
                             {[...team, ...team].map((m, i) => (
                                 <div key={`${m.id}-${i}`} style={{ textAlign: 'center', width: '140px', flexShrink: 0 }}>
-                                    <div style={{
+                                    <div className="about-us-team-avatar" style={{
                                         width: '110px', height: '110px', borderRadius: '16px', margin: '0 auto 10px', overflow: 'hidden',
                                         background: getAvatarColor(m.name), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        fontSize: '2rem', fontWeight: 600,
+                                        fontSize: '2rem', fontWeight: 600, boxShadow: '0 4px 14px rgba(0,0,0,0.12)', transition: 'transform 0.2s ease',
                                     }}>
                                         {(m.avatar_url || m.photo_url) ? (
                                             <img src={m.avatar_url || m.photo_url || ''} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -410,6 +447,9 @@ export default function AboutUsPage() {
                                 @keyframes aboutUsTeamSlideRTL { from { transform: translateX(0%); } to { transform: translateX(-50%); } }
                                 .about-us-team-track { animation: aboutUsTeamSlideRTL 30s linear infinite; }
                                 .about-us-team-track:hover { animation-play-state: paused; }
+                                .about-us-team-avatar:hover { transform: translateY(-4px) scale(1.04); }
+                                .about-us-policy-card:hover { transform: translateY(-4px); box-shadow: 0 14px 28px rgba(0,0,0,0.1); }
+                                .about-us-journey-circle:hover { transform: scale(1.08); }
                             `
                         }} />
                     </div>
@@ -419,12 +459,18 @@ export default function AboutUsPage() {
             {/* Our Journey — a horizontal timeline in view mode (colored circle per year, bold
                 title/description, arrows flowing left to right); edit mode keeps the simpler
                 vertical form since typing into small circles would be unusable. */}
-            <motion.div variants={item} style={{ marginBottom: '48px' }}>
+            <motion.div variants={item} style={{ marginBottom: '130px' }}>
                 {editing ? (
-                    <input className="input" value={draft.journey_title || ''} onChange={e => setDraft({ ...draft, journey_title: e.target.value })}
-                        placeholder="Our Journey" style={{ ...SECTION_TITLE_STYLE, marginBottom: '16px', width: '100%' }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '16px' }}>
+                        <SectionIcon icon={<IconRocket size={22} color="#fff" />} color="#DB2777" />
+                        <input className="input" value={draft.journey_title || ''} onChange={e => setDraft({ ...draft, journey_title: e.target.value })}
+                            placeholder="Our Journey" style={{ ...SECTION_TITLE_STYLE, flex: 1 }} />
+                    </div>
                 ) : (
-                    <h2 style={{ ...SECTION_TITLE_STYLE, marginBottom: '16px' }}>{c.journey_title || 'Our Journey'}</h2>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '34px' }}>
+                        <SectionIcon icon={<IconRocket size={22} color="#fff" />} color="#DB2777" />
+                        <h2 style={SECTION_TITLE_STYLE}>{c.journey_title || 'Our Journey'}</h2>
+                    </div>
                 )}
                 {editing ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -458,9 +504,10 @@ export default function AboutUsPage() {
                             return (
                                 <Fragment key={idx}>
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: '1 1 0', minWidth: 0, textAlign: 'center', padding: '0 10px' }}>
-                                        <div style={{
+                                        <div className="about-us-journey-circle" style={{
                                             width: '64px', height: '64px', borderRadius: '50%', background: jc.accent, color: '#fff',
                                             display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.9375rem', flexShrink: 0,
+                                            boxShadow: `0 6px 16px ${jc.accent}55`, transition: 'transform 0.2s ease',
                                         }}>
                                             {j.year}
                                         </div>
@@ -487,8 +534,9 @@ export default function AboutUsPage() {
             </motion.div>
 
             {/* Footer Banner */}
-            <motion.div className="card" variants={item} style={{
-                padding: '24px', textAlign: 'center',
+            {/* <motion.div className="card" variants={item} style={{
+                padding: '40px 24px', textAlign: 'center', borderRadius: '18px', border: 'none',
+                boxShadow: '0 12px 32px rgba(15,23,42,0.18)',
                 background: c.banner_image_url ? `linear-gradient(rgba(15,23,42,0.55), rgba(15,23,42,0.55)), url(${c.banner_image_url}) center/cover` : 'linear-gradient(135deg, #0f172a 0%, #1e3a5f 60%, #1d4ed8 100%)',
                 color: '#fff',
             }}>
@@ -507,9 +555,9 @@ export default function AboutUsPage() {
                         </div>
                     </div>
                 ) : (
-                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>{c.banner_tagline || ''}</h2>
+                    <h2 style={{ fontSize: '1.625rem', fontWeight: 800, margin: 0, textShadow: '0 2px 8px rgba(0,0,0,0.35)', letterSpacing: '0.01em' }}>{c.banner_tagline || ''}</h2>
                 )}
-            </motion.div>
+            </motion.div> */}
 
             {/* Policy detail modal — cards show a clamped preview; clicking one opens the full text. */}
             <AnimatePresence>
