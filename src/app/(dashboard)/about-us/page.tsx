@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import type { CSSProperties, ReactElement } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { usePermissions } from '@/lib/PermissionsContext'
@@ -73,6 +73,17 @@ function SectionIcon({ icon, color }: { icon: ReactElement; color: string }) {
     )
 }
 
+// Lightweight bold-only markup for policy descriptions: text wrapped in **stars** renders as
+// <strong>. Keeps the description a plain string (no HTML to sanitize) while still letting an
+// admin bold a phrase from the toolbar button next to the textarea.
+function renderFormattedText(text: string) {
+    return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) => (
+        part.startsWith('**') && part.endsWith('**')
+            ? <strong key={i}>{part.slice(2, -2)}</strong>
+            : <span key={i}>{part}</span>
+    ))
+}
+
 function getAvatarColor(name: string) {
     const colors = ['#2563EB', '#1D4ED8', '#1E40AF', '#3B82F6', '#60A5FA', '#1E3A5F', '#172554', '#93C5FD']
     return colors[(name || '?').charCodeAt(0) % colors.length]
@@ -93,6 +104,7 @@ export default function AboutUsPage() {
     const [viewingPolicyIdx, setViewingPolicyIdx] = useState<number | null>(null)
     const [bannerUploading, setBannerUploading] = useState(false)
     const [policyIconUploading, setPolicyIconUploading] = useState(false)
+    const [isDraggingTeam, setIsDraggingTeam] = useState(false)
 
     const fetchData = useCallback(async () => {
         setLoading(true)
@@ -122,6 +134,59 @@ export default function AboutUsPage() {
     }, [])
 
     useEffect(() => { fetchData() }, [fetchData])
+
+    // Team carousel: a requestAnimationFrame loop drives the scroll position (instead of a CSS
+    // keyframe animation) so the same position can also be nudged by dragging with the mouse.
+    // The member list is rendered twice back-to-back, so wrapping the offset at exactly one
+    // copy's width (halfWidth) makes the loop seamless in both directions.
+    const teamTrackRef = useRef<HTMLDivElement>(null)
+    const teamOffsetRef = useRef(0)
+    const teamHalfWidthRef = useRef(0)
+    const teamPausedRef = useRef(false)
+    const teamDragRef = useRef({ dragging: false, startX: 0, startOffset: 0, moved: false })
+
+    useEffect(() => {
+        const track = teamTrackRef.current
+        if (!team.length || !track) return
+        const halfWidth = track.scrollWidth / 2
+        teamHalfWidthRef.current = halfWidth
+        const pxPerMs = halfWidth / 65000 // matches the previous 65s-per-loop pace
+        let last = performance.now()
+        let raf = 0
+        const tick = (now: number) => {
+            const dt = now - last
+            last = now
+            if (!teamDragRef.current.dragging && !teamPausedRef.current && halfWidth > 0) {
+                let next = teamOffsetRef.current + pxPerMs * dt
+                next = ((next % halfWidth) + halfWidth) % halfWidth
+                teamOffsetRef.current = next
+            }
+            track.style.transform = `translateX(${-teamOffsetRef.current}px)`
+            raf = requestAnimationFrame(tick)
+        }
+        raf = requestAnimationFrame(tick)
+        return () => cancelAnimationFrame(raf)
+    }, [team])
+
+    const handleTeamPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+        teamDragRef.current = { dragging: true, startX: e.clientX, startOffset: teamOffsetRef.current, moved: false }
+        e.currentTarget.setPointerCapture(e.pointerId)
+        setIsDraggingTeam(true)
+    }
+    const handleTeamPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+        const drag = teamDragRef.current
+        if (!drag.dragging) return
+        const dx = e.clientX - drag.startX
+        if (Math.abs(dx) > 3) drag.moved = true
+        const halfWidth = teamHalfWidthRef.current
+        let next = drag.startOffset - dx
+        if (halfWidth > 0) next = ((next % halfWidth) + halfWidth) % halfWidth
+        teamOffsetRef.current = next
+    }
+    const endTeamDrag = () => {
+        teamDragRef.current.dragging = false
+        setIsDraggingTeam(false)
+    }
 
     const startEditing = () => { setDraft(content); setEditing(true) }
     const cancelEditing = () => { setDraft(content); setEditing(false) }
@@ -191,6 +256,22 @@ export default function AboutUsPage() {
 
     const updatePolicy = (idx: number, field: keyof PolicyItem, value: string) => {
         setDraft(prev => ({ ...prev, policies: prev.policies.map((p, i) => i === idx ? { ...p, [field]: value } : p) }))
+    }
+    // Wraps the currently-selected text in a policy's description textarea with ** markers
+    // (rendered as bold by renderFormattedText) and restores the selection afterward so
+    // repeated bolding of different phrases doesn't lose the cursor position.
+    const policyDescRefs = useRef<Record<number, HTMLTextAreaElement | null>>({})
+    const applyBoldToPolicyDescription = (idx: number) => {
+        const ta = policyDescRefs.current[idx]
+        if (!ta) return
+        const { selectionStart, selectionEnd, value } = ta
+        if (selectionStart === selectionEnd) return
+        const newValue = `${value.slice(0, selectionStart)}**${value.slice(selectionStart, selectionEnd)}**${value.slice(selectionEnd)}`
+        updatePolicy(idx, 'description', newValue)
+        requestAnimationFrame(() => {
+            ta.focus()
+            ta.setSelectionRange(selectionStart + 2, selectionEnd + 2)
+        })
     }
     const addPolicy = () => setDraft(prev => ({ ...prev, policies: [...prev.policies, { title: '', description: '' }] }))
     const removePolicy = (idx: number) => setDraft(prev => ({ ...prev, policies: prev.policies.filter((_, i) => i !== idx) }))
@@ -372,7 +453,14 @@ export default function AboutUsPage() {
                             )}
                             {editing ? (
                                 <>
-                                    <textarea className="input" value={p.description} onChange={e => updatePolicy(idx, 'description', e.target.value)}
+                                    <div style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
+                                        <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => applyBoldToPolicyDescription(idx)}
+                                            title="Bold the selected text" style={{
+                                                width: '26px', height: '26px', borderRadius: '6px', border: '1px solid var(--color-border-light)',
+                                                background: 'var(--color-bg-primary)', fontWeight: 800, fontSize: '0.75rem', cursor: 'pointer',
+                                            }}>B</button>
+                                    </div>
+                                    <textarea ref={el => { policyDescRefs.current[idx] = el }} className="input" value={p.description} onChange={e => updatePolicy(idx, 'description', e.target.value)}
                                         placeholder="Description" rows={2} style={{ width: '100%', fontSize: '0.8125rem', resize: 'vertical' }} />
                                     <div style={{ display: 'flex', gap: '4px', marginTop: '8px', justifyContent: 'flex-end' }}>
                                         <button className="btn btn-ghost btn-icon" onClick={() => movePolicy(idx, -1)} title="Move up" style={{ padding: '4px', fontSize: '0.75rem' }}>↑</button>
@@ -385,7 +473,7 @@ export default function AboutUsPage() {
                                     fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: 0, whiteSpace: 'pre-line',
                                     overflowWrap: 'anywhere', wordBreak: 'break-word', flex: 1, minHeight: 0,
                                     display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                                }}>{p.description}</p>
+                                }}>{renderFormattedText(p.description)}</p>
                             )}
                         </div>
                         )
@@ -416,37 +504,48 @@ export default function AboutUsPage() {
                         <h2 style={SECTION_TITLE_STYLE}>{c.team_title || 'Our Team'}</h2>
                     </div>
                 )}
-                <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', marginBottom: '50px' }}>Meet the people behind the team.</p>
+                <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', marginBottom: '100px' }}>Meet the people behind the team.</p>
                 {team.length === 0 ? (
                     <div style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', fontSize: '0.875rem', padding: '20px' }}>No active members yet.</div>
                 ) : (
-                    <div style={{ position: 'relative', overflow: 'hidden' }}>
+                    <div
+                        style={{ position: 'relative', overflow: 'hidden', cursor: isDraggingTeam ? 'grabbing' : 'grab' }}
+                        onMouseEnter={() => { teamPausedRef.current = true }}
+                        onMouseLeave={() => { teamPausedRef.current = false }}
+                        onPointerDown={handleTeamPointerDown}
+                        onPointerMove={handleTeamPointerMove}
+                        onPointerUp={endTeamDrag}
+                        onPointerCancel={endTeamDrag}
+                    >
                         {/* Fade masks at both edges so the infinite carousel appears to dissolve into
                             the page background instead of cutting members off with a hard edge. */}
                         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '80px', zIndex: 1, pointerEvents: 'none', background: 'linear-gradient(to right, var(--color-bg-primary), transparent)' }} />
                         <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '80px', zIndex: 1, pointerEvents: 'none', background: 'linear-gradient(to left, var(--color-bg-primary), transparent)' }} />
-                        <div className="about-us-team-track" style={{ display: 'flex', gap: '24px', width: 'max-content' }}>
-                            {[...team, ...team].map((m, i) => (
-                                <div key={`${m.id}-${i}`} style={{ textAlign: 'center', width: '140px', flexShrink: 0 }}>
+                        <div ref={teamTrackRef} className="about-us-team-track" style={{ display: 'flex', alignItems: 'flex-end', gap: '24px', width: 'max-content', willChange: 'transform' }}>
+                            {[...team, ...team].map((m, i) => {
+                                // First member's avatar is the biggest, second is bigger than the
+                                // usual size but smaller than the first, third-onward unchanged.
+                                const origIdx = i % team.length
+                                const size = origIdx === 0 ? 150 : origIdx === 1 ? 125 : 110
+                                return (
+                                <div key={`${m.id}-${i}`} style={{ textAlign: 'center', width: '160px', flexShrink: 0 }}>
                                     <div className="about-us-team-avatar" style={{
-                                        width: '110px', height: '110px', borderRadius: '16px', margin: '0 auto 10px', overflow: 'hidden',
+                                        width: `${size}px`, height: `${size}px`, borderRadius: '16px', margin: '0 auto 10px', overflow: 'hidden',
                                         background: getAvatarColor(m.name), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                        fontSize: '2rem', fontWeight: 600, boxShadow: '0 4px 14px rgba(0,0,0,0.12)', transition: 'transform 0.2s ease',
+                                        fontSize: `${size / 55}rem`, fontWeight: 600, boxShadow: '0 4px 14px rgba(0,0,0,0.12)', transition: 'transform 0.2s ease',
                                     }}>
                                         {(m.avatar_url || m.photo_url) ? (
-                                            <img src={m.avatar_url || m.photo_url || ''} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                            <img src={m.avatar_url || m.photo_url || ''} alt="" draggable={false} onDragStart={e => e.preventDefault()} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                         ) : (m.name || '?')[0]?.toUpperCase()}
                                     </div>
                                     <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#1E293B' }}>{m.name}</div>
                                     <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: '#2563EB' }}>{m.designation || m.department?.name || ''}</div>
                                 </div>
-                            ))}
+                                )
+                            })}
                         </div>
                         <style dangerouslySetInnerHTML={{
                             __html: `
-                                @keyframes aboutUsTeamSlideRTL { from { transform: translateX(0%); } to { transform: translateX(-50%); } }
-                                .about-us-team-track { animation: aboutUsTeamSlideRTL 30s linear infinite; }
-                                .about-us-team-track:hover { animation-play-state: paused; }
                                 .about-us-team-avatar:hover { transform: translateY(-4px) scale(1.04); }
                                 .about-us-policy-card:hover { transform: translateY(-4px); box-shadow: 0 14px 28px rgba(0,0,0,0.1); }
                                 .about-us-journey-circle:hover { transform: scale(1.08); }
@@ -571,7 +670,7 @@ export default function AboutUsPage() {
                             </div>
                             <div className="modal-body">
                                 <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', whiteSpace: 'pre-line', overflowWrap: 'anywhere', wordBreak: 'break-word', margin: 0 }}>
-                                    {content.policies[viewingPolicyIdx].description}
+                                    {renderFormattedText(content.policies[viewingPolicyIdx].description)}
                                 </p>
                             </div>
                             <div className="modal-footer">
