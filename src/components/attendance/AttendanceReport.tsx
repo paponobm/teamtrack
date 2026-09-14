@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { getMonthRangeFromString } from '@/lib/dateRange'
 import { IconChevronLeft, IconChevronRight, IconSearch, IconX, IconDownload } from '@/components/icons/Icons'
@@ -47,6 +47,10 @@ function formatDuration(ms: number) {
     const mins = Math.floor((ms % 3600000) / 60000)
     return `${hrs}h ${mins}m`
 }
+
+// Keeps the table's own column headers visible while scrolling through a long report,
+// without touching the shared `.table th` class used by every other table in the app.
+const stickyThStyle: CSSProperties = { position: 'sticky', top: 'var(--header-height)', zIndex: 20 }
 
 const defaultMonth = () => {
     const d = new Date()
@@ -216,17 +220,23 @@ export default function AttendanceReport() {
                     <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>No members match the selected filters for this month.</p>
                 </motion.div>
             ) : !error && (
-                <motion.div className="table-container" variants={item} initial="hidden" animate="show">
-                    <table className="table">
+                <motion.div className="table-container" variants={item} initial="hidden" animate="show"
+                    // See the Daily Attendance table for why both axes need overriding: overflow-x:
+                    // auto (from the shared .table-container class) makes this a scroll container,
+                    // which hijacks position: sticky's reference frame (and per spec, overflow-y:
+                    // visible alone gets silently forced back to auto whenever overflow-x isn't
+                    // visible too) — breaking the sticky header and letting rows bleed through above it.
+                    style={{ overflowX: 'visible', overflowY: 'visible' }}>
+                    <table className="table" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
                         <thead>
                             <tr>
-                                <th>SL</th>
-                                <th>Employee</th>
-                                <th>Total Attendance</th>
-                                <th>Leave &amp; Absence</th>
-                                <th>Total Late</th>
-                                <th>Total Working Time</th>
-                                <th>Total Break Time</th>
+                                <th style={stickyThStyle}>SL</th>
+                                <th style={stickyThStyle}>Employee</th>
+                                <th style={stickyThStyle}>Total Attendance</th>
+                                <th style={stickyThStyle}>Leave &amp; Absence</th>
+                                <th style={stickyThStyle}>Total Late</th>
+                                <th style={stickyThStyle}>Total Working Time</th>
+                                <th style={stickyThStyle}>Total Break Time</th>
                             </tr>
                         </thead>
                         <tbody>
