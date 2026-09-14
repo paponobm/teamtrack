@@ -9,8 +9,11 @@ export async function GET() {
     if (!isAuthed(auth)) return auth
     const db = auth.db
 
-    const today = new Date().toISOString().split('T')[0]
+    // Bangladesh is a fixed UTC+6 offset (no DST); derive "today" from that offset rather than
+    // the server's local timezone (UTC by default on a fresh droplet), which would otherwise
+    // roll the date over 6 hours early/late relative to Bangladesh's actual calendar day.
     const nowMs = Date.now()
+    const today = new Date(nowMs + 6 * 60 * 60 * 1000).toISOString().split('T')[0]
     const TWO_HOURS_MS = 2 * 60 * 60 * 1000
 
     // Get all active employees with their duty_start_time
@@ -41,11 +44,12 @@ export async function GET() {
         // Skip if already clocked in or on approved leave
         if (attendedIds.has(emp.id) || onLeaveIds.has(emp.id)) return false
 
-        // Determine their shift start: duty_start_time or fallback to 09:00
+        // Determine their shift start: duty_start_time or fallback to 09:00, built with an
+        // explicit +06:00 offset (see the "today" comment above for why).
         const startTime = emp.duty_start_time || '09:00:00'
         const [h, m] = startTime.split(':').map(Number)
-        const shiftStart = new Date(today)
-        shiftStart.setHours(h, m, 0, 0)
+        const pad = (n: number) => String(n).padStart(2, '0')
+        const shiftStart = new Date(`${today}T${pad(h)}:${pad(m)}:00+06:00`)
 
         // Count as absent only if shift started more than 2 hours ago
         return nowMs - shiftStart.getTime() > TWO_HOURS_MS

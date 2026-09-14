@@ -30,7 +30,9 @@ export default function SelfAttendance() {
     const [loading, setLoading] = useState(true)
     const [actionLoading, setActionLoading] = useState(false)
     const [now, setNow] = useState(Date.now())
-    const [date] = useState(() => new Date().toISOString().split('T')[0])
+    // Bangladesh is a fixed UTC+6 offset (no DST) — derive "today" from that offset rather than
+    // the viewing device's own local timezone/clock configuration.
+    const [date] = useState(() => new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString().split('T')[0])
     const [dutyStartTime, setDutyStartTime] = useState<string | null>(null)
 
     // Update the 'now' timer every second to keep live counters ticking
@@ -135,8 +137,9 @@ export default function SelfAttendance() {
     if (!hasClockedIn && !isOnLeave) {
         const startTime = dutyStartTime || '09:00:00'
         const [dutyH, dutyM] = startTime.split(':').map(Number)
-        const shiftStart = new Date(`${date}T00:00:00`)
-        shiftStart.setHours(dutyH, dutyM, 0, 0)
+        // Explicit +06:00 offset, same reasoning as the date above.
+        const pad = (n: number) => String(n).padStart(2, '0')
+        const shiftStart = new Date(`${date}T${pad(dutyH)}:${pad(dutyM)}:00+06:00`)
         minutesLateBeforeClockIn = (now - shiftStart.getTime()) / 60000
     }
     const isAutoAbsent = minutesLateBeforeClockIn > 120

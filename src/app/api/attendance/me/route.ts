@@ -57,8 +57,12 @@ export async function POST(request: Request) {
 
         const startTime = empRow?.duty_start_time || '09:00:00'
         const [dutyH, dutyM] = startTime.split(':').map(Number)
-        const shiftStart = new Date(`${date}T00:00:00`)
-        shiftStart.setHours(dutyH, dutyM, 0, 0)
+        // Bangladesh is a fixed UTC+6 offset (no DST) — build the shift-start moment with an
+        // explicit offset instead of the server process's local timezone. A fresh droplet
+        // defaults to UTC, which would otherwise shift this comparison by 6 hours and make
+        // "late" almost impossible to ever trigger.
+        const pad = (n: number) => String(n).padStart(2, '0')
+        const shiftStart = new Date(`${date}T${pad(dutyH)}:${pad(dutyM)}:00+06:00`)
         const LATE_GRACE_MS = 15 * 60 * 1000
         const clockInStatus = Date.now() - shiftStart.getTime() > LATE_GRACE_MS ? 'late' : 'present'
 
