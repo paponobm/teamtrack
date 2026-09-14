@@ -1,4 +1,5 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
+import { backfillAbsences } from '@/lib/attendanceBackfill'
 import { NextResponse } from 'next/server'
 
 // No configurable shift-length exists anywhere in the schema (only a per-employee
@@ -25,6 +26,11 @@ export async function GET(request: Request) {
     if (!startDate || !endDate) {
         return NextResponse.json({ error: 'start_date and end_date are required' }, { status: 400 })
     }
+
+    // Lazily create 'absent' rows for anyone 2+ hours past their reporting time with no record
+    // for a given day in this range, so the totals below (and the daily rows) actually count
+    // unexcused no-shows instead of silently skipping days with no attendance row at all.
+    await backfillAbsences(db, startDate, endDate)
 
     // group_by=employee - one row per employee, totals for the whole range instead of one row
     // per daily record. Used by the Attendance Report's monthly summary view; the per-record
@@ -62,7 +68,7 @@ export async function GET(request: Request) {
              WHERE ${empConditions.join(' AND ')}
              GROUP BY e.id, d.name
              ${having}
-             ORDER BY e.name ASC`,
+             ORDER BY e.sort_order ASC NULLS LAST, e.created_at DESC`,
             empParams
         )
 

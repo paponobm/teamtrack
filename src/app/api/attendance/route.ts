@@ -1,4 +1,5 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
+import { backfillAbsences } from '@/lib/attendanceBackfill'
 import { NextResponse } from 'next/server'
 
 const EMPLOYEE_JOIN = `
@@ -20,6 +21,10 @@ export async function GET(request: Request) {
 
     const date = searchParams.get('date') || new Date().toISOString().split('T')[0]
     const employeeId = searchParams.get('employee_id') || ''
+
+    // Lazily create 'absent' rows for anyone who's now 2+ hours past their reporting time with
+    // no attendance record for this date, so they actually show up in the list below.
+    if (isAdmin) await backfillAbsences(db, date, date)
 
     const conditions = ['a.date = $1']
     const params: unknown[] = [date]

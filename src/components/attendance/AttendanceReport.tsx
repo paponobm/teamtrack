@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { AnimatePresence } from 'framer-motion'
 import { motion } from 'framer-motion'
 import { getMonthRangeFromString } from '@/lib/dateRange'
 import { IconChevronLeft, IconChevronRight, IconSearch, IconX, IconDownload } from '@/components/icons/Icons'
@@ -65,6 +66,7 @@ export default function AttendanceReport() {
     const [filterEmployee, setFilterEmployee] = useState('')
     const [filterStatus, setFilterStatus] = useState('all')
     const [searchQuery, setSearchQuery] = useState('')
+    const [zoomedPhoto, setZoomedPhoto] = useState<{ url: string; name: string } | null>(null)
 
     const range = getMonthRangeFromString(month)
 
@@ -235,7 +237,8 @@ export default function AttendanceReport() {
                                     <td style={{ color: 'var(--color-text-tertiary)' }}>{i + 1}</td>
                                     <td>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                            <div className="avatar avatar-sm" style={{ background: getAvatarColor(emp.name || '?'), overflow: 'hidden' }}>
+                                            <div className="avatar avatar-sm" onClick={() => { if (emp.avatar_url) setZoomedPhoto({ url: emp.avatar_url, name: emp.name || '' }) }}
+                                                style={{ background: getAvatarColor(emp.name || '?'), overflow: 'hidden', cursor: emp.avatar_url ? 'zoom-in' : 'default' }}>
                                                 {emp.avatar_url ? (
                                                     <img src={emp.avatar_url} alt="" onError={(ev) => { ev.currentTarget.style.display = 'none' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                 ) : (emp.name || '?')[0]?.toUpperCase()}
@@ -264,6 +267,26 @@ export default function AttendanceReport() {
                     </table>
                 </motion.div>
             )}
+
+            {/* Photo zoom lightbox — click any employee avatar in the table to view it larger. */}
+            <AnimatePresence>
+                {zoomedPhoto && (
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        onClick={() => setZoomedPhoto(null)}
+                        style={{ zIndex: 1200, cursor: 'zoom-out' }}>
+                        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+                            onClick={e => e.stopPropagation()}
+                            style={{ maxWidth: '90vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                            <img src={zoomedPhoto.url} alt={zoomedPhoto.name}
+                                style={{ maxWidth: '90vw', maxHeight: '80vh', borderRadius: '12px', boxShadow: '0 20px 60px rgba(0,0,0,0.4)', objectFit: 'contain' }} />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9375rem' }}>{zoomedPhoto.name}</span>
+                                <button className="btn btn-secondary btn-sm" onClick={() => setZoomedPhoto(null)}>Close</button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     )
 }
