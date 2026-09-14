@@ -24,6 +24,7 @@ interface AttendanceRecord {
         designation: string
         avatar_url: string | null
         duty_start_time: string | null
+        duty_end_time: string | null
         department: { id: string; name: string } | null
     }
 }
@@ -60,13 +61,21 @@ function toTimeInput(ts: string | null) {
     return new Date(ts).toTimeString().slice(0, 5)
 }
 
-// duty_start_time comes back as a plain "HH:MM:SS" TIME value (no date), format it for display.
+// duty_start_time/duty_end_time come back as plain "HH:MM:SS" TIME values (no date), format for display.
 function formatReportingTime(t: string | null) {
     if (!t) return null
     const [h, m] = t.split(':').map(Number)
     const d = new Date()
     d.setHours(h, m, 0, 0)
     return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+}
+
+// Shift range shown under the employee_id (e.g. "OBM-001" / "10:00 AM - 08:00 PM").
+function formatDutyRange(start: string | null, end: string | null) {
+    const s = formatReportingTime(start)
+    const e = formatReportingTime(end)
+    if (s && e) return `${s} - ${e}`
+    return s || e || null
 }
 
 function getDuration(clockIn: string | null, clockOut: string | null) {
@@ -156,6 +165,9 @@ export default function AttendancePage() {
 
     // Stat card detail view
     const [viewingStatus, setViewingStatus] = useState<string | null>(null)
+
+    // Profile photo zoom
+    const [zoomedPhoto, setZoomedPhoto] = useState<{ url: string; name: string } | null>(null)
 
     const fetchAttendance = useCallback(async () => {
         setLoading(true)
@@ -620,7 +632,6 @@ export default function AttendancePage() {
                                 <th>Employee</th>
                                 <th>Department</th>
                                 <th>Status</th>
-                                <th>Reporting Time</th>
                                 <th>Clock In</th>
                                 <th>Clock Out</th>
                                 <th>Duration</th>
@@ -636,7 +647,9 @@ export default function AttendancePage() {
                                         initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }}>
                                         <td>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                <div className="avatar avatar-sm" style={{ background: getAvatarColor(record.employee.name), overflow: 'hidden' }}>
+                                                <div className="avatar avatar-sm"
+                                                    onClick={() => { if (record.employee.avatar_url) setZoomedPhoto({ url: record.employee.avatar_url, name: record.employee.name }) }}
+                                                    style={{ background: getAvatarColor(record.employee.name), overflow: 'hidden', cursor: record.employee.avatar_url ? 'zoom-in' : 'default' }}>
                                                     {record.employee.avatar_url ? (
                                                         <img src={record.employee.avatar_url} alt="" onError={(e) => { e.currentTarget.style.display = 'none' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                     ) : record.employee.name[0]?.toUpperCase()}
@@ -644,15 +657,15 @@ export default function AttendancePage() {
                                                 <div>
                                                     <div style={{ fontWeight: 500 }}>{record.employee.name}</div>
                                                     {record.employee.employee_id && <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>{record.employee.employee_id}</div>}
+                                                    {formatDutyRange(record.employee.duty_start_time, record.employee.duty_end_time) && (
+                                                        <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>{formatDutyRange(record.employee.duty_start_time, record.employee.duty_end_time)}</div>
+                                                    )}
                                                 </div>
                                             </div>
                                         </td>
                                         <td style={{ color: 'var(--color-text-secondary)' }}>{record.employee.department?.name || '-'}</td>
                                         <td>
                                             <span style={{ padding: '3px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: `${sc.color}15` }}>{sc.label}</span>
-                                        </td>
-                                        <td style={{ fontFamily: 'monospace', fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
-                                            {record.status === 'leave' ? <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic', fontFamily: 'inherit' }}>N/A</span> : (formatReportingTime(record.employee.duty_start_time) || '-')}
                                         </td>
                                         <td style={{ fontFamily: 'monospace', fontSize: '0.8125rem' }}>
                                             {record.status === 'leave' ? <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic', fontFamily: 'inherit' }}>N/A</span> : formatTime(record.clock_in)}
@@ -1044,6 +1057,26 @@ export default function AttendancePage() {
                                     style={{ background: '#F59E0B', color: '#fff', border: 'none' }}>
                                     {pointSaving ? 'Awarding...' : 'Award Points'}
                                 </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Profile photo zoom lightbox — click any employee avatar in the table to view it larger. */}
+            <AnimatePresence>
+                {zoomedPhoto && (
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        onClick={() => setZoomedPhoto(null)}
+                        style={{ zIndex: 1200, cursor: 'zoom-out' }}>
+                        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+                            onClick={e => e.stopPropagation()}
+                            style={{ maxWidth: '90vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                            <img src={zoomedPhoto.url} alt={zoomedPhoto.name}
+                                style={{ maxWidth: '90vw', maxHeight: '80vh', borderRadius: '12px', boxShadow: '0 20px 60px rgba(0,0,0,0.4)', objectFit: 'contain' }} />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9375rem' }}>{zoomedPhoto.name}</span>
+                                <button className="btn btn-secondary btn-sm" onClick={() => setZoomedPhoto(null)}>Close</button>
                             </div>
                         </motion.div>
                     </motion.div>

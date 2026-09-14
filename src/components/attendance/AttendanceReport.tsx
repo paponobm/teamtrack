@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { AnimatePresence } from 'framer-motion'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { getMonthRangeFromString } from '@/lib/dateRange'
 import { IconChevronLeft, IconChevronRight, IconSearch, IconX, IconDownload } from '@/components/icons/Icons'
 
@@ -224,8 +223,7 @@ export default function AttendanceReport() {
                                 <th>SL</th>
                                 <th>Employee</th>
                                 <th>Total Attendance</th>
-                                <th>Total Leave</th>
-                                <th>Total Absence</th>
+                                <th>Leave &amp; Absence</th>
                                 <th>Total Late</th>
                                 <th>Total Working Time</th>
                                 <th>Total Break Time</th>
@@ -256,8 +254,14 @@ export default function AttendanceReport() {
                                         </div>
                                     </td>
                                     <td style={{ fontWeight: 600, color: statColors.present }}>{emp.total_attendance}</td>
-                                    <td style={{ fontWeight: 600, color: statColors.leave }}>{emp.total_leave}</td>
-                                    <td style={{ fontWeight: 600, color: statColors.absent }}>{emp.total_absent}</td>
+                                    <td>
+                                        <div style={{ fontWeight: 600 }}>{emp.total_leave + emp.total_absent}</div>
+                                        <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
+                                            <span style={{ color: statColors.leave }}>Leave: {emp.total_leave}</span>
+                                            {' '}
+                                            <span style={{ color: statColors.absent }}>Absence: {emp.total_absent}</span>
+                                        </div>
+                                    </td>
                                     <td style={{ fontWeight: 600, color: statColors.late }}>{emp.total_late}</td>
                                     <td style={{ fontSize: '0.8125rem' }}>{formatDuration(emp.total_working_ms)}</td>
                                     <td style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>{formatDuration(emp.total_break_ms)}</td>

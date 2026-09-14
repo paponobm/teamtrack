@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server'
 const EMPLOYEE_JOIN = `
     json_build_object(
         'id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'designation', e.designation,
-        'avatar_url', e.avatar_url, 'duty_start_time', e.duty_start_time,
+        'avatar_url', e.avatar_url, 'duty_start_time', e.duty_start_time, 'duty_end_time', e.duty_end_time,
         'department', json_build_object('id', d.id, 'name', d.name)
     ) AS employee
 `
