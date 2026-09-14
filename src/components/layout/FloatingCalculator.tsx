@@ -3,12 +3,76 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
+const BTN_SIZE = 52
+const DRAG_THRESHOLD = 6 // px of movement before a press counts as a drag instead of a click
+const POS_STORAGE_KEY = 'tt_calc_pos'
+
 export default function FloatingCalculator() {
     const [isOpen, setIsOpen] = useState(false)
     const [expr, setExpr] = useState('0')
     const [cursorVisible, setCursorVisible] = useState(true)
     const [activePanel, setActivePanel] = useState<'main' | 'history' | 'scientific' | 'converter'>('main')
     const [history, setHistory] = useState<{expr: string, res: string}[]>([])
+
+    // Draggable button position — null means "use the default bottom-right corner".
+    // Once the user drags it, we switch to explicit left/top coordinates and remember
+    // them across reloads so the button stays wherever they left it.
+    const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+    const dragState = useRef<{ startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null)
+
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem(POS_STORAGE_KEY)
+            if (saved) setPos(JSON.parse(saved))
+        } catch { /* ignore */ }
+    }, [])
+
+    const clampPos = (x: number, y: number) => ({
+        x: Math.min(Math.max(x, 8), window.innerWidth - BTN_SIZE - 8),
+        y: Math.min(Math.max(y, 8), window.innerHeight - BTN_SIZE - 8),
+    })
+
+    const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+        const rect = e.currentTarget.getBoundingClientRect()
+        dragState.current = { startX: e.clientX, startY: e.clientY, originX: rect.left, originY: rect.top, moved: false }
+        e.currentTarget.setPointerCapture(e.pointerId)
+    }
+
+    const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+        const drag = dragState.current
+        if (!drag) return
+        const dx = e.clientX - drag.startX
+        const dy = e.clientY - drag.startY
+        if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+        drag.moved = true
+        setPos(clampPos(drag.originX + dx, drag.originY + dy))
+    }
+
+    const handlePointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+        const drag = dragState.current
+        e.currentTarget.releasePointerCapture(e.pointerId)
+        dragState.current = null
+        if (drag?.moved) {
+            setPos(current => {
+                if (current) { try { localStorage.setItem(POS_STORAGE_KEY, JSON.stringify(current)) } catch { /* ignore */ } }
+                return current
+            })
+        } else {
+            setIsOpen(v => !v)
+        }
+    }
+
+    // Position the calculator panel next to wherever the button currently is, flipping
+    // above/below and left/right as needed so it never renders off-screen.
+    const getPanelStyle = (): React.CSSProperties => {
+        if (!pos) return { bottom: '88px', right: '24px' }
+        const panelWidth = 340, panelHeight = 620, margin = 12
+        let left = pos.x + BTN_SIZE - panelWidth
+        left = Math.min(Math.max(left, 8), window.innerWidth - panelWidth - 8)
+        let top = pos.y - panelHeight - margin
+        if (top < 8) top = Math.min(pos.y + BTN_SIZE + margin, window.innerHeight - panelHeight - 8)
+        return { left: `${left}px`, top: `${top}px` }
+    }
 
     // Blinking cursor effect
     useEffect(() => {
@@ -136,20 +200,23 @@ export default function FloatingCalculator() {
 
     return (
         <>
-            {/* Floating Toggle Button */}
+            {/* Floating Toggle Button — draggable; a small movement (mouse or touch) repositions
+                it anywhere on screen, while a plain click/tap still opens the calculator. */}
             <motion.button
-                onClick={() => setIsOpen(!isOpen)}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
                 style={{
                     position: 'fixed',
-                    bottom: '24px',
-                    right: '24px',
+                    ...(pos ? { left: `${pos.x}px`, top: `${pos.y}px` } : { bottom: '24px', right: '24px' }),
                     width: '52px',
                     height: '52px',
                     borderRadius: '16px',
                     border: 'none',
                     background: 'linear-gradient(135deg, #1ea31d 0%, #178a16 100%)',
                     color: '#fff',
-                    cursor: 'pointer',
+                    cursor: 'grab',
+                    touchAction: 'none',
                     boxShadow: '0 4px 20px rgba(30,163,29,0.35), 0 2px 8px rgba(0,0,0,0.15)',
                     display: 'flex',
                     alignItems: 'center',
@@ -158,7 +225,7 @@ export default function FloatingCalculator() {
                 }}
                 whileHover={{ scale: 1.08 }}
                 whileTap={{ scale: 0.95 }}
-                title="Calculator"
+                title="Calculator (drag to move)"
             >
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="4" y="2" width="16" height="20" rx="2" />
@@ -180,8 +247,7 @@ export default function FloatingCalculator() {
                         transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                         style={{
                             position: 'fixed',
-                            bottom: '88px',
-                            right: '24px',
+                            ...getPanelStyle(),
                             width: '340px',
                             height: '620px',
                             borderRadius: '32px',

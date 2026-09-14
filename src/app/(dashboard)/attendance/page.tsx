@@ -523,8 +523,16 @@ export default function AttendancePage() {
                 </div>
             </motion.div>
 
-            {/* Tabs for Admin View */}
-            <motion.div variants={item} style={{ marginBottom: '24px' }}>
+            {/* Tabs for Admin View — sticky so switching tabs / seeing the active one doesn't
+                require scrolling back up past a long attendance table. */}
+            <motion.div variants={item} style={{
+                position: 'sticky', top: 'var(--header-height)', zIndex: 40,
+                background: 'var(--color-bg-primary)',
+                marginLeft: 'calc(var(--space-xl) * -1)', marginRight: 'calc(var(--space-xl) * -1)',
+                paddingLeft: 'var(--space-xl)', paddingRight: 'var(--space-xl)',
+                paddingTop: '12px', paddingBottom: '12px', marginBottom: '12px',
+                borderBottom: '1px solid var(--color-border-light)',
+            }}>
                 <div className="tabs" style={{ display: 'inline-flex', background: 'var(--color-bg-primary)', padding: '4px', borderRadius: '12px', border: '1px solid var(--color-border-light)' }}>
                     <button 
                         className={`tab-btn ${activeTab === 'attendance' ? 'active' : ''}`}
