@@ -462,8 +462,9 @@ export default function AttendancePage() {
         { key: 'leave', label: 'On Leave', value: statCounts.leave, color: '#7C3AED' },
     ]
 
+    // "Present" includes "late" (they still showed up) — matches statCounts.present above.
     const statusFilterMap: Record<string, string[]> = {
-        present: ['present'],
+        present: ['present', 'late'],
         absent: ['absent'],
         late: ['late'],
         leave: ['leave', 'half_day', 'on_duty'],
@@ -571,69 +572,16 @@ export default function AttendancePage() {
                             </div>
                         </div>
                         <span className="stat-value">{loading ? '-' : stat.value}</span>
-                        <div style={{ fontSize: '0.625rem', color: 'var(--color-text-tertiary)', marginTop: '4px' }}>Click to view</div>
+                        <div style={{ fontSize: '0.625rem', color: 'var(--color-text-tertiary)', marginTop: '4px' }}>
+                            {viewingStatus === stat.key ? 'Click to clear filter' : 'Click to filter'}
+                        </div>
                     </motion.div>
                 ))}
             </motion.div>
 
-            {/* Filtered Status Detail Panel */}
-            <AnimatePresence>
-                {viewingStatus && filteredByStatus && (
-                    <motion.div className="card" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-                        style={{ marginBottom: '24px', overflow: 'hidden' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                            <h3 style={{ fontSize: '0.9375rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: stats.find(s => s.key === viewingStatus)?.color }} />
-                                {stats.find(s => s.key === viewingStatus)?.label} - {filteredByStatus.length} member{filteredByStatus.length !== 1 ? 's' : ''}
-                            </h3>
-                            <button className="btn btn-ghost btn-sm" onClick={() => setViewingStatus(null)} style={{ fontSize: '0.75rem' }}>✕ Close</button>
-                        </div>
-                        {filteredByStatus.length === 0 ? (
-                            <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', padding: '12px 0' }}>No members in this category</div>
-                        ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                {filteredByStatus.map(r => {
-                                    const sc = statusConfig[r.status] || statusConfig.present
-                                    return (
-                                        <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', background: sc.bg, borderRadius: '10px', border: `1px solid ${sc.color}15` }}>
-                                            <div style={{ background: getAvatarColor(r.employee.name), width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 600, fontSize: '0.875rem', flexShrink: 0, overflow: 'hidden' }}>
-                                                {r.employee.avatar_url ? (
-                                                    <img src={r.employee.avatar_url} alt="" onError={(e) => { e.currentTarget.style.display = 'none' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                ) : r.employee.name[0]?.toUpperCase()}
-                                            </div>
-                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{r.employee.name}</div>
-                                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
-                                                    {r.employee.designation || r.employee.department?.name || '-'}
-                                                    {r.employee.employee_id && ` • #${r.employee.employee_id}`}
-                                                </div>
-                                            </div>
-                                            <div style={{ textAlign: 'right', fontSize: '0.75rem', fontFamily: 'monospace' }}>
-                                                {r.status === 'leave' ? (
-                                                    <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic', fontFamily: 'inherit' }}>N/A</span>
-                                                ) : (
-                                                    <>
-                                                        {formatTime(r.clock_in)}
-                                                        {r.clock_out && ` - ${formatTime(r.clock_out)}`}
-                                                    </>
-                                                )}
-                                                {r.status === 'late' && r.employee.duty_start_time && (
-                                                    <div style={{ color: 'var(--color-text-tertiary)', fontFamily: 'inherit', marginTop: '2px' }}>
-                                                        Reporting: {formatReportingTime(r.employee.duty_start_time)}
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <span style={{ padding: '3px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: `${sc.color}15`, flexShrink: 0 }}>{sc.label}</span>
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                        )}
-                    </motion.div>
-                )}
-            </AnimatePresence>
-
-            {/* Attendance Table */}
+            {/* Attendance Table — filtered in place by the stat card clicked above (no separate
+                detail panel), so the same table always shows either everyone or just the selected
+                status/group. */}
             {loading ? (
                 <div className="card" style={{ padding: '0' }}>
                     <div style={{ padding: '16px 24px' }}>
@@ -656,6 +604,14 @@ export default function AttendancePage() {
                     <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem', marginBottom: '20px' }}>No attendance has been marked for this date yet.</p>
                     <button className="btn btn-primary" onClick={() => setShowModal(true)}>Mark Attendance</button>
                 </motion.div>
+            ) : (filteredByStatus ?? records).length === 0 ? (
+                <motion.div className="card" variants={item} style={{ textAlign: 'center', padding: '48px 24px' }}>
+                    <h3 style={{ marginBottom: '8px', color: 'var(--color-text-secondary)' }}>
+                        No {stats.find(s => s.key === viewingStatus)?.label.toLowerCase()} members
+                    </h3>
+                    <p style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem', marginBottom: '20px' }}>Nobody falls into this category today.</p>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setViewingStatus(null)}>Clear filter</button>
+                </motion.div>
             ) : (
                 <motion.div className="table-container" variants={item}>
                     <table className="table">
@@ -664,6 +620,7 @@ export default function AttendancePage() {
                                 <th>Employee</th>
                                 <th>Department</th>
                                 <th>Status</th>
+                                <th>Reporting Time</th>
                                 <th>Clock In</th>
                                 <th>Clock Out</th>
                                 <th>Duration</th>
@@ -672,7 +629,7 @@ export default function AttendancePage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {records.map((record) => {
+                            {(filteredByStatus ?? records).map((record) => {
                                 const sc = statusConfig[record.status] || statusConfig.present
                                 return (
                                     <motion.tr key={record.id}
@@ -693,6 +650,9 @@ export default function AttendancePage() {
                                         <td style={{ color: 'var(--color-text-secondary)' }}>{record.employee.department?.name || '-'}</td>
                                         <td>
                                             <span style={{ padding: '3px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: `${sc.color}15` }}>{sc.label}</span>
+                                        </td>
+                                        <td style={{ fontFamily: 'monospace', fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
+                                            {record.status === 'leave' ? <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic', fontFamily: 'inherit' }}>N/A</span> : (formatReportingTime(record.employee.duty_start_time) || '-')}
                                         </td>
                                         <td style={{ fontFamily: 'monospace', fontSize: '0.8125rem' }}>
                                             {record.status === 'leave' ? <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic', fontFamily: 'inherit' }}>N/A</span> : formatTime(record.clock_in)}

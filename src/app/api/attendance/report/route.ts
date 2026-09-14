@@ -20,9 +20,95 @@ export async function GET(request: Request) {
     const search = (searchParams.get('search') || '').trim().toLowerCase()
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
     const limit = Math.max(1, Math.min(200, parseInt(searchParams.get('limit') || '20')))
+    const groupBy = searchParams.get('group_by') || ''
 
     if (!startDate || !endDate) {
         return NextResponse.json({ error: 'start_date and end_date are required' }, { status: 400 })
+    }
+
+    // group_by=employee - one row per employee, totals for the whole range instead of one row
+    // per daily record. Used by the Attendance Report's monthly summary view; the per-record
+    // shape below is untouched and still serves whatever else calls this endpoint plain.
+    if (groupBy === 'employee') {
+        const empConditions = [`e.is_active = true`]
+        const empParams: unknown[] = []
+        if (employeeId) { empParams.push(employeeId); empConditions.push(`e.id = $${empParams.length}`) }
+        if (search) { empParams.push(`%${search}%`); empConditions.push(`LOWER(e.name) LIKE $${empParams.length}`) }
+        empParams.push(startDate)
+        const startIdx = empParams.length
+        empParams.push(endDate)
+        const endIdx = empParams.length
+
+        let having = ''
+        if (status === 'present') having = `HAVING COUNT(*) FILTER (WHERE a.status IN ('present','late')) > 0`
+        else if (status === 'late') having = `HAVING COUNT(*) FILTER (WHERE a.status = 'late') > 0`
+        else if (status === 'absent') having = `HAVING COUNT(*) FILTER (WHERE a.status = 'absent') > 0`
+        else if (status === 'leave') having = `HAVING COUNT(*) FILTER (WHERE a.status IN ('leave','half_day','on_duty')) > 0`
+
+        const { rows } = await db.query(
+            `SELECT e.id, e.name, e.employee_id, e.avatar_url, e.duty_start_time, d.name AS department_name,
+                COUNT(*) FILTER (WHERE a.status IN ('present','late')) AS total_attendance,
+                COUNT(*) FILTER (WHERE a.status = 'late') AS total_late,
+                COUNT(*) FILTER (WHERE a.status = 'absent') AS total_absent,
+                COUNT(*) FILTER (WHERE a.status IN ('leave','half_day','on_duty')) AS total_leave,
+                COALESCE(SUM(
+                    CASE WHEN a.clock_in IS NOT NULL
+                        THEN EXTRACT(EPOCH FROM (COALESCE(a.clock_out, NOW()) - a.clock_in)) * 1000
+                        ELSE 0 END
+                ), 0) AS total_gross_ms
+             FROM employees e
+             LEFT JOIN departments d ON d.id = e.department_id
+             LEFT JOIN attendance a ON a.employee_id = e.id AND a.date >= $${startIdx} AND a.date <= $${endIdx}
+             WHERE ${empConditions.join(' AND ')}
+             GROUP BY e.id, d.name
+             ${having}
+             ORDER BY e.name ASC`,
+            empParams
+        )
+
+        const employeeIds = rows.map(r => r.id)
+        const breakTotals: Record<string, number> = {}
+        if (employeeIds.length > 0) {
+            const { rows: breakRows } = await db.query(
+                `SELECT a.employee_id,
+                    COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(ab.end_time, NOW()) - ab.start_time)) * 1000), 0) AS total_break_ms
+                 FROM attendance a
+                 JOIN attendance_breaks ab ON ab.attendance_id = a.id
+                 WHERE a.employee_id = ANY($1) AND a.date >= $2 AND a.date <= $3
+                 GROUP BY a.employee_id`,
+                [employeeIds, startDate, endDate]
+            )
+            breakRows.forEach(b => { breakTotals[b.employee_id] = Number(b.total_break_ms) })
+        }
+
+        const employeesOut = rows.map(r => {
+            const totalBreakMs = breakTotals[r.id] || 0
+            const totalGrossMs = Number(r.total_gross_ms) || 0
+            return {
+                id: r.id,
+                name: r.name,
+                employee_id: r.employee_id,
+                avatar_url: r.avatar_url,
+                duty_start_time: r.duty_start_time,
+                department: r.department_name,
+                total_attendance: Number(r.total_attendance),
+                total_late: Number(r.total_late),
+                total_absent: Number(r.total_absent),
+                total_leave: Number(r.total_leave),
+                total_working_ms: Math.max(0, totalGrossMs - totalBreakMs),
+                total_break_ms: totalBreakMs,
+            }
+        })
+
+        const counts = employeesOut.reduce((acc, e) => {
+            acc.present += e.total_attendance
+            acc.late += e.total_late
+            acc.absent += e.total_absent
+            acc.leave += e.total_leave
+            return acc
+        }, { present: 0, late: 0, absent: 0, leave: 0 })
+
+        return NextResponse.json({ employees: employeesOut, counts })
     }
 
     const conditions = [`a.date >= $1`, `a.date <= $2`]
