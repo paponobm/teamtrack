@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import AttendanceModal from '@/components/attendance/AttendanceModal'
 import AdminLeaves from '@/components/attendance/AdminLeaves'
@@ -86,6 +86,10 @@ function getDuration(clockIn: string | null, clockOut: string | null) {
     const mins = Math.floor((diff % 3600000) / 60000)
     return `${hrs}h ${mins}m`
 }
+
+// Keeps the table's own column headers visible while scrolling through a long attendance
+// list, without touching the shared `.table th` class used by every other table in the app.
+const stickyThStyle: CSSProperties = { position: 'sticky', top: 'var(--header-height)', zIndex: 20 }
 
 const statusConfig: Record<string, { label: string; color: string; bg: string }> = {
     present: { label: 'Present', color: '#16A34A', bg: 'rgba(22,163,74,0.08)' },
@@ -523,16 +527,8 @@ export default function AttendancePage() {
                 </div>
             </motion.div>
 
-            {/* Tabs for Admin View — sticky so switching tabs / seeing the active one doesn't
-                require scrolling back up past a long attendance table. */}
-            <motion.div variants={item} style={{
-                position: 'sticky', top: 'var(--header-height)', zIndex: 40,
-                background: 'var(--color-bg-primary)',
-                marginLeft: 'calc(var(--space-xl) * -1)', marginRight: 'calc(var(--space-xl) * -1)',
-                paddingLeft: 'var(--space-xl)', paddingRight: 'var(--space-xl)',
-                paddingTop: '12px', paddingBottom: '12px', marginBottom: '12px',
-                borderBottom: '1px solid var(--color-border-light)',
-            }}>
+            {/* Tabs for Admin View */}
+            <motion.div variants={item} style={{ marginBottom: '24px' }}>
                 <div className="tabs" style={{ display: 'inline-flex', background: 'var(--color-bg-primary)', padding: '4px', borderRadius: '12px', border: '1px solid var(--color-border-light)' }}>
                     <button 
                         className={`tab-btn ${activeTab === 'attendance' ? 'active' : ''}`}
@@ -633,18 +629,28 @@ export default function AttendancePage() {
                     <button className="btn btn-secondary btn-sm" onClick={() => setViewingStatus(null)}>Clear filter</button>
                 </motion.div>
             ) : (
-                <motion.div className="table-container" variants={item}>
-                    <table className="table">
+                <motion.div className="table-container" variants={item}
+                    // .table-container's overflow-x: auto makes it a scroll container, which hijacks
+                    // position: sticky's reference frame (per spec, overflow-x: auto forces the
+                    // computed overflow-y to auto too even if we set overflow-y: visible here — so
+                    // that alone doesn't undo it). Sticky then sticks to this box's own bounds
+                    // instead of the page, and combined with the box's rounded corners, let a sliver
+                    // of a scrolled-past row visually escape above the header. Overriding overflow-x
+                    // to visible as well fully removes the scroll-container status so the sticky
+                    // header correctly follows real page scroll (this table doesn't need the
+                    // horizontal scroll safety net — it isn't wide enough to overflow narrow screens).
+                    style={{ overflowX: 'visible', overflowY: 'visible' }}>
+                    <table className="table" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
                         <thead>
                             <tr>
-                                <th>Employee</th>
-                                <th>Department</th>
-                                <th>Status</th>
-                                <th>Clock In</th>
-                                <th>Clock Out</th>
-                                <th>Duration</th>
-                                <th>Notes</th>
-                                <th></th>
+                                <th style={stickyThStyle}>Employee</th>
+                                <th style={stickyThStyle}>Department</th>
+                                <th style={stickyThStyle}>Status</th>
+                                <th style={stickyThStyle}>Clock In</th>
+                                <th style={stickyThStyle}>Clock Out</th>
+                                <th style={stickyThStyle}>Duration</th>
+                                <th style={stickyThStyle}>Notes</th>
+                                <th style={stickyThStyle}></th>
                             </tr>
                         </thead>
                         <tbody>
