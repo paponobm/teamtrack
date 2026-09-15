@@ -31,6 +31,10 @@ export async function POST(
     const start_time = body.start_time || new Date().toISOString()
     const end_time = body.end_time || null
 
+    if (end_time && new Date(end_time).getTime() <= new Date(start_time).getTime()) {
+        return NextResponse.json({ error: 'End Time must be after Start Time' }, { status: 400 })
+    }
+
     const { rows: [data] } = await db.query(
         `INSERT INTO attendance_breaks (attendance_id, start_time, end_time) VALUES ($1, $2, $3) RETURNING id, start_time, end_time`,
         [id, start_time, end_time]

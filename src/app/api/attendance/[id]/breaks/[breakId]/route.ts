@@ -17,6 +17,23 @@ export async function PATCH(
     if (body.start_time !== undefined) updateFields.start_time = body.start_time
     if (body.end_time !== undefined) updateFields.end_time = body.end_time
 
+    // Guard against an End Time landing before Start Time (e.g. editing End first while Start
+    // still holds its just-created "now" value from Add Break) — Postgres would happily store
+    // it, and every duration computed from it (Break Time, Working Time) would then silently
+    // clamp to zero instead of surfacing the mistake.
+    if ('start_time' in updateFields || 'end_time' in updateFields) {
+        const { rows: [current] } = await db.query(
+            `SELECT start_time, end_time FROM attendance_breaks WHERE id = $1 AND attendance_id = $2`,
+            [breakId, id]
+        )
+        if (!current) return NextResponse.json({ error: 'Break not found' }, { status: 404 })
+        const effectiveStart = 'start_time' in updateFields ? updateFields.start_time as string | null : current.start_time
+        const effectiveEnd = 'end_time' in updateFields ? updateFields.end_time as string | null : current.end_time
+        if (effectiveStart && effectiveEnd && new Date(effectiveEnd).getTime() <= new Date(effectiveStart).getTime()) {
+            return NextResponse.json({ error: 'End Time must be after Start Time' }, { status: 400 })
+        }
+    }
+
     const keys = Object.keys(updateFields)
     const setClauses = keys.map((k, i) => `"${k}" = $${i + 3}`)
     const { rows: [data] } = await db.query(

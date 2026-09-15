@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { getMonthRangeFromString } from '@/lib/dateRange'
 import { IconChevronLeft, IconChevronRight, IconSearch, IconX, IconDownload } from '@/components/icons/Icons'
+import EmployeeMonthDetailModal from './EmployeeMonthDetailModal'
 
 interface EmployeeSummary {
     id: string
@@ -70,6 +71,7 @@ export default function AttendanceReport() {
     const [filterStatus, setFilterStatus] = useState('all')
     const [searchQuery, setSearchQuery] = useState('')
     const [zoomedPhoto, setZoomedPhoto] = useState<{ url: string; name: string } | null>(null)
+    const [viewingEmployee, setViewingEmployee] = useState<{ id: string; name: string } | null>(null)
 
     const range = getMonthRangeFromString(month)
 
@@ -241,11 +243,11 @@ export default function AttendanceReport() {
                         </thead>
                         <tbody>
                             {employeeRows.map((emp, i) => (
-                                <tr key={emp.id}>
+                                <tr key={emp.id} onClick={() => setViewingEmployee({ id: emp.id, name: emp.name || '-' })} style={{ cursor: 'pointer' }} title="View full month attendance">
                                     <td style={{ color: 'var(--color-text-tertiary)' }}>{i + 1}</td>
                                     <td>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                            <div className="avatar avatar-sm" onClick={() => { if (emp.avatar_url) setZoomedPhoto({ url: emp.avatar_url, name: emp.name || '' }) }}
+                                            <div className="avatar avatar-sm" onClick={(e) => { e.stopPropagation(); if (emp.avatar_url) setZoomedPhoto({ url: emp.avatar_url, name: emp.name || '' }) }}
                                                 style={{ background: getAvatarColor(emp.name || '?'), overflow: 'hidden', cursor: emp.avatar_url ? 'zoom-in' : 'default' }}>
                                                 {emp.avatar_url ? (
                                                     <img src={emp.avatar_url} alt="" onError={(ev) => { ev.currentTarget.style.display = 'none' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -299,6 +301,22 @@ export default function AttendanceReport() {
                             </div>
                         </motion.div>
                     </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Full-month, per-day detail for one employee — opened by clicking their row above,
+                since this table only shows monthly totals. Lets Admin/Super Admin edit any day's
+                record, same as the Daily Attendance tab's own edit capability. */}
+            <AnimatePresence>
+                {viewingEmployee && (
+                    <EmployeeMonthDetailModal
+                        employeeId={viewingEmployee.id}
+                        employeeName={viewingEmployee.name}
+                        month={month}
+                        monthStart={range.start}
+                        monthEnd={range.end}
+                        onClose={() => setViewingEmployee(null)}
+                    />
                 )}
             </AnimatePresence>
         </div>

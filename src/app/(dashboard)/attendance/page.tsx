@@ -17,6 +17,7 @@ interface AttendanceRecord {
     clock_out: string | null
     status: string
     notes: string | null
+    breakMs: number
     employee: {
         id: string
         name: string
@@ -84,6 +85,13 @@ function getDuration(clockIn: string | null, clockOut: string | null) {
     if (diff <= 0) return '-'
     const hrs = Math.floor(diff / 3600000)
     const mins = Math.floor((diff % 3600000) / 60000)
+    return `${hrs}h ${mins}m`
+}
+
+function formatBreakDuration(ms: number) {
+    if (!ms || ms <= 0) return '-'
+    const hrs = Math.floor(ms / 3600000)
+    const mins = Math.floor((ms % 3600000) / 60000)
     return `${hrs}h ${mins}m`
 }
 
@@ -649,6 +657,7 @@ export default function AttendancePage() {
                                 <th style={stickyThStyle}>Clock In</th>
                                 <th style={stickyThStyle}>Clock Out</th>
                                 <th style={stickyThStyle}>Duration</th>
+                                <th style={stickyThStyle}>Break Time</th>
                                 <th style={stickyThStyle}>Notes</th>
                                 <th style={stickyThStyle}></th>
                             </tr>
@@ -689,6 +698,9 @@ export default function AttendancePage() {
                                         </td>
                                         <td style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
                                             {record.status === 'leave' ? <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic' }}>N/A</span> : getDuration(record.clock_in, record.clock_out)}
+                                        </td>
+                                        <td style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
+                                            {record.status === 'leave' ? <span style={{ color: 'var(--color-text-tertiary)', fontStyle: 'italic' }}>N/A</span> : formatBreakDuration(record.breakMs)}
                                         </td>
                                         <td style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', maxWidth: '150px' }}>
                                             <span className="truncate" style={{ display: 'block' }}>{record.notes || '-'}</span>

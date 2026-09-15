@@ -47,6 +47,10 @@ export async function GET(request: Request) {
         const startIdx = empParams.length
         empParams.push(endDate)
         const endIdx = empParams.length
+        // Someone who joined after this report's own end date wasn't employed at all during the
+        // selected month — leave them off entirely, same "not employed yet = hidden" rule the
+        // Payroll Sheet already applies via basic_salary_effective_month.
+        empConditions.push(`(e.joining_date IS NULL OR e.joining_date <= $${endIdx})`)
 
         let having = ''
         if (status === 'present') having = `HAVING COUNT(*) FILTER (WHERE a.status IN ('present','late')) > 0`
@@ -68,6 +72,7 @@ export async function GET(request: Request) {
              FROM employees e
              LEFT JOIN departments d ON d.id = e.department_id
              LEFT JOIN attendance a ON a.employee_id = e.id AND a.date >= $${startIdx} AND a.date <= $${endIdx}
+                AND (e.joining_date IS NULL OR a.date >= e.joining_date)
              WHERE ${empConditions.join(' AND ')}
              GROUP BY e.id, d.name
              ${having}
@@ -120,13 +125,13 @@ export async function GET(request: Request) {
         return NextResponse.json({ employees: employeesOut, counts })
     }
 
-    const conditions = [`a.date >= $1`, `a.date <= $2`]
+    const conditions = [`a.date >= $1`, `a.date <= $2`, `(e.joining_date IS NULL OR a.date >= e.joining_date)`]
     const params: unknown[] = [startDate, endDate]
     if (employeeId) { params.push(employeeId); conditions.push(`a.employee_id = $${params.length}`) }
     if (status) { params.push(status); conditions.push(`a.status = $${params.length}`) }
 
     const { rows: data } = await db.query(
-        `SELECT a.id, a.date, a.clock_in, a.clock_out, a.status,
+        `SELECT a.id, a.date, a.clock_in, a.clock_out, a.status, a.notes,
             json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url,
                 'duty_start_time', e.duty_start_time, 'department', json_build_object('id', d.id, 'name', d.name)) AS employee
          FROM attendance a
@@ -193,6 +198,7 @@ export async function GET(request: Request) {
             clock_in: r.clock_in,
             clock_out: r.clock_out,
             status: r.status,
+            notes: r.notes,
             employee: {
                 id: r.employee?.id,
                 name: r.employee?.name,

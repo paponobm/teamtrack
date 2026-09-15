@@ -38,6 +38,9 @@ export async function GET(request: Request) {
         // admin's Daily Attendance list entirely until it's set (Members → Edit Member → Duty
         // Schedule), same "not configured yet = hidden" rule the backfill above now follows.
         conditions.push(`e.duty_start_time IS NOT NULL AND e.duty_end_time IS NOT NULL`)
+        // Someone who joined on the 15th has no attendance obligation on the 14th or earlier —
+        // don't show them on a date before they actually joined, even if a stray record exists.
+        conditions.push(`(e.joining_date IS NULL OR e.joining_date <= a.date)`)
         if (employeeId) {
             params.push(employeeId)
             conditions.push(`a.employee_id = $${params.length}`)
@@ -54,7 +57,25 @@ export async function GET(request: Request) {
         params
     )
 
-    return NextResponse.json(rows)
+    // Total Break Time per record — same live-computed-from-attendance_breaks approach the
+    // Attendance Report tab already uses (see the legacy branch of /api/attendance/report),
+    // just added here too so the Daily Attendance list can show it per row.
+    const attendanceIds = rows.map(r => r.id)
+    const breakMsByAttendance: Record<string, number> = {}
+    if (attendanceIds.length > 0) {
+        const { rows: breaks } = await db.query(
+            `SELECT attendance_id, start_time, end_time FROM attendance_breaks WHERE attendance_id = ANY($1)`,
+            [attendanceIds]
+        )
+        breaks.forEach(b => {
+            const start = new Date(b.start_time).getTime()
+            const end = b.end_time ? new Date(b.end_time).getTime() : Date.now()
+            breakMsByAttendance[b.attendance_id] = (breakMsByAttendance[b.attendance_id] || 0) + Math.max(0, end - start)
+        })
+    }
+    const rowsWithBreaks = rows.map(r => ({ ...r, breakMs: breakMsByAttendance[r.id] || 0 }))
+
+    return NextResponse.json(rowsWithBreaks)
 }
 
 // POST /api/attendance - mark attendance (admin only)

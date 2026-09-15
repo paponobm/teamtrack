@@ -16,6 +16,12 @@ import type { Pool, PoolClient } from 'pg'
 // e.duty_end_time IS NOT NULL filters in src/app/api/attendance/route.ts and
 // src/app/api/attendance/report/route.ts) until their schedule is actually set.
 //
+// Also never backfills a day before the employee's own joining_date — someone who joined on the
+// 15th has no attendance obligation on the 14th or earlier, so those days must stay untouched
+// rather than getting silently marked Absent (see the matching e.joining_date filters in
+// src/app/api/attendance/route.ts and src/app/api/attendance/report/route.ts, which apply the
+// same rule to what's actually displayed).
+//
 // Called at the top of every admin attendance read (daily list + monthly report) so the missing
 // row gets created lazily the first time anyone looks, with no cron/scheduler required. Safe to
 // call repeatedly — ON CONFLICT (employee_id, date) means it never touches a day that already
@@ -30,6 +36,7 @@ export async function backfillAbsences(db: Pool | PoolClient, startDate: string,
          WHERE e.is_active = true
            AND e.duty_start_time IS NOT NULL
            AND e.duty_end_time IS NOT NULL
+           AND (e.joining_date IS NULL OR gs.d::date >= e.joining_date)
            AND a.id IS NULL
            AND (
              gs.d::date < (NOW() AT TIME ZONE 'Asia/Dhaka')::date
