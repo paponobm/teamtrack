@@ -127,6 +127,7 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
             json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url,
                 'joining_date', e.joining_date, 'festival_bonus_percentage', e.festival_bonus_percentage,
                 'basic_salary_effective_month', e.basic_salary_effective_month,
+                'monthly_leave_allowance', e.monthly_leave_allowance,
                 'department', json_build_object('id', d.id, 'name', d.name)) AS employee
          FROM salary_entries se
          LEFT JOIN employees e ON e.id = se.employee_id
@@ -161,10 +162,14 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
         const productBuyDetail = productBuys[r.employee_id] || { total: 0, records: [] }
         const emiDetail = emis[r.employee_id] || { total: 0, records: [] }
         const providentFundDetail = providentFunds[r.employee_id] || { total: 0, records: [] }
-        // Same effective Leave count the Attendance (Day) column shows — override if a Super
-        // Admin has set one, otherwise the live-computed value.
+        // Same effective Present/Leave counts the Attendance (Day) columns show — override if a
+        // Super Admin has set one, otherwise the live-computed value. The deduction is driven by
+        // Present (worked days short of the required count), not Leave alone — see
+        // computeLeaveDeduction for why.
         const effectiveLeave = r.attendance_leave_override ?? (attendance[r.employee_id]?.leave || 0)
-        const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectiveLeave)
+        const effectivePresent = r.attendance_present_override ?? (attendance[r.employee_id]?.present || 0)
+        const monthlyLeaveAllowance = Number(r.employee?.monthly_leave_allowance) || 0
+        const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance)
         return {
             id: r.id,
             employee_id: r.employee_id,
@@ -187,6 +192,10 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
             // festival_bonus amount above doesn't change if this is edited later, so on an
             // older sheet these two can legitimately show a different rate than the amount.
             festival_bonus_percentage: Number(r.employee?.festival_bonus_percentage) || 0,
+            // The employee's own configured free Leave days per month (Members → Edit Member →
+            // Duty Schedule) — shown next to Leave Deduction so the sheet's caption always
+            // matches the quota that was actually used to compute the amount above.
+            monthly_leave_allowance: monthlyLeaveAllowance,
             advance: advanceDetail.total,
             advance_records: advanceDetail.records,
             product_buy: productBuyDetail.total,
@@ -205,8 +214,8 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
             // Late/Absent are never overridden, only ever shown as computed.
             attendance: {
                 ...(attendance[r.employee_id] || { present: 0, late: 0, absent: 0, leave: 0 }),
-                present: r.attendance_present_override ?? (attendance[r.employee_id]?.present || 0),
-                leave: r.attendance_leave_override ?? (attendance[r.employee_id]?.leave || 0),
+                present: effectivePresent,
+                leave: effectiveLeave,
             },
             attendance_present_override: r.attendance_present_override,
             attendance_leave_override: r.attendance_leave_override,

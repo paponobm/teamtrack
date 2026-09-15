@@ -73,7 +73,7 @@ export async function POST(request: Request) {
         name, email, password, designation, address, nid_no, blood_group,
         personal_contact, whatsapp_number, family_contact_1, family_contact_2,
         department_id, role_id, joining_date, employee_id: empId,
-        gender, date_of_birth, duty_start_time, duty_end_time, cv_url, avatar_url
+        gender, date_of_birth, duty_start_time, duty_end_time, monthly_leave_allowance, cv_url, avatar_url
     } = body
 
     // Mirrors the `required` fields on the Add New Member form — enforced here too so a direct
@@ -123,8 +123,8 @@ export async function POST(request: Request) {
                     user_id, employee_id, name, email, designation, address, nid_no, blood_group,
                     personal_contact, whatsapp_number, family_contact_1, family_contact_2,
                     department_id, role_id, joining_date, gender, date_of_birth,
-                    duty_start_time, duty_end_time, cv_url, avatar_url, is_active, sort_order
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,true,
+                    duty_start_time, duty_end_time, monthly_leave_allowance, cv_url, avatar_url, is_active, sort_order
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,true,
                     (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM employees))
                 RETURNING *
              )
@@ -138,7 +138,8 @@ export async function POST(request: Request) {
                 userId, empId || null, name, email, designation, address, nid_no, blood_group,
                 personal_contact, whatsapp_number, family_contact_1, family_contact_2,
                 department_id || null, role_id || null, joining_date || null, gender || null, date_of_birth || null,
-                duty_start_time || null, duty_end_time || null, cv_url || null, avatar_url || null,
+                duty_start_time || null, duty_end_time || null, Number.isFinite(Number(monthly_leave_allowance)) ? Number(monthly_leave_allowance) : 4,
+                cv_url || null, avatar_url || null,
             ]
         )
         data = emp

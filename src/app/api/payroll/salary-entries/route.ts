@@ -103,11 +103,17 @@ export async function PUT(request: Request) {
 
     if (!data) return NextResponse.json({ error: 'Salary entry not found' }, { status: 404 })
 
+    // The employee's own configured free Leave days per month (Members → Edit Member → Duty
+    // Schedule) — looked up once here since both the attendance-override recompute below and
+    // the Paid-settlement block further down need it for computeLeaveDeduction.
+    const { rows: [employeeRow] } = await db.query(`SELECT monthly_leave_allowance FROM employees WHERE id = $1`, [data.employee_id])
+    const monthlyLeaveAllowance = Number(employeeRow?.monthly_leave_allowance) || 0
+
     // Present/Leave were touched (most notably "Delete Record" clearing an adjustment back to
     // null) — recompute the live attendance-log value here so the client can show the real
     // number immediately, instead of needing a full page reload to see what's left once the
     // override is gone. Leave Deduction and Net Payable are recomputed alongside it since both
-    // depend directly on the effective Leave count (see computeLeaveDeduction).
+    // depend directly on the effective Present count (see computeLeaveDeduction).
     let attendance: { present: number; late: number; absent: number; leave: number } | undefined
     let leaveDeductionForResponse: number | undefined
     let netPayableForResponse: number | undefined
@@ -121,7 +127,7 @@ export async function PUT(request: Request) {
                 present: data.attendance_present_override ?? computed.present,
                 leave: data.attendance_leave_override ?? computed.leave,
             }
-            leaveDeductionForResponse = computeLeaveDeduction(Number(data.basic_salary) || 0, attendance.leave)
+            leaveDeductionForResponse = computeLeaveDeduction(Number(data.basic_salary) || 0, attendance.present, monthlyLeaveAllowance)
 
             const employeeIds = [data.employee_id]
             const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails] = await Promise.all([
@@ -223,10 +229,10 @@ export async function PUT(request: Request) {
                 getProvidentFundDetailsForMonth(db, employeeIds, sheet.month),
                 getAttendanceStatsForMonth(db, employeeIds, sheet.month),
             ])
-            // Same effective Leave count the Attendance (Day) column shows (override, else
+            // Same effective Present count the Attendance (Day) column shows (override, else
             // computed) — the linked Finance expense amount must match Payable Salary exactly.
-            const effectiveLeave = data.attendance_leave_override ?? (attendanceStats[data.employee_id]?.leave || 0)
-            const leaveDeduction = computeLeaveDeduction(Number(data.basic_salary) || 0, effectiveLeave)
+            const effectivePresent = data.attendance_present_override ?? (attendanceStats[data.employee_id]?.present || 0)
+            const leaveDeduction = computeLeaveDeduction(Number(data.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance)
             const netPayable = computeNetPayable(
                 data,
                 fineTotals[data.employee_id] || 0,

@@ -25,6 +25,7 @@ interface MemberModalProps {
         cv_url?: string | null
         duty_start_time?: string | null
         duty_end_time?: string | null
+        monthly_leave_allowance?: number | null
         avatar_url?: string | null
         payroll_basic_salary?: number | null
         payroll_transportation_bill?: number | null
@@ -129,6 +130,10 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
         date_of_birth: member?.date_of_birth || '',
         duty_start_time: member?.duty_start_time || '',
         duty_end_time: member?.duty_end_time || '',
+        // Held as a string (native number input value), same reasoning as payrollForm below —
+        // defaults to 4 (matching employees.monthly_leave_allowance's DB default) for a new
+        // member, or the employee's own configured value when editing.
+        monthly_leave_allowance: String(member?.monthly_leave_allowance ?? 4),
         cv_url: member?.cv_url || '',
         avatar_url: member?.avatar_url || '',
     })
@@ -359,10 +364,11 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                     date_of_birth: form.date_of_birth || null,
                     duty_start_time: form.duty_start_time || null,
                     duty_end_time: form.duty_end_time || null,
+                    monthly_leave_allowance: form.monthly_leave_allowance ? Number(form.monthly_leave_allowance) : 4,
                     cv_url: form.cv_url || null,
                     avatar_url: form.avatar_url || null,
                 }
-                : form
+                : { ...form, monthly_leave_allowance: form.monthly_leave_allowance ? Number(form.monthly_leave_allowance) : 4 }
 
             const res = await fetch(url, {
                 method,
@@ -685,7 +691,7 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                     {/* Section: Schedule */}
                                     <div style={sectionStyle}>
                                         <div style={sectionTitle}>Duty Schedule</div>
-                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
                                             <div className="input-group">
                                                 <label className="input-label" htmlFor="duty_start_time">Start Time {!isEdit && '*'}</label>
                                                 <input className="input" id="duty_start_time" name="duty_start_time" type="time" value={form.duty_start_time} onChange={handleChange} required={!isEdit} />
@@ -693,6 +699,11 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                             <div className="input-group">
                                                 <label className="input-label" htmlFor="duty_end_time">End Time {!isEdit && '*'}</label>
                                                 <input className="input" id="duty_end_time" name="duty_end_time" type="time" value={form.duty_end_time} onChange={handleChange} required={!isEdit} />
+                                            </div>
+                                            <div className="input-group">
+                                                <label className="input-label" htmlFor="monthly_leave_allowance">Monthly Leave Allowance</label>
+                                                <input className="input" id="monthly_leave_allowance" name="monthly_leave_allowance" type="number" min={0} step={1}
+                                                    value={form.monthly_leave_allowance} onChange={handleChange} placeholder="0" />
                                             </div>
                                         </div>
                                     </div>

@@ -304,6 +304,7 @@ model employees {
   cv_url                                                                 String?
   duty_start_time                                                        DateTime?                 @db.Time(6)
   duty_end_time                                                          DateTime?                 @db.Time(6)
+  monthly_leave_allowance                                                Int                       @default(4)
   total_points                                                           Int?                      @default(0)
   avatar_url                                                             String?
   payroll_basic_salary                                                   Decimal                   @default(0) @db.Decimal(10, 2)

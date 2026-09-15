@@ -117,8 +117,10 @@ export interface SalaryAmounts {
     other_deduction: number
 }
 
-// Every employee gets this many paid Leave days per month for free — any beyond that is
-// deducted from salary at a per-day rate (see computeLeaveDeduction below).
+// Default paid Leave days per month, used only as a fallback for the rare row that predates
+// the per-employee `employees.monthly_leave_allowance` column (which itself defaults to this
+// same value, see the Prisma migration) — every employee normally has their own configurable
+// allowance now (Members → Edit Member → Duty Schedule), not a single shared quota.
 export const MONTHLY_FREE_LEAVE_DAYS = 4
 
 // Standard payroll month length used for the per-day salary rate — a fixed 30 days every month
@@ -126,20 +128,31 @@ export const MONTHLY_FREE_LEAVE_DAYS = 4
 // docks the same amount per excess Leave day in February as it does in August.
 export const STANDARD_MONTH_DAYS = 30
 
-// Leave Deduction: days taken beyond the free monthly quota are docked at Basic Salary / 30 per
-// excess day (e.g. 6 Leave days with ৳30,000 Basic Salary docks (6-4) × ৳1,000 = ৳2,000).
-// `leaveDays` should be the same effective value shown in the Attendance (Day) column —
-// attendance_leave_override when a Super Admin has set one, otherwise the live-computed count
-// from the attendance log (see getAttendanceStatsForMonth and EditAttendanceModal in
-// src/components/payroll/SalarySheet.tsx) — so this can never silently disagree with what the
-// sheet displays. Kept to 2 decimal places (paisa), same precision every salary_entries amount
-// column is stored at (Decimal(10,2)) — a per-day rate rarely divides evenly, so rounding to a
-// whole taka here would silently over/under-charge the employee by a few paisa.
-export function computeLeaveDeduction(basicSalary: number, leaveDays: number): number {
-    const excessLeave = leaveDays - MONTHLY_FREE_LEAVE_DAYS
-    if (excessLeave <= 0) return 0
+// Leave Deduction: Basic Salary is meant to cover (STANDARD_MONTH_DAYS - allowedLeaveDays)
+// actual worked days each month — e.g. with the default 4-day free Leave allowance, Basic
+// Salary pays for 26 worked days out of 30 (the other 4 being paid Leave). Any day short of
+// that required count — whether it's an excess Leave day beyond the allowance, an unexcused
+// Absence, or simply a day with no attendance record at all — is one day the employee neither
+// worked nor was on approved paid Leave for, and gets docked at Basic Salary / 30 per short day
+// (e.g. an employee who only shows up 25 of the required 26 days is docked
+// (26-25) × Basic Salary/30 = one day's pay, regardless of whether that missing day shows up
+// as Absent or as an extra Leave day — deliberately NOT limited to counting excess Leave alone,
+// since an employee who's simply Absent shouldn't be paid in full either).
+// `presentDays` should be the same effective value shown in the Attendance (Day) column —
+// attendance_present_override when a Super Admin has set one, otherwise the live-computed
+// present+late count from the attendance log (see getAttendanceStatsForMonth and
+// EditAttendanceModal in src/components/payroll/SalarySheet.tsx) — so this can never silently
+// disagree with what the sheet displays. `allowedLeaveDays` defaults to MONTHLY_FREE_LEAVE_DAYS
+// only for callers that haven't been updated to pass the employee's own allowance yet. Kept to
+// 2 decimal places (paisa), same precision every salary_entries amount column is stored at
+// (Decimal(10,2)) — a per-day rate rarely divides evenly, so rounding to a whole taka here
+// would silently over/under-charge the employee by a few paisa.
+export function computeLeaveDeduction(basicSalary: number, presentDays: number, allowedLeaveDays: number = MONTHLY_FREE_LEAVE_DAYS): number {
+    const requiredWorkingDays = STANDARD_MONTH_DAYS - allowedLeaveDays
+    const shortfall = requiredWorkingDays - presentDays
+    if (shortfall <= 0) return 0
     const perDayRate = (Number(basicSalary) || 0) / STANDARD_MONTH_DAYS
-    return Math.round(excessLeave * perDayRate * 100) / 100
+    return Math.round(shortfall * perDayRate * 100) / 100
 }
 
 // Net Payable = Basic Salary + Extra Duty + Transportation Bill + Snacks Bill + Performance Bonus

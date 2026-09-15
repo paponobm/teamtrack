@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString } from '@/lib/dateRange'
-import { MONTHLY_FREE_LEAVE_DAYS } from '@/lib/payroll'
+import { STANDARD_MONTH_DAYS } from '@/lib/payroll'
 import { IconFileText, IconX, IconPrinter, IconCheckCircle, IconEdit, IconTrash } from '@/components/icons/Icons'
 import PaySlipModal from './PaySlipModal'
 
@@ -35,9 +35,13 @@ export interface SalaryEntry {
     attendance_present_override?: number | null
     attendance_leave_override?: number | null
     fine: number
-    // Leave days beyond the monthly free quota (see MONTHLY_FREE_LEAVE_DAYS in
-    // src/lib/payroll.ts), docked at Basic Salary / days-in-month per excess day. Live-computed
-    // from attendance.leave, never stored/typed in directly.
+    // This employee's own configured free Leave days per month (Members → Edit Member → Duty
+    // Schedule → Monthly Leave Allowance), used as the quota leave_deduction below was computed
+    // against — shown in the caption next to the deduction amount.
+    monthly_leave_allowance: number
+    // Leave days beyond monthly_leave_allowance, docked at Basic Salary / days-in-month per
+    // excess day (see computeLeaveDeduction in src/lib/payroll.ts). Live-computed from
+    // attendance.leave, never stored/typed in directly.
     leave_deduction: number
     net_payable: number
 }
@@ -304,7 +308,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                         ৳{e.leave_deduction.toLocaleString()}
                                         {e.leave_deduction > 0 && (
                                             <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
-                                                ({e.attendance.leave} Leave, {MONTHLY_FREE_LEAVE_DAYS} free)
+                                                ({e.attendance.present} worked of {STANDARD_MONTH_DAYS - e.monthly_leave_allowance} required)
                                             </div>
                                         )}
                                     </td>
@@ -671,7 +675,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                         <ReadOnlyField label="Department" value={entry.employee.department || '—'} />
                         <ReadOnlyField label="Attendance" value={`${entry.attendance.present} present, ${entry.attendance.absent} absent`} />
                         <ReadOnlyField label="Leave Days" value={String(entry.attendance.leave)} />
-                        <ReadOnlyField label="Leave Deduction" value={`৳${entry.leave_deduction.toLocaleString()}${entry.leave_deduction > 0 ? ` (${entry.attendance.leave - MONTHLY_FREE_LEAVE_DAYS} beyond ${MONTHLY_FREE_LEAVE_DAYS} free)` : ''}`} />
+                        <ReadOnlyField label="Leave Deduction" value={`৳${entry.leave_deduction.toLocaleString()}${entry.leave_deduction > 0 ? ` (${entry.attendance.present} worked of ${STANDARD_MONTH_DAYS - entry.monthly_leave_allowance} required)` : ''}`} />
                         <ReadOnlyField label="Basic Salary" value={`৳${entry.basic_salary.toLocaleString()}`} />
                         <ReadOnlyField label="Transportation Bill" value={`৳${entry.transportation_bill.toLocaleString()}`} />
                         <ReadOnlyField label="Snacks Bill" value={`৳${entry.snacks_bill.toLocaleString()}`} />
@@ -791,7 +795,7 @@ function EditAttendanceModal({ entry, totalDays, onClose, onSaved }: { entry: Sa
                     attendance: { ...entry.attendance, present: numPresent, leave: numLeave },
                     attendance_present_override: numPresent,
                     attendance_leave_override: numLeave,
-                    // Leave Deduction (and therefore Payable Salary) depends on the Leave count
+                    // Leave Deduction (and therefore Payable Salary) depends on the Present count
                     // just saved — the API recomputes both in the same response so the row
                     // reflects them immediately, without a full sheet reload.
                     ...(json.leave_deduction !== undefined ? { leave_deduction: json.leave_deduction } : {}),
