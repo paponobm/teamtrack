@@ -29,3 +29,13 @@ export function getMonthRangeFromString(month: string) {
     const end = new Date(y, m, 0)
     return { start: getLocalDateString(start), end: getLocalDateString(end) }
 }
+
+// Actual calendar day count for a 'YYYY-MM' month (28-31) — used for counting how many
+// Present/Leave/Absent days a month actually has (e.g. payroll's required-working-days math
+// in src/lib/payroll.ts), as opposed to STANDARD_MONTH_DAYS there, which is a fixed 30 used
+// only for the per-day salary RATE so it doesn't fluctuate between a 28-day February and a
+// 31-day August.
+export function daysInMonthFromString(month: string): number {
+    const [y, m] = month.split('-').map(Number)
+    return new Date(y, m, 0).getDate()
+}

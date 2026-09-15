@@ -1,5 +1,6 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction } from '@/lib/payroll'
+import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus } from '@/lib/payroll'
+import { daysInMonthFromString } from '@/lib/dateRange'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
 import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
@@ -156,6 +157,8 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
         getProvidentFundDetailsForMonth(db, employeeIds, month),
     ])
 
+    const daysInMonth = daysInMonthFromString(month)
+
     return rows.map(r => {
         const fine = fines[r.employee_id] || 0
         const advanceDetail = advances[r.employee_id] || { total: 0, records: [] }
@@ -169,7 +172,8 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
         const effectiveLeave = r.attendance_leave_override ?? (attendance[r.employee_id]?.leave || 0)
         const effectivePresent = r.attendance_present_override ?? (attendance[r.employee_id]?.present || 0)
         const monthlyLeaveAllowance = Number(r.employee?.monthly_leave_allowance) || 0
-        const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance)
+        const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance, daysInMonth)
+        const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance, daysInMonth)
         return {
             id: r.id,
             employee_id: r.employee_id,
@@ -183,6 +187,12 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
             },
             basic_salary: Number(r.basic_salary) || 0,
             extra_duty: Number(r.extra_duty) || 0,
+            // Credited for taking fewer Leave days than the monthly allowance (see
+            // computeLeaveSurplusBonus) — shown as an addition on top of Extra Duty on the
+            // sheet, but kept separate from the `extra_duty` value above (that one is the
+            // admin's own manually-typed amount, editable in Edit Entry) so re-saving Extra
+            // Duty can never bake this live-computed bonus in and double-count it next month.
+            leave_surplus_bonus: leaveSurplusBonus,
             transportation_bill: Number(r.transportation_bill) || 0,
             snacks_bill: Number(r.snacks_bill) || 0,
             performance_bonus: Number(r.performance_bonus) || 0,
@@ -221,7 +231,7 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
             attendance_leave_override: r.attendance_leave_override,
             fine,
             leave_deduction: leaveDeduction,
-            net_payable: computeNetPayable(r, fine, advanceDetail.total, productBuyDetail.total, emiDetail.total, providentFundDetail.total, leaveDeduction),
+            net_payable: computeNetPayable(r, fine, advanceDetail.total, productBuyDetail.total, emiDetail.total, providentFundDetail.total, leaveDeduction, leaveSurplusBonus),
             updated_at: r.updated_at,
         }
     })

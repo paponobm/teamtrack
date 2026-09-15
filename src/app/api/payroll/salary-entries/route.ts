@@ -1,6 +1,6 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { getMonthRangeFromString } from '@/lib/dateRange'
-import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, createOrSyncSalaryExpense } from '@/lib/payroll'
+import { getMonthRangeFromString, daysInMonthFromString } from '@/lib/dateRange'
+import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus, createOrSyncSalaryExpense } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
 import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
@@ -116,6 +116,7 @@ export async function PUT(request: Request) {
     // depend directly on the effective Present count (see computeLeaveDeduction).
     let attendance: { present: number; late: number; absent: number; leave: number } | undefined
     let leaveDeductionForResponse: number | undefined
+    let leaveSurplusBonusForResponse: number | undefined
     let netPayableForResponse: number | undefined
     if ('attendance_present_override' in update || 'attendance_leave_override' in update) {
         const { rows: [sheet] } = await db.query(`SELECT month FROM salary_sheets WHERE id = $1`, [data.salary_sheet_id])
@@ -127,7 +128,9 @@ export async function PUT(request: Request) {
                 present: data.attendance_present_override ?? computed.present,
                 leave: data.attendance_leave_override ?? computed.leave,
             }
-            leaveDeductionForResponse = computeLeaveDeduction(Number(data.basic_salary) || 0, attendance.present, monthlyLeaveAllowance)
+            const daysInMonth = daysInMonthFromString(sheet.month)
+            leaveDeductionForResponse = computeLeaveDeduction(Number(data.basic_salary) || 0, attendance.present, monthlyLeaveAllowance, daysInMonth)
+            leaveSurplusBonusForResponse = computeLeaveSurplusBonus(Number(data.basic_salary) || 0, attendance.present, monthlyLeaveAllowance, daysInMonth)
 
             const employeeIds = [data.employee_id]
             const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails] = await Promise.all([
@@ -145,6 +148,7 @@ export async function PUT(request: Request) {
                 emiDetails[data.employee_id]?.total || 0,
                 providentFundDetails[data.employee_id]?.total || 0,
                 leaveDeductionForResponse,
+                leaveSurplusBonusForResponse,
             )
         }
     }
@@ -232,7 +236,9 @@ export async function PUT(request: Request) {
             // Same effective Present count the Attendance (Day) column shows (override, else
             // computed) — the linked Finance expense amount must match Payable Salary exactly.
             const effectivePresent = data.attendance_present_override ?? (attendanceStats[data.employee_id]?.present || 0)
-            const leaveDeduction = computeLeaveDeduction(Number(data.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance)
+            const daysInMonth = daysInMonthFromString(sheet.month)
+            const leaveDeduction = computeLeaveDeduction(Number(data.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance, daysInMonth)
+            const leaveSurplusBonus = computeLeaveSurplusBonus(Number(data.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance, daysInMonth)
             const netPayable = computeNetPayable(
                 data,
                 fineTotals[data.employee_id] || 0,
@@ -241,6 +247,7 @@ export async function PUT(request: Request) {
                 emiDetails[data.employee_id]?.total || 0,
                 providentFundDetails[data.employee_id]?.total || 0,
                 leaveDeduction,
+                leaveSurplusBonus,
             )
 
             // Paid on time (within the sheet's own month, or even early) → book the expense on
@@ -271,6 +278,7 @@ export async function PUT(request: Request) {
             attendance_present_override: data.attendance_present_override,
             attendance_leave_override: data.attendance_leave_override,
             leave_deduction: leaveDeductionForResponse,
+            leave_surplus_bonus: leaveSurplusBonusForResponse,
             net_payable: netPayableForResponse,
         } : {}),
     })

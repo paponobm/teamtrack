@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString } from '@/lib/dateRange'
-import { STANDARD_MONTH_DAYS } from '@/lib/payroll'
 import { IconFileText, IconX, IconPrinter, IconCheckCircle, IconEdit, IconTrash } from '@/components/icons/Icons'
 import PaySlipModal from './PaySlipModal'
 
@@ -14,6 +13,11 @@ export interface SalaryEntry {
     employee: { id: string; name: string; employee_id: string | null; avatar_url: string | null; joining_date: string | null; department: string | null }
     basic_salary: number
     extra_duty: number
+    // Credited for taking fewer Leave days than monthly_leave_allowance (see
+    // computeLeaveSurplusBonus in src/lib/payroll.ts) — shown as an addition on top of
+    // extra_duty above, kept separate so re-editing/saving Extra Duty never bakes this
+    // live-computed bonus into the manually-typed value.
+    leave_surplus_bonus: number
     transportation_bill: number
     snacks_bill: number
     performance_bonus: number
@@ -299,16 +303,23 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                             <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginLeft: '4px' }}>({e.festival_bonus_percentage}%)</span>
                                         )}
                                     </td>
-                                    <td className="earn-col" style={{ color: e.extra_duty > 0 ? '#16A34A' : undefined }}>৳{e.extra_duty.toLocaleString()}</td>
+                                    <td className="earn-col" style={{ color: (e.extra_duty + e.leave_surplus_bonus) > 0 ? '#16A34A' : undefined }}>
+                                        ৳{(e.extra_duty + e.leave_surplus_bonus).toLocaleString()}
+                                        {e.leave_surplus_bonus > 0 && (
+                                            <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
+                                                (+৳{e.leave_surplus_bonus.toLocaleString()} unused leave)
+                                            </div>
+                                        )}
+                                    </td>
                                     <td className="earn-col" style={{ color: e.performance_bonus > 0 ? '#16A34A' : undefined }}>৳{e.performance_bonus.toLocaleString()}</td>
                                     <td className="earning-highlight-col" style={{ color: '#16A34A', fontWeight: 600 }}>
-                                        ৳{(e.basic_salary + e.extra_duty + e.transportation_bill + e.snacks_bill + e.performance_bonus + e.festival_bonus).toLocaleString()}
+                                        ৳{(e.basic_salary + e.extra_duty + e.leave_surplus_bonus + e.transportation_bill + e.snacks_bill + e.performance_bonus + e.festival_bonus).toLocaleString()}
                                     </td>
                                     <td className="deduct-col deduct-col-first" style={{ color: e.leave_deduction > 0 ? '#DC2626' : undefined }}>
                                         ৳{e.leave_deduction.toLocaleString()}
                                         {e.leave_deduction > 0 && (
                                             <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
-                                                ({e.attendance.present} worked of {STANDARD_MONTH_DAYS - e.monthly_leave_allowance} required)
+                                                ({e.attendance.present} worked of {totalDays - e.monthly_leave_allowance} required)
                                             </div>
                                         )}
                                     </td>
@@ -390,6 +401,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                 {editing && (
                     <EditEntryModal
                         entry={editing}
+                        totalDays={totalDays}
                         onClose={() => setEditing(null)}
                         onSaved={(updated) => {
                             setEntries(prev => prev.map(e => e.id === updated.id ? updated : e))
@@ -608,7 +620,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
     )
 }
 
-function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClose: () => void; onSaved: (e: SalaryEntry) => void }) {
+function EditEntryModal({ entry, totalDays, onClose, onSaved }: { entry: SalaryEntry; totalDays: number; onClose: () => void; onSaved: (e: SalaryEntry) => void }) {
     const { success: toastSuccess, error: toastError } = useToast()
     // Held as raw strings while editing (same pattern as the Requisition quantity field) so
     // deleting the "0" to type a fresh number leaves the field genuinely empty instead of
@@ -627,7 +639,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
         performance_bonus: Math.max(0, Number(amounts.performance_bonus) || 0),
     }
 
-    const netPayable = entry.basic_salary + numAmounts.extra_duty + entry.transportation_bill + entry.snacks_bill
+    const netPayable = entry.basic_salary + numAmounts.extra_duty + entry.leave_surplus_bonus + entry.transportation_bill + entry.snacks_bill
         + numAmounts.performance_bonus + entry.festival_bonus - entry.fine - entry.advance - entry.product_buy - entry.loan - entry.provident_fund - entry.leave_deduction - entry.other_deduction
 
     const handleSave = async () => {
@@ -675,7 +687,7 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                         <ReadOnlyField label="Department" value={entry.employee.department || '—'} />
                         <ReadOnlyField label="Attendance" value={`${entry.attendance.present} present, ${entry.attendance.absent} absent`} />
                         <ReadOnlyField label="Leave Days" value={String(entry.attendance.leave)} />
-                        <ReadOnlyField label="Leave Deduction" value={`৳${entry.leave_deduction.toLocaleString()}${entry.leave_deduction > 0 ? ` (${entry.attendance.present} worked of ${STANDARD_MONTH_DAYS - entry.monthly_leave_allowance} required)` : ''}`} />
+                        <ReadOnlyField label="Leave Deduction" value={`৳${entry.leave_deduction.toLocaleString()}${entry.leave_deduction > 0 ? ` (${entry.attendance.present} worked of ${totalDays - entry.monthly_leave_allowance} required)` : ''}`} />
                         <ReadOnlyField label="Basic Salary" value={`৳${entry.basic_salary.toLocaleString()}`} />
                         <ReadOnlyField label="Transportation Bill" value={`৳${entry.transportation_bill.toLocaleString()}`} />
                         <ReadOnlyField label="Snacks Bill" value={`৳${entry.snacks_bill.toLocaleString()}`} />
@@ -692,11 +704,23 @@ function EditEntryModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClo
                             const num = Number(amounts[f.key])
                             return (
                                 <div key={f.key}>
-                                    <label className="form-label">{f.label}</label>
+                                    <label className="form-label">{f.key === 'extra_duty' && entry.leave_surplus_bonus > 0 ? 'Extra Duty (manual)' : f.label}</label>
                                     <input className="form-input" type="number" min={0} value={amounts[f.key]}
                                         style={{ color: num < 0 ? '#DC2626' : num > 0 ? '#16A34A' : undefined, fontWeight: num !== 0 ? 600 : undefined }}
                                         onFocus={e => e.target.select()}
                                         onChange={e => setAmounts(prev => ({ ...prev, [f.key]: e.target.value }))} />
+                                    {f.key === 'extra_duty' && entry.leave_surplus_bonus > 0 && (
+                                        <div style={{
+                                            marginTop: '6px', padding: '6px 10px', borderRadius: '8px',
+                                            background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.25)',
+                                            fontSize: '0.75rem', color: '#16A34A', fontWeight: 600,
+                                        }}>
+                                            + ৳{entry.leave_surplus_bonus.toLocaleString()} Unused Leave Bonus (auto)
+                                            <div style={{ fontWeight: 500, color: 'var(--color-text-tertiary)', marginTop: '2px' }}>
+                                                Not editable here, and never overwrites the manual amount above — always added on top, so Total Extra Duty this month is ৳{(num + entry.leave_surplus_bonus).toLocaleString()}.
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )
                         })}
@@ -795,10 +819,11 @@ function EditAttendanceModal({ entry, totalDays, onClose, onSaved }: { entry: Sa
                     attendance: { ...entry.attendance, present: numPresent, leave: numLeave },
                     attendance_present_override: numPresent,
                     attendance_leave_override: numLeave,
-                    // Leave Deduction (and therefore Payable Salary) depends on the Present count
-                    // just saved — the API recomputes both in the same response so the row
-                    // reflects them immediately, without a full sheet reload.
+                    // Leave Deduction/Leave Surplus Bonus (and therefore Payable Salary) depend
+                    // on the Present count just saved — the API recomputes all three in the same
+                    // response so the row reflects them immediately, without a full sheet reload.
                     ...(json.leave_deduction !== undefined ? { leave_deduction: json.leave_deduction } : {}),
+                    ...(json.leave_surplus_bonus !== undefined ? { leave_surplus_bonus: json.leave_surplus_bonus } : {}),
                     ...(json.net_payable !== undefined ? { net_payable: json.net_payable } : {}),
                 })
                 toastSuccess('Attendance updated')

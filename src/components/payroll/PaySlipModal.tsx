@@ -32,7 +32,7 @@ function formatDate(d: string | null) {
 }
 
 export default function PaySlipModal({ entry, month, totalDays, onClose }: PaySlipModalProps) {
-    const totalEarnings = entry.basic_salary + entry.extra_duty + entry.transportation_bill + entry.snacks_bill
+    const totalEarnings = entry.basic_salary + entry.extra_duty + entry.leave_surplus_bonus + entry.transportation_bill + entry.snacks_bill
         + entry.performance_bonus + entry.festival_bonus
     const totalDeductions = entry.fine + entry.advance + entry.product_buy + entry.loan + entry.leave_deduction + entry.other_deduction
     const netPay = totalEarnings - totalDeductions
@@ -91,6 +91,9 @@ export default function PaySlipModal({ entry, month, totalDays, onClose }: PaySl
                             <div style={{ fontWeight: 700, fontSize: '0.8125rem', color: '#111827', marginBottom: '10px' }}>Earnings</div>
                             <PayslipLine label="Basic Salary" value={entry.basic_salary} />
                             <PayslipLine label="Extra Duty" value={entry.extra_duty} />
+                            {entry.leave_surplus_bonus > 0 && (
+                                <PayslipLine label="Unused Leave Bonus" value={entry.leave_surplus_bonus} />
+                            )}
                             <PayslipLine label="Transportation Bill" value={entry.transportation_bill} />
                             <PayslipLine label="Snacks Bill" value={entry.snacks_bill} />
                             <PayslipLine label="Performance Bonus" value={entry.performance_bonus} />

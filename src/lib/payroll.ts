@@ -128,13 +128,13 @@ export const MONTHLY_FREE_LEAVE_DAYS = 4
 // docks the same amount per excess Leave day in February as it does in August.
 export const STANDARD_MONTH_DAYS = 30
 
-// Leave Deduction: Basic Salary is meant to cover (STANDARD_MONTH_DAYS - allowedLeaveDays)
-// actual worked days each month — e.g. with the default 4-day free Leave allowance, Basic
-// Salary pays for 26 worked days out of 30 (the other 4 being paid Leave). Any day short of
-// that required count — whether it's an excess Leave day beyond the allowance, an unexcused
+// Leave Deduction: Basic Salary is meant to cover (actual days in the month - allowedLeaveDays)
+// worked days that month — e.g. in a 31-day August with the default 4-day free Leave allowance,
+// Basic Salary pays for 27 worked days out of 31 (the other 4 being paid Leave). Any day short
+// of that required count — whether it's an excess Leave day beyond the allowance, an unexcused
 // Absence, or simply a day with no attendance record at all — is one day the employee neither
-// worked nor was on approved paid Leave for, and gets docked at Basic Salary / 30 per short day
-// (e.g. an employee who only shows up 25 of the required 26 days is docked
+// worked nor was on approved paid Leave for, and gets docked at Basic Salary / STANDARD_MONTH_DAYS
+// per short day (e.g. an employee who only shows up 25 of a 26-day requirement is docked
 // (26-25) × Basic Salary/30 = one day's pay, regardless of whether that missing day shows up
 // as Absent or as an extra Leave day — deliberately NOT limited to counting excess Leave alone,
 // since an employee who's simply Absent shouldn't be paid in full either).
@@ -143,31 +143,58 @@ export const STANDARD_MONTH_DAYS = 30
 // present+late count from the attendance log (see getAttendanceStatsForMonth and
 // EditAttendanceModal in src/components/payroll/SalarySheet.tsx) — so this can never silently
 // disagree with what the sheet displays. `allowedLeaveDays` defaults to MONTHLY_FREE_LEAVE_DAYS
-// only for callers that haven't been updated to pass the employee's own allowance yet. Kept to
-// 2 decimal places (paisa), same precision every salary_entries amount column is stored at
-// (Decimal(10,2)) — a per-day rate rarely divides evenly, so rounding to a whole taka here
+// only for callers that haven't been updated to pass the employee's own allowance yet.
+// `daysInMonth` MUST be the actual calendar day count for the sheet's own month (see
+// daysInMonthFromString in src/lib/dateRange.ts) — using the fixed STANDARD_MONTH_DAYS here
+// instead would silently miscount the requirement in every month that isn't exactly 30 days
+// (e.g. it would require 26 worked days in a 31-day August just like a 30-day April, docking or
+// crediting a day that was never actually owed). STANDARD_MONTH_DAYS is only for the per-day
+// RATE below, which deliberately stays fixed so the same Basic Salary docks the same amount per
+// day in February as it does in August — only the day COUNT needs the real calendar length.
+// Kept to 2 decimal places (paisa), same precision every salary_entries amount column is stored
+// at (Decimal(10,2)) — a per-day rate rarely divides evenly, so rounding to a whole taka here
 // would silently over/under-charge the employee by a few paisa.
-export function computeLeaveDeduction(basicSalary: number, presentDays: number, allowedLeaveDays: number = MONTHLY_FREE_LEAVE_DAYS): number {
-    const requiredWorkingDays = STANDARD_MONTH_DAYS - allowedLeaveDays
+export function computeLeaveDeduction(basicSalary: number, presentDays: number, allowedLeaveDays: number = MONTHLY_FREE_LEAVE_DAYS, daysInMonth: number = STANDARD_MONTH_DAYS): number {
+    const requiredWorkingDays = daysInMonth - allowedLeaveDays
     const shortfall = requiredWorkingDays - presentDays
     if (shortfall <= 0) return 0
     const perDayRate = (Number(basicSalary) || 0) / STANDARD_MONTH_DAYS
     return Math.round(shortfall * perDayRate * 100) / 100
 }
 
-// Net Payable = Basic Salary + Extra Duty + Transportation Bill + Snacks Bill + Performance Bonus
-// + Festival Bonus - Fine - Advance - Product Buy - Loan - Provident Fund - Leave Deduction -
-// Other Deduction. The one place this formula lives — every API route imports it, so the
-// dashboard totals and the salary sheet rows can never disagree with each other. Fine, Advance,
-// Product Buy, Loan, Provident Fund, and Leave Deduction are all live-computed (never stored
-// per salary entry), so they're passed in explicitly. Loan comes from active EMIs
-// (src/lib/emis.ts), Provident Fund from active Provident Fund records
-// (src/lib/providentFunds.ts) — neither is ever manually typed once the corresponding record
-// exists for that employee/month. leaveDeduction defaults to 0 so older callers that haven't
-// been updated yet don't silently break.
-export function computeNetPayable(entry: SalaryAmounts, fine: number, advance: number, productBuy: number, loan: number, providentFund: number, leaveDeduction: number = 0): number {
+// Leave Surplus Bonus: the flip side of Leave Deduction. An employee who takes FEWER Leave days
+// than their monthly allowance ends up Present for more than the required working days — e.g.
+// in a 31-day August, an 8-day-allowance employee who only takes 7 Leave days is Present 24 of
+// 31 days, one more than the 23 actually required — and is credited one day's pay
+// (Basic Salary / STANDARD_MONTH_DAYS) for each such surplus day, at the same rate the
+// deduction docks it. Shown as an addition to Extra Duty on the sheet (see SalarySheet.tsx),
+// but deliberately kept as its own separate live-computed value rather than being merged into
+// the stored `extra_duty` column itself — that column is also a manually-typed admin field
+// (real extra-duty work), and baking a live-computed bonus into it would double-count on the
+// next edit/save round-trip. `daysInMonth` must be the real calendar day count — see
+// computeLeaveDeduction above for why STANDARD_MONTH_DAYS alone isn't enough.
+export function computeLeaveSurplusBonus(basicSalary: number, presentDays: number, allowedLeaveDays: number = MONTHLY_FREE_LEAVE_DAYS, daysInMonth: number = STANDARD_MONTH_DAYS): number {
+    const requiredWorkingDays = daysInMonth - allowedLeaveDays
+    const surplus = presentDays - requiredWorkingDays
+    if (surplus <= 0) return 0
+    const perDayRate = (Number(basicSalary) || 0) / STANDARD_MONTH_DAYS
+    return Math.round(surplus * perDayRate * 100) / 100
+}
+
+// Net Payable = Basic Salary + Extra Duty + Leave Surplus Bonus + Transportation Bill + Snacks
+// Bill + Performance Bonus + Festival Bonus - Fine - Advance - Product Buy - Loan - Provident
+// Fund - Leave Deduction - Other Deduction. The one place this formula lives — every API route
+// imports it, so the dashboard totals and the salary sheet rows can never disagree with each
+// other. Fine, Advance, Product Buy, Loan, Provident Fund, Leave Deduction, and Leave Surplus
+// Bonus are all live-computed (never stored per salary entry), so they're passed in explicitly.
+// Loan comes from active EMIs (src/lib/emis.ts), Provident Fund from active Provident Fund
+// records (src/lib/providentFunds.ts) — neither is ever manually typed once the corresponding
+// record exists for that employee/month. leaveDeduction/leaveSurplusBonus default to 0 so older
+// callers that haven't been updated yet don't silently break.
+export function computeNetPayable(entry: SalaryAmounts, fine: number, advance: number, productBuy: number, loan: number, providentFund: number, leaveDeduction: number = 0, leaveSurplusBonus: number = 0): number {
     return (Number(entry.basic_salary) || 0)
         + (Number(entry.extra_duty) || 0)
+        + leaveSurplusBonus
         + (Number(entry.transportation_bill) || 0)
         + (Number(entry.snacks_bill) || 0)
         + (Number(entry.performance_bonus) || 0)
