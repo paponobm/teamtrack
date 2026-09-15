@@ -36,7 +36,10 @@ export async function GET(request: Request) {
     // per daily record. Used by the Attendance Report's monthly summary view; the per-record
     // shape below is untouched and still serves whatever else calls this endpoint plain.
     if (groupBy === 'employee') {
-        const empConditions = [`e.is_active = true`]
+        // Same "not configured yet = hidden" rule as the Daily Attendance list and the backfill
+        // itself (see src/lib/attendanceBackfill.ts) — an employee with no Duty Schedule set has
+        // no real reporting time to compute Present/Late/Absent against.
+        const empConditions = [`e.is_active = true`, `e.duty_start_time IS NOT NULL`, `e.duty_end_time IS NOT NULL`]
         const empParams: unknown[] = []
         if (employeeId) { empParams.push(employeeId); empConditions.push(`e.id = $${empParams.length}`) }
         if (search) { empParams.push(`%${search}%`); empConditions.push(`LOWER(e.name) LIKE $${empParams.length}`) }

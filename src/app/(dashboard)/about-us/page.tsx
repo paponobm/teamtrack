@@ -92,7 +92,10 @@ function getAvatarColor(name: string) {
 export default function AboutUsPage() {
     const { data: perms } = usePermissions()
     const toast = useToast()
-    const isAdmin = !!(perms.is_super || perms.is_admin)
+    // Editing this page is Super Admin only — a regular Admin can view it like everyone else,
+    // but only Super Admin (or Owner, which usePermissions reports as is_super too) sees the
+    // Edit Page button, matching the backend's own requireAuth(2) gate on PATCH /api/about-us.
+    const isSuperAdmin = !!perms.is_super
 
     const [content, setContent] = useState<AboutUsContent>(emptyContent)
     const [team, setTeam] = useState<TeamMember[]>([])
@@ -317,7 +320,7 @@ export default function AboutUsPage() {
                     <h1 className="page-title">About Us</h1>
                     <p className="page-subtitle">Our story, policies, team, and journey.</p>
                 </div>
-                {isAdmin && !editing && (
+                {isSuperAdmin && !editing && (
                     <button className="btn btn-primary" onClick={startEditing}>
                         <IconEdit size={16} /> Edit Page
                     </button>

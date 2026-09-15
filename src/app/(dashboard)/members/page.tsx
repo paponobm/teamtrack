@@ -472,21 +472,24 @@ export default function MembersPage() {
                                 <div style={{ fontSize: '1rem', fontWeight: 700, color: '#F59E0B' }}>{member.total_points || 0}</div>
                                 <div style={{ fontSize: '0.625rem', color: 'var(--color-text-tertiary)' }}>pts</div>
                             </div>
-                            {/* Quick tab links */}
-                            <div style={{ display: 'flex', gap: '3px', flexShrink: 0 }}>
+                            {/* Quick tab links — each a distinct color so Profile/Access/Logs/Performance
+                                read apart at a glance instead of four identical grey squares. */}
+                            <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
                                 {[
-                                    { key: 'profile' as const, title: 'Profile', icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg> },
-                                    { key: 'access' as const, title: 'Access', icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg> },
-                                    { key: 'logs' as const, title: 'Logs', icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8v4l3 3" /><circle cx="12" cy="12" r="10" /></svg> },
-                                    { key: 'performance' as const, title: 'Performance', icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 20V10" /><path d="M12 20V4" /><path d="M6 20v-6" /></svg> },
+                                    { key: 'profile' as const, title: 'Profile', color: '#2563EB', icon: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg> },
+                                    { key: 'access' as const, title: 'Access', color: '#7C3AED', icon: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg> },
+                                    { key: 'logs' as const, title: 'Logs', color: '#F59E0B', icon: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8v4l3 3" /><circle cx="12" cy="12" r="10" /></svg> },
+                                    { key: 'performance' as const, title: 'Performance', color: '#16A34A', icon: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 20V10" /><path d="M12 20V4" /><path d="M6 20v-6" /></svg> },
                                 ].map(tab => (
                                     <button key={tab.key} title={tab.title}
                                         onClick={(e) => { e.stopPropagation(); handleEdit(member, tab.key) }}
+                                        onMouseEnter={e => { e.currentTarget.style.background = `${tab.color}25`; e.currentTarget.style.transform = 'translateY(-1px)' }}
+                                        onMouseLeave={e => { e.currentTarget.style.background = `${tab.color}15`; e.currentTarget.style.transform = 'translateY(0)' }}
                                         style={{
-                                            width: '28px', height: '28px', borderRadius: '7px', border: '1px solid var(--color-border-light)',
-                                            background: 'var(--color-bg-secondary)', cursor: 'pointer',
+                                            width: '34px', height: '34px', borderRadius: '9px', border: `1px solid ${tab.color}30`,
+                                            background: `${tab.color}15`, cursor: 'pointer',
                                             display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                            color: 'var(--color-text-tertiary)', transition: 'all 0.15s',
+                                            color: tab.color, transition: 'all 0.15s',
                                         }}
                                     >
                                         {tab.icon}

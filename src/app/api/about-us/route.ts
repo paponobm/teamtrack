@@ -31,9 +31,11 @@ export async function GET() {
     })
 }
 
-// PATCH /api/about-us - update the About Us content singleton (Admin/Super Admin only).
+// PATCH /api/about-us - update the About Us content singleton (Super Admin only — a regular
+// Admin can view the page but not edit it, matching the isSuperAdmin gate on the Edit Page
+// button in src/app/(dashboard)/about-us/page.tsx).
 export async function PATCH(request: Request) {
-    const auth = await requireAuth(3) // Admin+
+    const auth = await requireAuth(2) // Super Admin+
     if (!isAuthed(auth)) return auth
     const db = auth.db
 

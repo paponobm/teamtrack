@@ -32,9 +32,16 @@ export async function GET(request: Request) {
     if (!isAdmin) {
         params.push(auth.employee.id)
         conditions.push(`a.employee_id = $${params.length}`)
-    } else if (employeeId) {
-        params.push(employeeId)
-        conditions.push(`a.employee_id = $${params.length}`)
+    } else {
+        // An employee whose Duty Schedule (Start Time / End Time) was never configured has no
+        // real reporting time to judge Present/Late/Absent against — exclude them from the
+        // admin's Daily Attendance list entirely until it's set (Members → Edit Member → Duty
+        // Schedule), same "not configured yet = hidden" rule the backfill above now follows.
+        conditions.push(`e.duty_start_time IS NOT NULL AND e.duty_end_time IS NOT NULL`)
+        if (employeeId) {
+            params.push(employeeId)
+            conditions.push(`a.employee_id = $${params.length}`)
+        }
     }
 
     const { rows } = await db.query(
