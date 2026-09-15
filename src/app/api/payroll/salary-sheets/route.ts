@@ -1,5 +1,5 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus } from '@/lib/payroll'
+import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus, usesPresentDayLeaveLogic } from '@/lib/payroll'
 import { daysInMonthFromString } from '@/lib/dateRange'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
@@ -172,8 +172,8 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
         const effectiveLeave = r.attendance_leave_override ?? (attendance[r.employee_id]?.leave || 0)
         const effectivePresent = r.attendance_present_override ?? (attendance[r.employee_id]?.present || 0)
         const monthlyLeaveAllowance = Number(r.employee?.monthly_leave_allowance) || 0
-        const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance, daysInMonth)
-        const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance, daysInMonth)
+        const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, daysInMonth, month)
+        const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance, daysInMonth, month)
         return {
             id: r.id,
             employee_id: r.employee_id,
@@ -206,6 +206,11 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
             // Duty Schedule) — shown next to Leave Deduction so the sheet's caption always
             // matches the quota that was actually used to compute the amount above.
             monthly_leave_allowance: monthlyLeaveAllowance,
+            // Whether this sheet's month uses the new Present-days-vs-required-days leave system
+            // (LEAVE_LOGIC_V2_CUTOVER_MONTH onward) or the original flat Leave-count rule from
+            // before it — lets the UI caption describe whichever formula actually produced
+            // leave_deduction/leave_surplus_bonus above, instead of always describing the new one.
+            uses_present_day_leave_calc: usesPresentDayLeaveLogic(month),
             advance: advanceDetail.total,
             advance_records: advanceDetail.records,
             product_buy: productBuyDetail.total,

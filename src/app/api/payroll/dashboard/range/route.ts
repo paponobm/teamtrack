@@ -121,9 +121,10 @@ export async function GET(request: Request) {
             // computeLeaveSurplusBonus in src/lib/payroll.ts for why Present (not Leave alone)
             // drives this, and why a surplus bonus exists alongside the deduction.
             const effectivePresent = r.attendance_present_override ?? (attendanceStats[r.employee_id]?.present || 0)
+            const effectiveLeave = r.attendance_leave_override ?? (attendanceStats[r.employee_id]?.leave || 0)
             const monthlyLeaveAllowance = Number(r.employee?.monthly_leave_allowance) || 0
-            const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance, daysInMonth)
-            const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance, daysInMonth)
+            const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, daysInMonth, sheet.month)
+            const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance, daysInMonth, sheet.month)
             const net = computeNetPayable(r, fine, advance, productBuy, loan, providentFund, leaveDeduction, leaveSurplusBonus)
             const isPaid = r.payment_status === 'Paid'
 

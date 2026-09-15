@@ -128,52 +128,76 @@ export const MONTHLY_FREE_LEAVE_DAYS = 4
 // docks the same amount per excess Leave day in February as it does in August.
 export const STANDARD_MONTH_DAYS = 30
 
-// Leave Deduction: Basic Salary is meant to cover (actual days in the month - allowedLeaveDays)
-// worked days that month — e.g. in a 31-day August with the default 4-day free Leave allowance,
-// Basic Salary pays for 27 worked days out of 31 (the other 4 being paid Leave). Any day short
-// of that required count — whether it's an excess Leave day beyond the allowance, an unexcused
-// Absence, or simply a day with no attendance record at all — is one day the employee neither
-// worked nor was on approved paid Leave for, and gets docked at Basic Salary / STANDARD_MONTH_DAYS
-// per short day (e.g. an employee who only shows up 25 of a 26-day requirement is docked
-// (26-25) × Basic Salary/30 = one day's pay, regardless of whether that missing day shows up
-// as Absent or as an extra Leave day — deliberately NOT limited to counting excess Leave alone,
-// since an employee who's simply Absent shouldn't be paid in full either).
-// `presentDays` should be the same effective value shown in the Attendance (Day) column —
-// attendance_present_override when a Super Admin has set one, otherwise the live-computed
-// present+late count from the attendance log (see getAttendanceStatsForMonth and
-// EditAttendanceModal in src/components/payroll/SalarySheet.tsx) — so this can never silently
-// disagree with what the sheet displays. `allowedLeaveDays` defaults to MONTHLY_FREE_LEAVE_DAYS
-// only for callers that haven't been updated to pass the employee's own allowance yet.
-// `daysInMonth` MUST be the actual calendar day count for the sheet's own month (see
-// daysInMonthFromString in src/lib/dateRange.ts) — using the fixed STANDARD_MONTH_DAYS here
-// instead would silently miscount the requirement in every month that isn't exactly 30 days
-// (e.g. it would require 26 worked days in a 31-day August just like a 30-day April, docking or
-// crediting a day that was never actually owed). STANDARD_MONTH_DAYS is only for the per-day
-// RATE below, which deliberately stays fixed so the same Basic Salary docks the same amount per
-// day in February as it does in August — only the day COUNT needs the real calendar length.
+// The whole "Present-days-vs-required" leave system (per-employee Monthly Leave Allowance,
+// Leave Surplus Bonus, real days-in-month) launched this month — applying it retroactively
+// would silently change already-agreed, possibly already-Paid, historical salary sheets for
+// months nobody asked to recompute. So it only applies to this cutover month and any month
+// after it; every earlier sheet keeps computing Leave Deduction exactly as it always did
+// (a flat, global 4-free-days-per-month rule based on Leave count alone, no per-employee
+// allowance, no Present-day shortfall/absence docking, no surplus bonus at all) — see the
+// `month < LEAVE_LOGIC_V2_CUTOVER_MONTH` branches below. Update this constant only if a future
+// change should get its own new cutover, never move it backward.
+export const LEAVE_LOGIC_V2_CUTOVER_MONTH = '2026-09'
+
+export function usesPresentDayLeaveLogic(month: string): boolean {
+    return month >= LEAVE_LOGIC_V2_CUTOVER_MONTH
+}
+
+// Leave Deduction. From LEAVE_LOGIC_V2_CUTOVER_MONTH onward: Basic Salary is meant to cover
+// (actual days in the month - allowedLeaveDays) worked days that month — e.g. in a 31-day
+// August with a 4-day free Leave allowance, Basic Salary pays for 27 worked days out of 31 (the
+// other 4 being paid Leave). Any day short of that required count — whether it's an excess
+// Leave day beyond the allowance, an unexcused Absence, or simply a day with no attendance
+// record at all — is one day the employee neither worked nor was on approved paid Leave for,
+// and gets docked at Basic Salary / STANDARD_MONTH_DAYS per short day (e.g. an employee who
+// only shows up 25 of a 26-day requirement is docked (26-25) × Basic Salary/30 = one day's pay,
+// regardless of whether that missing day shows up as Absent or as an extra Leave day —
+// deliberately NOT limited to counting excess Leave alone, since an employee who's simply
+// Absent shouldn't be paid in full either).
+// Before the cutover: the original flat rule — only Leave days beyond a fixed
+// MONTHLY_FREE_LEAVE_DAYS (never the per-employee allowance, which didn't exist yet) are
+// docked, `presentDays`/`daysInMonth` are ignored entirely, matching exactly what every
+// already-created sheet for an earlier month was already computing before this feature existed.
+// `presentDays`/`leaveDays` should be the same effective values shown in the Attendance (Day)
+// column — attendance_present_override/attendance_leave_override when a Super Admin has set
+// one, otherwise the live-computed count from the attendance log (see
+// getAttendanceStatsForMonth and EditAttendanceModal in src/components/payroll/SalarySheet.tsx)
+// — so this can never silently disagree with what the sheet displays. `daysInMonth` must be the
+// actual calendar day count for the sheet's own month (see daysInMonthFromString in
+// src/lib/dateRange.ts) — STANDARD_MONTH_DAYS is only for the per-day RATE, which deliberately
+// stays fixed so the same Basic Salary docks the same amount per day in February as it does in
+// August. `month` is the sheet's own 'YYYY-MM', used only to pick which rule above applies.
 // Kept to 2 decimal places (paisa), same precision every salary_entries amount column is stored
 // at (Decimal(10,2)) — a per-day rate rarely divides evenly, so rounding to a whole taka here
 // would silently over/under-charge the employee by a few paisa.
-export function computeLeaveDeduction(basicSalary: number, presentDays: number, allowedLeaveDays: number = MONTHLY_FREE_LEAVE_DAYS, daysInMonth: number = STANDARD_MONTH_DAYS): number {
+export function computeLeaveDeduction(basicSalary: number, presentDays: number, leaveDays: number, allowedLeaveDays: number, daysInMonth: number, month: string): number {
+    const rate = (Number(basicSalary) || 0) / STANDARD_MONTH_DAYS
+    if (!usesPresentDayLeaveLogic(month)) {
+        const excessLeave = leaveDays - MONTHLY_FREE_LEAVE_DAYS
+        if (excessLeave <= 0) return 0
+        return Math.round(excessLeave * rate * 100) / 100
+    }
     const requiredWorkingDays = daysInMonth - allowedLeaveDays
     const shortfall = requiredWorkingDays - presentDays
     if (shortfall <= 0) return 0
-    const perDayRate = (Number(basicSalary) || 0) / STANDARD_MONTH_DAYS
-    return Math.round(shortfall * perDayRate * 100) / 100
+    return Math.round(shortfall * rate * 100) / 100
 }
 
-// Leave Surplus Bonus: the flip side of Leave Deduction. An employee who takes FEWER Leave days
-// than their monthly allowance ends up Present for more than the required working days — e.g.
-// in a 31-day August, an 8-day-allowance employee who only takes 7 Leave days is Present 24 of
-// 31 days, one more than the 23 actually required — and is credited one day's pay
-// (Basic Salary / STANDARD_MONTH_DAYS) for each such surplus day, at the same rate the
-// deduction docks it. Shown as an addition to Extra Duty on the sheet (see SalarySheet.tsx),
-// but deliberately kept as its own separate live-computed value rather than being merged into
-// the stored `extra_duty` column itself — that column is also a manually-typed admin field
-// (real extra-duty work), and baking a live-computed bonus into it would double-count on the
-// next edit/save round-trip. `daysInMonth` must be the real calendar day count — see
-// computeLeaveDeduction above for why STANDARD_MONTH_DAYS alone isn't enough.
-export function computeLeaveSurplusBonus(basicSalary: number, presentDays: number, allowedLeaveDays: number = MONTHLY_FREE_LEAVE_DAYS, daysInMonth: number = STANDARD_MONTH_DAYS): number {
+// Leave Surplus Bonus: the flip side of Leave Deduction, and entirely new as of
+// LEAVE_LOGIC_V2_CUTOVER_MONTH — no equivalent existed before, so any earlier month always
+// returns 0 here, same as if the feature had simply never been applied to that sheet. From the
+// cutover onward: an employee who takes FEWER Leave days than their monthly allowance ends up
+// Present for more than the required working days — e.g. in a 31-day August, an 8-day-allowance
+// employee who only takes 7 Leave days is Present 24 of 31 days, one more than the 23 actually
+// required — and is credited one day's pay (Basic Salary / STANDARD_MONTH_DAYS) for each such
+// surplus day, at the same rate the deduction docks it. Shown as an addition to Extra Duty on
+// the sheet (see SalarySheet.tsx), but deliberately kept as its own separate live-computed value
+// rather than being merged into the stored `extra_duty` column itself — that column is also a
+// manually-typed admin field (real extra-duty work), and baking a live-computed bonus into it
+// would double-count on the next edit/save round-trip. `daysInMonth` must be the real calendar
+// day count — see computeLeaveDeduction above for why STANDARD_MONTH_DAYS alone isn't enough.
+export function computeLeaveSurplusBonus(basicSalary: number, presentDays: number, allowedLeaveDays: number, daysInMonth: number, month: string): number {
+    if (!usesPresentDayLeaveLogic(month)) return 0
     const requiredWorkingDays = daysInMonth - allowedLeaveDays
     const surplus = presentDays - requiredWorkingDays
     if (surplus <= 0) return 0

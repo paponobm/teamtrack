@@ -43,6 +43,12 @@ export interface SalaryEntry {
     // Schedule → Monthly Leave Allowance), used as the quota leave_deduction below was computed
     // against — shown in the caption next to the deduction amount.
     monthly_leave_allowance: number
+    // Whether this sheet's month falls on/after LEAVE_LOGIC_V2_CUTOVER_MONTH (src/lib/payroll.ts)
+    // — the new Present-days-vs-required-days system only applies from that month onward, so an
+    // earlier month's leave_deduction was computed with the original flat Leave-count rule
+    // instead (and never has a leave_surplus_bonus, which didn't exist before that month). Used
+    // purely to pick which caption wording actually describes the amount shown.
+    uses_present_day_leave_calc: boolean
     // Leave days beyond monthly_leave_allowance, docked at Basic Salary / days-in-month per
     // excess day (see computeLeaveDeduction in src/lib/payroll.ts). Live-computed from
     // attendance.leave, never stored/typed in directly.
@@ -81,6 +87,17 @@ function getAvatarColor(name: string) {
 function daysInMonth(month: string) {
     const [y, m] = month.split('-').map(Number)
     return new Date(y, m, 0).getDate()
+}
+
+// Describes whichever formula actually produced this entry's leave_deduction — the new
+// Present-days-vs-required-days system (LEAVE_LOGIC_V2_CUTOVER_MONTH onward) or the original
+// flat Leave-count rule from before it (see computeLeaveDeduction in src/lib/payroll.ts) — so a
+// historical month's sheet never gets a caption describing math that isn't what actually ran.
+function leaveDeductionCaption(e: Pick<SalaryEntry, 'attendance' | 'monthly_leave_allowance' | 'uses_present_day_leave_calc'>, totalDays: number) {
+    if (e.uses_present_day_leave_calc) {
+        return `${e.attendance.present} worked of ${totalDays - e.monthly_leave_allowance} required`
+    }
+    return `${e.attendance.leave} Leave, 4 free`
 }
 
 // Present days vs. the calendar month's day count — green/amber/red so a thin sheet reads
@@ -319,7 +336,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                         ৳{e.leave_deduction.toLocaleString()}
                                         {e.leave_deduction > 0 && (
                                             <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
-                                                ({e.attendance.present} worked of {totalDays - e.monthly_leave_allowance} required)
+                                                ({leaveDeductionCaption(e, totalDays)})
                                             </div>
                                         )}
                                     </td>
@@ -687,7 +704,7 @@ function EditEntryModal({ entry, totalDays, onClose, onSaved }: { entry: SalaryE
                         <ReadOnlyField label="Department" value={entry.employee.department || '—'} />
                         <ReadOnlyField label="Attendance" value={`${entry.attendance.present} present, ${entry.attendance.absent} absent`} />
                         <ReadOnlyField label="Leave Days" value={String(entry.attendance.leave)} />
-                        <ReadOnlyField label="Leave Deduction" value={`৳${entry.leave_deduction.toLocaleString()}${entry.leave_deduction > 0 ? ` (${entry.attendance.present} worked of ${totalDays - entry.monthly_leave_allowance} required)` : ''}`} />
+                        <ReadOnlyField label="Leave Deduction" value={`৳${entry.leave_deduction.toLocaleString()}${entry.leave_deduction > 0 ? ` (${leaveDeductionCaption(entry, totalDays)})` : ''}`} />
                         <ReadOnlyField label="Basic Salary" value={`৳${entry.basic_salary.toLocaleString()}`} />
                         <ReadOnlyField label="Transportation Bill" value={`৳${entry.transportation_bill.toLocaleString()}`} />
                         <ReadOnlyField label="Snacks Bill" value={`৳${entry.snacks_bill.toLocaleString()}`} />
