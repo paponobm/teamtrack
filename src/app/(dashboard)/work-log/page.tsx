@@ -917,6 +917,12 @@ export default function WorkLogPage() {
                                                             <div style={{ fontSize: '1.125rem', fontWeight: 700, color: '#2563EB' }}>{r.totalOrders}</div>
                                                             <div style={{ fontSize: '0.625rem', color: 'var(--color-text-tertiary)' }}>Orders</div>
                                                         </div>
+                                                        {isAdmin && (
+                                                            <div style={{ textAlign: 'center', width: '80px' }}>
+                                                                <div style={{ fontSize: '1.125rem', fontWeight: 700, color: '#10B981' }}>৳{r.totalAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                                                                <div style={{ fontSize: '0.625rem', color: 'var(--color-text-tertiary)' }}>Amount</div>
+                                                            </div>
+                                                        )}
                                                         <div style={{ textAlign: 'center', width: '40px' }}>
                                                             {r.orders2000Plus > 0 ? (
                                                                 <>
