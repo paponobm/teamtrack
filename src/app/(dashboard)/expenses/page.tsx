@@ -114,6 +114,12 @@ export default function ExpensesPage() {
     const [isSuperAdmin, setIsSuperAdmin] = useState(false)
     const [activeFilter, setActiveFilter] = useState('all')
     const [searchQuery, setSearchQuery] = useState('')
+    // Clicking a slice/legend row in the "Expenses by Category" card filters the table below to
+    // just that category — click the same one again to clear it.
+    const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
+    // Description cells truncate by default (see the table below); clicking one toggles it to
+    // show the full text instead of opening a separate modal.
+    const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null)
     const [showModal, setShowModal] = useState(false)
     const [showExtraFields, setShowExtraFields] = useState(false)
     const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
@@ -321,8 +327,43 @@ export default function ExpensesPage() {
         await fetchExpenses()
     }
 
+    // Same color per category everywhere on this page — built once here (same "highest total
+    // first" ordering the "Expenses by Category" chart itself sorts by) so the chart's ring/
+    // legend and the table's category badges below can never show two different colors for the
+    // same category. The chart still does its own sort/percentage math for the pie itself; this
+    // only supplies the color for a given category name so both places agree.
+    const categoryChartColors = ['#2563EB', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#0EA5E9', '#14B8A6', '#F97316', '#6366F1', '#84CC16', '#A855F7', '#06B6D4', '#D946EF', '#78716C', '#64748B', '#DC2626', '#16A34A', '#CA8A04', '#9333EA', '#0891B2']
+    const categoryTotalsForColor: Record<string, number> = {}
+    expenses.forEach(e => {
+        const cat = e.category || 'Other'
+        categoryTotalsForColor[cat] = (categoryTotalsForColor[cat] || 0) + Number(e.amount || 0)
+    })
+    const categoryColorMap: Record<string, string> = {}
+    Object.entries(categoryTotalsForColor).sort((a, b) => b[1] - a[1]).forEach(([cat], i) => {
+        categoryColorMap[cat] = categoryChartColors[i % categoryChartColors.length]
+    })
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const getName = (obj: any) => {
+        if (!obj) return null
+        return Array.isArray(obj) ? obj[0]?.name : obj.name
+    }
+
+    // Same idea for "By" (submitter) — matches the "Expenses by User" chart's own colors/order.
+    const userChartColors = ['#10B981', '#2563EB', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#0EA5E9', '#14B8A6', '#F97316', '#6366F1', '#84CC16']
+    const userTotalsForColor: Record<string, number> = {}
+    expenses.forEach(e => {
+        const name = getName(e.submitter) || 'Unknown'
+        userTotalsForColor[name] = (userTotalsForColor[name] || 0) + Number(e.amount || 0)
+    })
+    const userColorMap: Record<string, string> = {}
+    Object.entries(userTotalsForColor).sort((a, b) => b[1] - a[1]).forEach(([name], i) => {
+        userColorMap[name] = userChartColors[i % userChartColors.length]
+    })
+
     const filtered = expenses.filter(e => {
         if (activeFilter !== 'all' && e.payment_status !== activeFilter) return false
+        if (categoryFilter && (e.category || 'Other') !== categoryFilter) return false
         if (searchQuery) {
             const q = searchQuery.toLowerCase()
             if (!(e.description || '').toLowerCase().includes(q) && !(e.category || '').toLowerCase().includes(q)) return false
@@ -333,12 +374,6 @@ export default function ExpensesPage() {
     // Only the pending rows currently on screen are selectable for bulk-approve.
     const pendingVisibleIds = filtered.filter(e => e.payment_status === 'pending').map(e => e.id)
     const allPendingSelected = pendingVisibleIds.length > 0 && pendingVisibleIds.every(id => selectedIds.includes(id))
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const getName = (obj: any) => {
-        if (!obj) return null
-        return Array.isArray(obj) ? obj[0]?.name : obj.name
-    }
 
     const handleIncomeSave = async () => {
         if (!incomeForm.amount || !incomeForm.description.trim()) return
@@ -691,11 +726,6 @@ export default function ExpensesPage() {
                         />
                     </div>
                 </div>
-                {isSuperAdmin && selectedIds.length > 0 && (
-                    <button className="btn btn-primary btn-sm" onClick={handleBulkApprove} disabled={bulkApproving} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        ✓ {bulkApproving ? 'Approving...' : `Approve Selected (${selectedIds.length})`}
-                    </button>
-                )}
             </motion.div>
 
             {/* Donut Charts: By Category & By User */}
@@ -773,7 +803,6 @@ export default function ExpensesPage() {
                         })
                         const sorted = Object.entries(catBreakdown).sort((a, b) => b[1] - a[1])
                         const total = sorted.reduce((s, [, v]) => s + v, 0)
-                        const chartColors = ['#2563EB', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#0EA5E9', '#14B8A6', '#F97316', '#6366F1', '#84CC16', '#A855F7', '#06B6D4', '#D946EF', '#78716C', '#64748B', '#DC2626', '#16A34A', '#CA8A04', '#9333EA', '#0891B2']
                         const r = 70, cx = 90, cy = 90, stroke = 28
                         const circumference = 2 * Math.PI * r
                         let offset = 0
@@ -783,19 +812,20 @@ export default function ExpensesPage() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
                                     <div style={{ position: 'relative', flexShrink: 0 }}>
                                         <svg width="180" height="180" viewBox="0 0 180 180">
-                                            {sorted.map(([cat, amount], i) => {
+                                            {sorted.map(([cat, amount]) => {
                                                 const pct = total > 0 ? amount / total : 0
                                                 const dashLen = pct * circumference
                                                 const dashOffset = -offset
                                                 offset += dashLen
                                                 return (
                                                     <circle key={cat} cx={cx} cy={cy} r={r} fill="none"
-                                                        stroke={chartColors[i % chartColors.length]}
+                                                        stroke={categoryColorMap[cat]}
                                                         strokeWidth={stroke}
                                                         strokeDasharray={`${dashLen} ${circumference - dashLen}`}
                                                         strokeDashoffset={dashOffset}
                                                         transform={`rotate(-90 ${cx} ${cy})`}
-                                                        style={{ transition: 'stroke-dasharray 0.5s ease, stroke-dashoffset 0.5s ease' }}
+                                                        onClick={() => setCategoryFilter(categoryFilter === cat ? null : cat)}
+                                                        style={{ transition: 'stroke-dasharray 0.5s ease, stroke-dashoffset 0.5s ease', cursor: 'pointer', opacity: categoryFilter && categoryFilter !== cat ? 0.35 : 1 }}
                                                     />
                                                 )
                                             })}
@@ -805,11 +835,18 @@ export default function ExpensesPage() {
                                             <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>৳{total.toLocaleString()}</div>
                                         </div>
                                     </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, maxHeight: '180px', overflowY: 'auto' }}>
-                                        {sorted.map(([cat, amount], i) => (
-                                            <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem' }}>
-                                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: chartColors[i % chartColors.length], flexShrink: 0 }} />
-                                                <span style={{ flex: 1, color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat} ({expenses.filter(e => (e.category || 'Other') === cat).length})</span>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+                                        {sorted.map(([cat, amount]) => (
+                                            <div key={cat} onClick={() => setCategoryFilter(categoryFilter === cat ? null : cat)}
+                                                title={categoryFilter === cat ? 'Click to clear filter' : `Click to filter by ${cat}`}
+                                                style={{
+                                                    display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', cursor: 'pointer',
+                                                    padding: '3px 6px', margin: '-3px -6px', borderRadius: '6px',
+                                                    background: categoryFilter === cat ? 'rgba(118,118,128,0.1)' : 'transparent',
+                                                    opacity: categoryFilter && categoryFilter !== cat ? 0.5 : 1,
+                                                }}>
+                                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: categoryColorMap[cat], flexShrink: 0 }} />
+                                                <span style={{ flex: 1, color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: categoryFilter === cat ? 700 : 400 }}>{cat} ({expenses.filter(e => (e.category || 'Other') === cat).length})</span>
                                                 <span style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'nowrap' }}>৳{amount.toLocaleString()}</span>
                                             </div>
                                         ))}
@@ -873,6 +910,14 @@ export default function ExpensesPage() {
                             </div>
                         )
                     })()}
+                </motion.div>
+            )}
+
+            {isSuperAdmin && selectedIds.length > 0 && (
+                <motion.div variants={item} style={{ display: 'flex', marginBottom: '24px' }}>
+                    <button className="btn btn-primary btn-sm" onClick={handleBulkApprove} disabled={bulkApproving} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        ✓ {bulkApproving ? 'Approving...' : `Approve Selected (${selectedIds.length})`}
+                    </button>
                 </motion.div>
             )}
 
@@ -944,12 +989,25 @@ export default function ExpensesPage() {
                                                 {new Date(e.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                                             </td>
                                             <td style={{ padding: '10px 16px' }}>
-                                                <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 500, background: 'rgba(118,118,128,0.08)', color: 'var(--color-text-secondary)' }}>
-                                                    {e.category || 'Other'}
-                                                </span>
+                                                {(() => {
+                                                    const catColor = categoryColorMap[e.category || 'Other'] || '#64748B'
+                                                    return (
+                                                        <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 500, background: `${catColor}1A`, color: catColor }}>
+                                                            {e.category || 'Other'}
+                                                        </span>
+                                                    )
+                                                })()}
                                             </td>
-                                            <td style={{ padding: '10px 16px', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                {e.description || '-'}
+                                            <td style={{ padding: '10px 16px', maxWidth: '200px' }}>
+                                                {e.description ? (
+                                                    <span onClick={() => setExpandedDescriptionId(expandedDescriptionId === e.id ? null : e.id)}
+                                                        title={expandedDescriptionId === e.id ? 'Click to collapse' : 'Click to see full description'}
+                                                        style={expandedDescriptionId === e.id
+                                                            ? { display: 'block', whiteSpace: 'normal', wordBreak: 'break-word', cursor: 'pointer' }
+                                                            : { display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+                                                        {e.description}
+                                                    </span>
+                                                ) : '-'}
                                             </td>
                                             <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontFamily: 'monospace' }}>
                                                 ৳{Number(e.amount).toLocaleString()}
@@ -976,8 +1034,17 @@ export default function ExpensesPage() {
                                                     <span style={{ color: 'var(--color-text-tertiary)' }}>-</span>
                                                 )}
                                             </td>
-                                            <td style={{ padding: '10px 16px', color: 'var(--color-text-tertiary)', fontSize: '0.75rem' }}>
-                                                {getName(e.submitter) || '-'}
+                                            <td style={{ padding: '10px 16px' }}>
+                                                {(() => {
+                                                    const submitterName = getName(e.submitter)
+                                                    if (!submitterName) return <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.75rem' }}>-</span>
+                                                    const userColor = userColorMap[submitterName] || '#64748B'
+                                                    return (
+                                                        <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 500, background: `${userColor}1A`, color: userColor }}>
+                                                            {submitterName}
+                                                        </span>
+                                                    )
+                                                })()}
                                             </td>
                                             {isAdmin && (
                                                 <td style={{ padding: '10px 16px', textAlign: 'right' }}>
