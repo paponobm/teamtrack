@@ -1,6 +1,6 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { getMonthRangeFromString, daysInMonthFromString } from '@/lib/dateRange'
-import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus, createOrSyncSalaryExpense } from '@/lib/payroll'
+import { getMonthRangeFromString } from '@/lib/dateRange'
+import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus, createOrSyncSalaryExpense, SALARY_EXPENSE_CATEGORY, usesPaidAmountFeature } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
 import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
@@ -11,7 +11,7 @@ import { NextResponse } from 'next/server'
 // 'transportation_bill'/'snacks_bill'/'festival_bonus' are also excluded — frozen at
 // salary-sheet-creation time from the employee's saved payroll defaults (Super Admin, via
 // Members → Edit Member), not editable per month here.
-const NUMERIC_FIELDS = ['extra_duty', 'performance_bonus', 'other_deduction'] as const
+const NUMERIC_FIELDS = ['extra_duty', 'performance_bonus', 'other_deduction', 'paid_amount'] as const
 const PAYMENT_METHODS = ['bKash', 'Rocket', 'Nagad', 'Bank', 'Cash'] as const
 
 // PUT /api/payroll/salary-entries — edit one employee's salary amounts/payment status for
@@ -26,15 +26,56 @@ export async function PUT(request: Request) {
     const { id } = body
     if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
 
+    // Fetched once up front — used both for the Paid-guard check below and for the Activity
+    // Log's before/after comparison once the update actually runs.
+    const { rows: [oldRecord] } = await db.query(
+        `SELECT se.extra_duty, se.performance_bonus, se.other_deduction, se.paid_amount, se.payment_status,
+             se.payment_method, se.payment_date, se.attendance_present_override, se.attendance_leave_override,
+             ss.month
+         FROM salary_entries se JOIN salary_sheets ss ON ss.id = se.salary_sheet_id
+         WHERE se.id = $1`,
+        [id]
+    )
+
     // Once an entry is marked Paid it's a settled payout — attempting to flip it back to
     // Unpaid (e.g. via a stale form still open after another update) is rejected here too,
     // not just hidden in the UI, since Paid triggers side effects (advance/product buy
     // settlement below) that don't have a matching "undo" on reversal.
-    if (body.payment_status === 'Unpaid') {
-        const { rows: [existing] } = await db.query(`SELECT payment_status FROM salary_entries WHERE id = $1`, [id])
-        if (existing?.payment_status === 'Paid') {
-            return NextResponse.json({ error: 'A Paid entry cannot be changed back to Unpaid' }, { status: 400 })
+    if (body.payment_status === 'Unpaid' && oldRecord?.payment_status === 'Paid') {
+        return NextResponse.json({ error: 'A Paid entry cannot be changed back to Unpaid' }, { status: 400 })
+    }
+
+    // Recording a Partial Payment (the "Mark as Paid" modal's own second tab, distinct from
+    // fully settling the entry) — installment-based: `amount` is how much is being handed over
+    // *right now*, added on top of whatever was already paid, not a replacement total. This is
+    // deliberately never allowed to touch payment_status itself (stays Unpaid/"Partial Paid"
+    // display state — see paymentStatusInfo in SalarySheet.tsx) — only a full "Mark as Paid"
+    // (the first tab) settles the entry and runs the advance/fine/expense-sync side effects
+    // further down. Rewritten into the same paid_amount/payment_method/payment_date fields the
+    // rest of this route already handles, so nothing else below needs to know this came from a
+    // different form.
+    let partialPaymentAmount: number | undefined
+    if (body.partial_payment) {
+        // Only offered for sheets from PAID_AMOUNT_FEATURE_CUTOVER_MONTH onward — see that
+        // constant in src/lib/payroll.ts. The frontend already hides the Partial Payment tab
+        // for an older sheet, but this guard covers a stale form/direct API call too.
+        if (!oldRecord?.month || !usesPaidAmountFeature(oldRecord.month)) {
+            return NextResponse.json({ error: 'Partial Payment is not available for this month' }, { status: 400 })
         }
+        const amount = Number(body.partial_payment.amount)
+        if (!Number.isFinite(amount) || amount <= 0) {
+            return NextResponse.json({ error: 'Partial payment amount must be a positive number' }, { status: 400 })
+        }
+        if (body.partial_payment.method !== undefined && body.partial_payment.method !== null && !PAYMENT_METHODS.includes(body.partial_payment.method)) {
+            return NextResponse.json({ error: `payment_method must be one of ${PAYMENT_METHODS.join(', ')}` }, { status: 400 })
+        }
+        if (!body.partial_payment.date || !/^\d{4}-\d{2}-\d{2}$/.test(body.partial_payment.date)) {
+            return NextResponse.json({ error: 'Partial payment date is required (YYYY-MM-DD)' }, { status: 400 })
+        }
+        partialPaymentAmount = amount
+        body.paid_amount = (Number(oldRecord?.paid_amount) || 0) + amount
+        body.payment_method = body.partial_payment.method || null
+        body.payment_date = body.partial_payment.date
     }
 
     const update: Record<string, number | string | null> = {}
@@ -95,13 +136,65 @@ export async function PUT(request: Request) {
     const setClauses = keys.map((k, i) => `"${k}" = $${i + 2}`)
     const { rows: [data] } = await db.query(
         `UPDATE salary_entries SET ${setClauses.join(', ')} WHERE id = $1
-         RETURNING id, employee_id, salary_sheet_id, expense_id, payment_date,
+         RETURNING id, employee_id, salary_sheet_id, expense_id, payment_date, payment_status,
              basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus, other_deduction,
-             attendance_present_override, attendance_leave_override`,
+             attendance_present_override, attendance_leave_override, paid_amount`,
         [id, ...keys.map(k => update[k])]
     )
 
     if (!data) return NextResponse.json({ error: 'Salary entry not found' }, { status: 404 })
+
+    // Activity Log — one entry per save, listing exactly which fields changed (before → after),
+    // same shape/module-agnostic table the Daily Attendance edit modal already writes to and
+    // reads back from (see PATCH /api/attendance/[id] and GET /api/activity-log). Only the
+    // fields actually present in this request are compared — untouched fields (e.g. an
+    // attendance-only save never touching extra_duty) never show up as a false "no change".
+    const FIELD_LABELS: Record<string, string> = {
+        extra_duty: 'Extra Duty', performance_bonus: 'Performance Bonus', other_deduction: 'Other Deduction',
+        paid_amount: 'Paid Amount', payment_status: 'Payment Status', payment_method: 'Payment Method',
+        payment_date: 'Payment Date', attendance_present_override: 'Present Days (override)',
+        attendance_leave_override: 'Leave Days (override)',
+    }
+    const changes: string[] = []
+    for (const key of keys) {
+        if (key === 'updated_by') continue
+        const oldVal = oldRecord?.[key] ?? null
+        const newVal = update[key]
+        if (String(oldVal ?? '') === String(newVal ?? '')) continue
+        const label = FIELD_LABELS[key] || key
+        changes.push(`${label}: ${oldVal ?? 'none'} → ${newVal ?? 'none'}`)
+    }
+    if (changes.length > 0) {
+        await db.query(
+            `INSERT INTO audit_log (actor_id, module, action, target_id, details)
+             VALUES ($1, 'payroll', 'update', $2, $3)`,
+            [auth.employee.id, id, JSON.stringify({ actor_name: auth.employee.name, changes })]
+        )
+    }
+
+    // A Partial Payment books its own standalone Finance Hub Expense right away — deliberately
+    // separate from createOrSyncSalaryExpense below, which maintains exactly ONE synced expense
+    // per entry for the final full settlement. Each partial installment instead becomes its own
+    // permanent 'Employee Salary' expense row dated on the day it was actually paid, so multiple
+    // partial payments across a month show up as multiple line items in Finance Hub, and the
+    // later full "Mark as Paid" settlement (above/below) tops up on top of them instead of
+    // double-booking the money already recorded here.
+    if (partialPaymentAmount !== undefined) {
+        const { rows: [sheet] } = await db.query(`SELECT month FROM salary_sheets WHERE id = $1`, [data.salary_sheet_id])
+        const { rows: [employee] } = await db.query(`SELECT name FROM employees WHERE id = $1`, [data.employee_id])
+        await db.query(
+            `INSERT INTO expenses (date, category, description, amount, payment_method, payment_status, submitted_by, approved_by)
+             VALUES ($1, $2, $3, $4, $5, 'paid', $6, $6)`,
+            [
+                body.partial_payment.date,
+                SALARY_EXPENSE_CATEGORY,
+                `Partial salary payment - ${employee?.name || 'Employee'} - ${sheet?.month || ''}`,
+                partialPaymentAmount,
+                body.partial_payment.method || null,
+                auth.employee.id,
+            ]
+        )
+    }
 
     // The employee's own configured free Leave days per month (Members → Edit Member → Duty
     // Schedule) — looked up once here since both the attendance-override recompute below and
@@ -128,9 +221,8 @@ export async function PUT(request: Request) {
                 present: data.attendance_present_override ?? computed.present,
                 leave: data.attendance_leave_override ?? computed.leave,
             }
-            const daysInMonth = daysInMonthFromString(sheet.month)
-            leaveDeductionForResponse = computeLeaveDeduction(Number(data.basic_salary) || 0, attendance.present, attendance.leave, monthlyLeaveAllowance, daysInMonth, sheet.month)
-            leaveSurplusBonusForResponse = computeLeaveSurplusBonus(Number(data.basic_salary) || 0, attendance.present, monthlyLeaveAllowance, daysInMonth, sheet.month)
+            leaveDeductionForResponse = computeLeaveDeduction(Number(data.basic_salary) || 0, attendance.present, attendance.leave, monthlyLeaveAllowance, sheet.month)
+            leaveSurplusBonusForResponse = computeLeaveSurplusBonus(Number(data.basic_salary) || 0, attendance.leave, monthlyLeaveAllowance, sheet.month)
 
             const employeeIds = [data.employee_id]
             const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails] = await Promise.all([
@@ -237,9 +329,8 @@ export async function PUT(request: Request) {
             // else computed) — the linked Finance expense amount must match Payable Salary exactly.
             const effectivePresent = data.attendance_present_override ?? (attendanceStats[data.employee_id]?.present || 0)
             const effectiveLeave = data.attendance_leave_override ?? (attendanceStats[data.employee_id]?.leave || 0)
-            const daysInMonth = daysInMonthFromString(sheet.month)
-            const leaveDeduction = computeLeaveDeduction(Number(data.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, daysInMonth, sheet.month)
-            const leaveSurplusBonus = computeLeaveSurplusBonus(Number(data.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance, daysInMonth, sheet.month)
+            const leaveDeduction = computeLeaveDeduction(Number(data.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, sheet.month)
+            const leaveSurplusBonus = computeLeaveSurplusBonus(Number(data.basic_salary) || 0, effectiveLeave, monthlyLeaveAllowance, sheet.month)
             const netPayable = computeNetPayable(
                 data,
                 fineTotals[data.employee_id] || 0,
@@ -251,6 +342,16 @@ export async function PUT(request: Request) {
                 leaveSurplusBonus,
             )
 
+            // Paid Amount/Due Amount (see the Salary Sheet columns) must never contradict a
+            // 'Paid' status — if this same request didn't already set a specific Paid Amount
+            // (e.g. the quick "Mark as Paid" flow, which only ever sends payment_status), treat
+            // the full Payable Salary as settled so Due Amount reads ৳0 instead of still
+            // showing the whole payout outstanding under a green "Paid" badge.
+            if (!('paid_amount' in update)) {
+                await db.query(`UPDATE salary_entries SET paid_amount = $1 WHERE id = $2`, [netPayable, id])
+                data.paid_amount = netPayable
+            }
+
             // Paid on time (within the sheet's own month, or even early) → book the expense on
             // the actual date it was paid. Paid late (settled in a month after the one it's
             // for) → book it on the sheet month's last day instead, so a late August payout
@@ -258,11 +359,22 @@ export async function PUT(request: Request) {
             // was actually settled in.
             const paymentMonth = (data.payment_date || end).slice(0, 7)
             const isLatePayment = paymentMonth > sheet.month
+
+            // If this entry already had money paid against it via one or more standalone
+            // Partial Payment expenses (see the `partial_payment` block above) BEFORE this
+            // request settled it, that money has already been booked in Finance Hub — the
+            // synced settlement expense below must only cover the remaining top-up, not the
+            // full Payable Salary again, or the payout would be double-counted. Only applies
+            // the very first time an entry transitions into 'Paid' (isFirstTimePaid); a later
+            // re-sync of an already-Paid entry (e.g. editing extra_duty afterwards) correctly
+            // keeps using the full current netPayable, matching existing behavior.
+            const isFirstTimePaid = oldRecord?.payment_status !== 'Paid'
+            const alreadyPaidBeforeThisAction = isFirstTimePaid ? (Number(oldRecord?.paid_amount) || 0) : 0
             const salaryExpenseId = await createOrSyncSalaryExpense(db, {
                 expenseId: data.expense_id,
                 employeeId: data.employee_id,
                 month: sheet.month,
-                amount: netPayable,
+                amount: Math.max(0, netPayable - alreadyPaidBeforeThisAction),
                 date: isLatePayment ? end : (data.payment_date || end),
                 submittedBy: auth.employee.id,
             })
@@ -274,6 +386,7 @@ export async function PUT(request: Request) {
 
     return NextResponse.json({
         success: true,
+        paid_amount: Number(data.paid_amount) || 0,
         ...(attendance ? {
             attendance,
             attendance_present_override: data.attendance_present_override,

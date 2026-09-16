@@ -1,6 +1,5 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus } from '@/lib/payroll'
-import { daysInMonthFromString } from '@/lib/dateRange'
+import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus, usesPaidAmountFeature } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
 import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
@@ -78,7 +77,7 @@ export async function GET(request: Request) {
     for (const sheet of sheetRows) {
         const { rows: entries } = await db.query(
             `SELECT se.employee_id, se.basic_salary, se.extra_duty, se.transportation_bill, se.snacks_bill,
-                se.performance_bonus, se.festival_bonus, se.other_deduction, se.payment_status,
+                se.performance_bonus, se.festival_bonus, se.other_deduction, se.payment_status, se.paid_amount,
                 se.attendance_present_override, se.attendance_leave_override,
                 json_build_object('basic_salary_effective_month', e.basic_salary_effective_month,
                     'monthly_leave_allowance', e.monthly_leave_allowance) AS employee
@@ -99,7 +98,6 @@ export async function GET(request: Request) {
 
         const employeeIds = rows.map((r: { employee_id: string }) => r.employee_id)
         employeeIds.forEach((id: string) => distinctEmployeeIds.add(id))
-        const daysInMonth = daysInMonthFromString(sheet.month)
 
         const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails, attendanceStats] = await Promise.all([
             getFineTotalsForMonth(db, employeeIds, sheet.month),
@@ -123,8 +121,8 @@ export async function GET(request: Request) {
             const effectivePresent = r.attendance_present_override ?? (attendanceStats[r.employee_id]?.present || 0)
             const effectiveLeave = r.attendance_leave_override ?? (attendanceStats[r.employee_id]?.leave || 0)
             const monthlyLeaveAllowance = Number(r.employee?.monthly_leave_allowance) || 0
-            const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, daysInMonth, sheet.month)
-            const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance, daysInMonth, sheet.month)
+            const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, sheet.month)
+            const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.basic_salary) || 0, effectiveLeave, monthlyLeaveAllowance, sheet.month)
             const net = computeNetPayable(r, fine, advance, productBuy, loan, providentFund, leaveDeduction, leaveSurplusBonus)
             const isPaid = r.payment_status === 'Paid'
 
@@ -164,6 +162,22 @@ export async function GET(request: Request) {
                 totalSalaryExpense += net
                 paidEmployees++
                 paidAmount += net
+            } else if (usesPaidAmountFeature(sheet.month)) {
+                unpaidEmployees++
+                // A Partial Payment (see the `partial_payment` handling in
+                // PUT /api/payroll/salary-entries) moves real money out the door before the
+                // entry is ever marked fully 'Paid' — clamped to `net` so a stale/rounding
+                // paid_amount can never push this employee's own contribution negative or over
+                // their own Payable Salary. Splitting it this way keeps
+                // paidAmount + unpaidAmount always equal to the sum of every entry's Payable
+                // Salary, while Total Salary Expense reflects money actually disbursed so far.
+                // Only applies from PAID_AMOUNT_FEATURE_CUTOVER_MONTH onward — an older sheet's
+                // paid_amount is just the migration's default 0, never actually tracked, so it
+                // falls through to the plain strict Paid/Unpaid split below instead.
+                const effectivePaid = Math.min(Number(r.paid_amount) || 0, net)
+                paidAmount += effectivePaid
+                totalSalaryExpense += effectivePaid
+                unpaidAmount += Math.max(0, net - effectivePaid)
             } else {
                 unpaidEmployees++
                 unpaidAmount += net

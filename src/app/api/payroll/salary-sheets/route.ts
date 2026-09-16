@@ -1,6 +1,5 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus, usesPresentDayLeaveLogic } from '@/lib/payroll'
-import { daysInMonthFromString } from '@/lib/dateRange'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
 import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
@@ -124,7 +123,7 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
     const { rows: entries } = await db.query(
         `SELECT se.id, se.employee_id, se.basic_salary, se.extra_duty, se.transportation_bill, se.snacks_bill,
             se.performance_bonus, se.festival_bonus, se.other_deduction, se.payment_status, se.payment_method,
-            se.payment_date, se.updated_at, se.attendance_present_override, se.attendance_leave_override,
+            se.payment_date, se.updated_at, se.attendance_present_override, se.attendance_leave_override, se.paid_amount,
             json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url,
                 'joining_date', e.joining_date, 'festival_bonus_percentage', e.festival_bonus_percentage,
                 'basic_salary_effective_month', e.basic_salary_effective_month,
@@ -157,8 +156,6 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
         getProvidentFundDetailsForMonth(db, employeeIds, month),
     ])
 
-    const daysInMonth = daysInMonthFromString(month)
-
     return rows.map(r => {
         const fine = fines[r.employee_id] || 0
         const advanceDetail = advances[r.employee_id] || { total: 0, records: [] }
@@ -172,8 +169,8 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
         const effectiveLeave = r.attendance_leave_override ?? (attendance[r.employee_id]?.leave || 0)
         const effectivePresent = r.attendance_present_override ?? (attendance[r.employee_id]?.present || 0)
         const monthlyLeaveAllowance = Number(r.employee?.monthly_leave_allowance) || 0
-        const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, daysInMonth, month)
-        const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.basic_salary) || 0, effectivePresent, monthlyLeaveAllowance, daysInMonth, month)
+        const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, month)
+        const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.basic_salary) || 0, effectiveLeave, monthlyLeaveAllowance, month)
         return {
             id: r.id,
             employee_id: r.employee_id,
@@ -221,6 +218,13 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
             provident_fund_records: providentFundDetail.records,
             other_deduction: Number(r.other_deduction) || 0,
             payment_status: r.payment_status,
+            // How much of net_payable has actually been handed over so far this month — tracked
+            // independently of payment_status (which still only flips to 'Paid' once, via Mark
+            // as Paid, triggering the advance/fine/expense settlement side effects below). The
+            // sheet/edit-modal derive a "Partial Paid" display state by comparing this against
+            // net_payable themselves, rather than a third payment_status value, so that
+            // settlement logic never needs to branch on anything but Paid/Unpaid.
+            paid_amount: Number(r.paid_amount) || 0,
             payment_method: r.payment_method,
             payment_date: r.payment_date,
             // Present/Leave are computed live from the attendance table by default, but a Super

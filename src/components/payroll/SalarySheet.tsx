@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString } from '@/lib/dateRange'
-import { IconFileText, IconX, IconPrinter, IconCheckCircle, IconEdit, IconTrash } from '@/components/icons/Icons'
+import { IconFileText, IconX, IconPrinter, IconCheckCircle, IconEdit, IconTrash, IconClock } from '@/components/icons/Icons'
 import PaySlipModal from './PaySlipModal'
 
 export interface SalaryEntry {
@@ -33,6 +33,11 @@ export interface SalaryEntry {
     provident_fund_records: { id: string; monthly_installment: number; month_number: number; duration_months: number }[]
     other_deduction: number
     payment_status: 'Paid' | 'Unpaid'
+    // How much of net_payable has actually been handed over so far this month — independent of
+    // payment_status, which still only ever flips to 'Paid' once (via Mark as Paid, triggering
+    // settlement side effects). "Partial Paid" is a display-only state derived by comparing this
+    // against net_payable (see paymentStatusLabel below), not a third payment_status value.
+    paid_amount: number
     payment_method: string | null
     payment_date: string | null
     attendance: { present: number; late: number; absent: number; leave: number }
@@ -93,11 +98,26 @@ function daysInMonth(month: string) {
 // Present-days-vs-required-days system (LEAVE_LOGIC_V2_CUTOVER_MONTH onward) or the original
 // flat Leave-count rule from before it (see computeLeaveDeduction in src/lib/payroll.ts) — so a
 // historical month's sheet never gets a caption describing math that isn't what actually ran.
-function leaveDeductionCaption(e: Pick<SalaryEntry, 'attendance' | 'monthly_leave_allowance' | 'uses_present_day_leave_calc'>, totalDays: number) {
+// "required" is always against a fixed 30-day standard month (STANDARD_MONTH_DAYS in
+// src/lib/payroll.ts), never the sheet's own actual calendar day count — matching the backend
+// exactly, so the same employee with the same allowance reads the same "X worked of Y required"
+// in a 31-day month as in a 30-day one, instead of a longer month silently demanding one extra
+// day for no reason.
+function leaveDeductionCaption(e: Pick<SalaryEntry, 'attendance' | 'monthly_leave_allowance' | 'uses_present_day_leave_calc'>) {
     if (e.uses_present_day_leave_calc) {
-        return `${e.attendance.present} worked of ${totalDays - e.monthly_leave_allowance} required`
+        return `${e.attendance.present} worked of ${30 - e.monthly_leave_allowance} required`
     }
     return `${e.attendance.leave} Leave, 4 free`
+}
+
+// Paid/Unpaid comes straight from payment_status (the field that actually triggers settlement
+// side effects — see PUT /api/payroll/salary-entries), but "Partial Paid" is purely a display
+// state: payment_status is still 'Unpaid' (nothing has been formally settled yet) while some
+// non-zero Paid Amount has already been recorded against it.
+function paymentStatusInfo(e: Pick<SalaryEntry, 'payment_status' | 'paid_amount'>): { label: string; color: string; bg: string } {
+    if (e.payment_status === 'Paid') return { label: 'Paid', color: '#16A34A', bg: 'rgba(22,163,74,0.1)' }
+    if (e.paid_amount > 0) return { label: 'Partial Paid', color: '#DC2626', bg: 'rgba(220,38,38,0.1)' }
+    return { label: 'Non-Paid', color: '#6B7280', bg: 'rgba(107,114,128,0.12)' }
 }
 
 // Present days vs. the calendar month's day count — green/amber/red so a thin sheet reads
@@ -113,6 +133,26 @@ function attendanceColor(present: number, totalDays: number) {
 function formatDate(d: string | null) {
     if (!d) return '—'
     return new Date(d).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+// Same relative-time formatting the Daily Attendance edit modal's own Change History uses (see
+// src/app/(dashboard)/attendance/page.tsx) — kept consistent so a log entry reads the same way
+// anywhere in the app it's shown.
+function timeAgo(dateStr: string) {
+    const diff = Date.now() - new Date(dateStr).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1) return 'just now'
+    if (mins < 60) return `${mins}m ago`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h ago`
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+// Full date + time for the Activity Log, e.g. "Sep 16, 2026, 04:22 PM" — unlike timeAgo above,
+// this never goes stale/relative, so a log entry from any point still reads exactly when it
+// happened without needing to do that math in your head.
+function formatLogDateTime(dateStr: string) {
+    return new Date(dateStr).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 function formatMonthLabel(month: string) {
@@ -135,6 +175,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
     const [editingAttendance, setEditingAttendance] = useState<SalaryEntry | null>(null)
     const [payslipEntry, setPayslipEntry] = useState<SalaryEntry | null>(null)
     const [markPaidEntry, setMarkPaidEntry] = useState<SalaryEntry | null>(null)
+    const [activityLogEntry, setActivityLogEntry] = useState<SalaryEntry | null>(null)
 
     // Table is wider than the viewport, so its horizontal scrollbar normally sits below every
     // row — reaching it means scrolling all the way down first. This tracks the real table's
@@ -212,6 +253,12 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
     }
 
     const totalDays = daysInMonth(month)
+    // Paid Amount/Due Amount/Partial Paid only mean anything from PAID_AMOUNT_FEATURE_CUTOVER_MONTH
+    // onward (see that constant in src/lib/payroll.ts) — an older sheet's paid_amount is just the
+    // migration's default 0 for every row, never actually tracked, so those columns and the
+    // Partial Payment tab stay hidden for it and it falls back to the original simple Paid/
+    // Non-Paid badge + single-shot Mark as Paid instead.
+    const showPaidAmountFeature = month >= '2026-09'
     const q = search.trim().toLowerCase()
     const filteredEntries = q
         ? entries.filter(e => e.employee.name.toLowerCase().includes(q) || (e.employee.employee_id || '').toLowerCase().includes(q))
@@ -270,10 +317,13 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                 <th className="deduct-col">Monthly Fine</th>
                                 <th className="deduction-highlight-col" style={{ fontWeight: 800,color: "#f81dd4"  }}>Total Deductions</th>
                                 <th className="payable-highlight" style={{ fontWeight: 800,color: "#f81dd4"  }}>Payable Salary</th>
+                                {showPaidAmountFeature && <th>Paid Amount</th>}
+                                {showPaidAmountFeature && <th>Due Amount</th>}
                                 <th>Paid / Non-Paid</th>
                                 <th>Payment Method</th>
                                 <th>Payment Date</th>
                                 <th>Pay Slip</th>
+                                <th>Activity Log</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -336,7 +386,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                         ৳{e.leave_deduction.toLocaleString()}
                                         {e.leave_deduction > 0 && (
                                             <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
-                                                ({leaveDeductionCaption(e, totalDays)})
+                                                ({leaveDeductionCaption(e)})
                                             </div>
                                         )}
                                     </td>
@@ -371,16 +421,37 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                             ৳{e.net_payable.toLocaleString()}
                                         </span>
                                     </td>
+                                    {showPaidAmountFeature && (
+                                        <td style={{ color: e.paid_amount > 0 ? '#16A34A' : undefined }}>৳{e.paid_amount.toLocaleString()}</td>
+                                    )}
+                                    {showPaidAmountFeature && (
+                                        <td style={{ color: Math.max(0, e.net_payable - e.paid_amount) > 0 ? '#DC2626' : undefined }}>
+                                            ৳{Math.max(0, e.net_payable - e.paid_amount).toLocaleString()}
+                                        </td>
+                                    )}
                                     <td>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                            <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: e.payment_status === 'Paid' ? '#16A34A' : '#B45309', background: e.payment_status === 'Paid' ? 'rgba(22,163,74,0.1)' : 'rgba(217,119,6,0.12)' }}>
-                                                {e.payment_status === 'Paid' ? 'Paid' : 'Non-Paid'}
-                                            </span>
+                                            {(() => {
+                                                // Pre-cutover sheets never had Paid Amount tracked, so "Partial
+                                                // Paid" can't mean anything real for them — always the original
+                                                // plain Paid/Non-Paid label instead of paymentStatusInfo's 3-state
+                                                // version, regardless of whatever paid_amount happens to hold.
+                                                const status = showPaidAmountFeature
+                                                    ? paymentStatusInfo(e)
+                                                    : (e.payment_status === 'Paid'
+                                                        ? { label: 'Paid', color: '#16A34A', bg: 'rgba(22,163,74,0.1)' }
+                                                        : { label: 'Non-Paid', color: '#6B7280', bg: 'rgba(107,114,128,0.12)' })
+                                                return (
+                                                    <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: status.color, background: status.bg }}>
+                                                        {status.label}
+                                                    </span>
+                                                )
+                                            })()}
                                             {e.payment_status !== 'Paid' && (
                                                 <button className="btn btn-secondary btn-sm" title="Mark as Paid"
                                                     style={{ padding: '2px 8px', fontSize: '0.6875rem', color: '#16A34A' }}
                                                     onClick={(ev) => { ev.stopPropagation(); setMarkPaidEntry(e) }}>
-                                                    <IconCheckCircle size={13} /> 
+                                                    <IconCheckCircle size={13} />
                                                 </button>
                                             )}
                                         </div>
@@ -398,10 +469,16 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                             <IconPrinter size={14} /> Pay Slip
                                         </button>
                                     </td>
+                                    <td>
+                                        <button className="btn btn-secondary btn-sm" title="View change history" style={{ color: '#7C3AED' }}
+                                            onClick={(ev) => { ev.stopPropagation(); setActivityLogEntry(e) }}>
+                                            <IconClock size={14} /> Log
+                                        </button>
+                                    </td>
                                 </tr>
                             ))}
                             {filteredEntries.length === 0 && (
-                                <tr><td colSpan={22} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>{q ? 'No employees match your search.' : 'No active employees found.'}</td></tr>
+                                <tr><td colSpan={showPaidAmountFeature ? 25 : 23} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>{q ? 'No employees match your search.' : 'No active employees found.'}</td></tr>
                             )}
                         </tbody>
                     </table>
@@ -418,7 +495,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                 {editing && (
                     <EditEntryModal
                         entry={editing}
-                        totalDays={totalDays}
+                        showPaidAmountFeature={showPaidAmountFeature}
                         onClose={() => setEditing(null)}
                         onSaved={(updated) => {
                             setEntries(prev => prev.map(e => e.id === updated.id ? updated : e))
@@ -458,6 +535,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                 {markPaidEntry && (
                     <MarkPaidModal
                         entry={markPaidEntry}
+                        showPaidAmountFeature={showPaidAmountFeature}
                         onClose={() => setMarkPaidEntry(null)}
                         onSaved={(updated) => {
                             setEntries(prev => prev.map(e => e.id === updated.id ? updated : e))
@@ -465,6 +543,12 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                             onPaymentUpdate?.()
                         }}
                     />
+                )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+                {activityLogEntry && (
+                    <ActivityLogModal entry={activityLogEntry} onClose={() => setActivityLogEntry(null)} />
                 )}
             </AnimatePresence>
 
@@ -637,7 +721,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
     )
 }
 
-function EditEntryModal({ entry, totalDays, onClose, onSaved }: { entry: SalaryEntry; totalDays: number; onClose: () => void; onSaved: (e: SalaryEntry) => void }) {
+function EditEntryModal({ entry, showPaidAmountFeature, onClose, onSaved }: { entry: SalaryEntry; showPaidAmountFeature: boolean; onClose: () => void; onSaved: (e: SalaryEntry) => void }) {
     const { success: toastSuccess, error: toastError } = useToast()
     // Held as raw strings while editing (same pattern as the Requisition quantity field) so
     // deleting the "0" to type a fresh number leaves the field genuinely empty instead of
@@ -646,39 +730,36 @@ function EditEntryModal({ entry, totalDays, onClose, onSaved }: { entry: SalaryE
         extra_duty: String(entry.extra_duty),
         performance_bonus: String(entry.performance_bonus),
     })
-    const [paymentStatus, setPaymentStatus] = useState(entry.payment_status)
-    const [paymentMethod, setPaymentMethod] = useState(entry.payment_method || '')
-    const [paymentDate, setPaymentDate] = useState(entry.payment_date || '')
     const [saving, setSaving] = useState(false)
 
     const numAmounts = {
         extra_duty: Math.max(0, Number(amounts.extra_duty) || 0),
         performance_bonus: Math.max(0, Number(amounts.performance_bonus) || 0),
     }
+    // Paid Amount is no longer hand-edited here — it's only ever moved by the Mark as Paid
+    // modal's Full/Partial Payment flows (see MarkPaidModal), so this form just reflects
+    // whatever the entry already has and lets the settlement/partial-payment endpoints own it.
+    // Never surfaced for a pre-cutover sheet (showPaidAmountFeature false) — see
+    // PAID_AMOUNT_FEATURE_CUTOVER_MONTH in src/lib/payroll.ts.
+    const isPartialPaid = showPaidAmountFeature && entry.payment_status !== 'Paid' && entry.paid_amount > 0
 
     const netPayable = entry.basic_salary + numAmounts.extra_duty + entry.leave_surplus_bonus + entry.transportation_bill + entry.snacks_bill
         + numAmounts.performance_bonus + entry.festival_bonus - entry.fine - entry.advance - entry.product_buy - entry.loan - entry.provident_fund - entry.leave_deduction - entry.other_deduction
 
+    // Marking Paid/Partial Paid now lives exclusively in the dedicated "Mark as Paid" button
+    // next to the Status column (see MarkPaidModal) — this form only ever touches Extra Duty/
+    // Performance Bonus, so payment_status/payment_method/payment_date are never sent here and
+    // stay exactly as they already are on the entry.
     const handleSave = async () => {
         setSaving(true)
         try {
             const res = await fetch('/api/payroll/salary-entries', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    id: entry.id,
-                    ...numAmounts,
-                    payment_status: paymentStatus,
-                    payment_method: paymentMethod || null,
-                    payment_date: paymentDate || null,
-                }),
+                body: JSON.stringify({ id: entry.id, ...numAmounts }),
             })
             if (res.ok) {
-                onSaved({
-                    ...entry, ...numAmounts, payment_status: paymentStatus,
-                    payment_method: paymentMethod || null, payment_date: paymentDate || null,
-                    net_payable: netPayable,
-                })
+                onSaved({ ...entry, ...numAmounts, net_payable: netPayable })
                 toastSuccess('Salary entry updated')
             } else {
                 const err = await res.json()
@@ -704,7 +785,7 @@ function EditEntryModal({ entry, totalDays, onClose, onSaved }: { entry: SalaryE
                         <ReadOnlyField label="Department" value={entry.employee.department || '—'} />
                         <ReadOnlyField label="Attendance" value={`${entry.attendance.present} present, ${entry.attendance.absent} absent`} />
                         <ReadOnlyField label="Leave Days" value={String(entry.attendance.leave)} />
-                        <ReadOnlyField label="Leave Deduction" value={`৳${entry.leave_deduction.toLocaleString()}${entry.leave_deduction > 0 ? ` (${leaveDeductionCaption(entry, totalDays)})` : ''}`} />
+                        <ReadOnlyField label="Leave Deduction" value={`৳${entry.leave_deduction.toLocaleString()}${entry.leave_deduction > 0 ? ` (${leaveDeductionCaption(entry)})` : ''}`} />
                         <ReadOnlyField label="Basic Salary" value={`৳${entry.basic_salary.toLocaleString()}`} />
                         <ReadOnlyField label="Transportation Bill" value={`৳${entry.transportation_bill.toLocaleString()}`} />
                         <ReadOnlyField label="Snacks Bill" value={`৳${entry.snacks_bill.toLocaleString()}`} />
@@ -743,29 +824,33 @@ function EditEntryModal({ entry, totalDays, onClose, onSaved }: { entry: SalaryE
                         })}
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-                        <div>
-                            <label className="form-label">Payment Status</label>
-                            <select className="form-input" value={paymentStatus} disabled={entry.payment_status === 'Paid'}
-                                title={entry.payment_status === 'Paid' ? 'A Paid entry cannot be changed back to Unpaid' : undefined}
-                                onChange={e => setPaymentStatus(e.target.value as 'Paid' | 'Unpaid')}>
-                                <option value="Unpaid">Unpaid</option>
-                                <option value="Paid">Paid</option>
-                            </select>
+                    {/* Read-only payment info — never editable here (that's owned by the Mark as
+                        Paid button/modal next to the Status column, Full or Partial Payment tab).
+                        A fully Paid entry shows what it was settled with (Paid Amount/Payment
+                        Method/Payment Date); a Partial Paid entry shows what's been paid so far
+                        against what's still owed (Paid Amount/Due Amount/Payment Date) instead. A
+                        plain Unpaid entry with nothing paid yet shows neither — the Net Salary card
+                        right below already covers that case. Paid Amount itself is dropped from a
+                        pre-cutover sheet's Paid panel (Payment Method/Date still show — those
+                        predate this feature and are still real) since that entry's paid_amount is
+                        just the migration's default 0, never actually tracked, and would read as a
+                        false "৳0 paid" next to a genuinely settled Paid badge. */}
+                    {entry.payment_status === 'Paid' ? (
+                        <div style={{ display: 'grid', gridTemplateColumns: showPaidAmountFeature ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)', gap: '10px', padding: '12px', borderRadius: '10px', background: 'rgba(22,163,74,0.08)', border: '1px solid rgba(22,163,74,0.25)' }}>
+                            {showPaidAmountFeature && <ReadOnlyField label="Paid Amount" value={`৳${entry.paid_amount.toLocaleString()}`} />}
+                            <ReadOnlyField label="Payment Method" value={entry.payment_method || '—'} />
+                            <ReadOnlyField label="Payment Date" value={entry.payment_date ? new Date(entry.payment_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'} />
                         </div>
-                        <div>
-                            <label className="form-label">Payment Method</label>
-                            <select className="form-input" value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
-                                <option value="">—</option>
-                                {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
-                            </select>
+                    ) : isPartialPaid && (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', padding: '12px', borderRadius: '10px', background: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.25)' }}>
+                            <ReadOnlyField label="Paid Amount" value={`৳${entry.paid_amount.toLocaleString()}`} />
+                            <div>
+                                <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>Due Amount</div>
+                                <div style={{ fontSize: '0.8125rem', fontWeight: 600, marginTop: '2px', color: '#DC2626' }}>৳{Math.max(0, netPayable - entry.paid_amount).toLocaleString()}</div>
+                            </div>
+                            <ReadOnlyField label="Payment Date" value={entry.payment_date ? new Date(entry.payment_date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'} />
                         </div>
-                        <div>
-                            <label className="form-label">Payment Date</label>
-                            <input className="form-input" type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
-                        </div>
-                    </div>
-
+                    )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderRadius: '10px', background: 'rgba(22,163,74,0.08)' }}>
                         <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Net Salary</span>
                         <span style={{ fontSize: '1.25rem', fontWeight: 700, color: '#16A34A' }}>৳{netPayable.toLocaleString()}</span>
@@ -937,13 +1022,23 @@ function EditAttendanceModal({ entry, totalDays, onClose, onSaved }: { entry: Sa
 // lighter-weight alternative to opening the full EditEntryModal just to settle payment.
 // Reuses the same PUT /api/payroll/salary-entries endpoint, only sending payment_status/
 // payment_method/payment_date so the amount fields on the entry are left untouched.
-function MarkPaidModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClose: () => void; onSaved: (e: SalaryEntry) => void }) {
+// Two tabs sharing one modal: "Full Payment" settles the entry outright (existing behavior,
+// unchanged) — "Partial Payment" records one installment without touching payment_status, so
+// the entry stays Unpaid/shows as "Partial Paid" (see paymentStatusInfo) until a later Full
+// Payment (or enough partials) clears the Due Amount. Kept as one component/one modal instance
+// rather than two separate modals since they share the employee header, the overlay, and most
+// of the form chrome.
+function MarkPaidModal({ entry, showPaidAmountFeature, onClose, onSaved }: { entry: SalaryEntry; showPaidAmountFeature: boolean; onClose: () => void; onSaved: (e: SalaryEntry) => void }) {
     const { success: toastSuccess, error: toastError } = useToast()
+    const [tab, setTab] = useState<'full' | 'partial'>('full')
     const [paymentMethod, setPaymentMethod] = useState('Cash')
     const [paymentDate, setPaymentDate] = useState(getLocalDateString())
+    const [partialAmount, setPartialAmount] = useState('')
     const [saving, setSaving] = useState(false)
 
-    const handleSubmit = async () => {
+    const dueAmount = Math.max(0, entry.net_payable - entry.paid_amount)
+
+    const handleFullSubmit = async () => {
         if (!paymentMethod) { toastError('Please select a payment method'); return }
         setSaving(true)
         try {
@@ -953,11 +1048,48 @@ function MarkPaidModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClos
                 body: JSON.stringify({ id: entry.id, payment_status: 'Paid', payment_method: paymentMethod, payment_date: paymentDate }),
             })
             if (res.ok) {
-                onSaved({ ...entry, payment_status: 'Paid', payment_method: paymentMethod, payment_date: paymentDate })
+                const json = await res.json()
+                onSaved({
+                    ...entry, payment_status: 'Paid', payment_method: paymentMethod, payment_date: paymentDate,
+                    // The API auto-settles Paid Amount to the full Payable Salary when this quick
+                    // flow doesn't specify one itself — reflect that immediately so the sheet's
+                    // Paid Amount/Due Amount columns never show a stale, contradicting figure.
+                    ...(json.paid_amount !== undefined ? { paid_amount: json.paid_amount } : {}),
+                })
                 toastSuccess('Marked as Paid')
             } else {
                 const err = await res.json()
                 toastError(err.error || 'Failed to update')
+            }
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    const handlePartialSubmit = async () => {
+        const amount = Number(partialAmount)
+        if (!Number.isFinite(amount) || amount <= 0) { toastError('Enter a valid paid amount'); return }
+        if (amount > dueAmount) { toastError(`Paid amount cannot exceed the Due Amount (৳${dueAmount.toLocaleString()})`); return }
+        setSaving(true)
+        try {
+            const res = await fetch('/api/payroll/salary-entries', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: entry.id, partial_payment: { amount, method: paymentMethod || null, date: paymentDate } }),
+            })
+            if (res.ok) {
+                const json = await res.json()
+                onSaved({
+                    ...entry,
+                    payment_method: paymentMethod || entry.payment_method,
+                    payment_date: paymentDate,
+                    ...(json.paid_amount !== undefined ? { paid_amount: json.paid_amount } : {}),
+                })
+                toastSuccess('Partial payment recorded')
+                onClose()
+            } else {
+                const err = await res.json()
+                toastError(err.error || 'Failed to record payment')
             }
         } finally {
             setSaving(false)
@@ -973,23 +1105,136 @@ function MarkPaidModal({ entry, onClose, onSaved }: { entry: SalaryEntry; onClos
                     <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: 'var(--color-text-tertiary)' }}><IconX size={18} /></button>
                 </div>
 
-                <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    <div>
-                        <label className="form-label">Payment Method *</label>
-                        <select className="form-input" value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
-                            <option value="">Select method...</option>
-                            {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
-                        </select>
+                {/* Partial Payment only exists from PAID_AMOUNT_FEATURE_CUTOVER_MONTH onward (see
+                    src/lib/payroll.ts) — an older sheet never tracked Paid Amount, so this tab
+                    switcher (and the tab itself) stays hidden and this modal falls back to
+                    exactly its original single-purpose "Mark as Paid" behavior. */}
+                {showPaidAmountFeature && (
+                    <div style={{ display: 'flex', gap: '4px', padding: '12px 20px 0' }}>
+                        {(['full', 'partial'] as const).map(t => (
+                            <button key={t} onClick={() => setTab(t)}
+                                style={{
+                                    flex: 1, padding: '8px 0', border: 'none', borderRadius: '8px 8px 0 0', cursor: 'pointer',
+                                    fontSize: '0.8125rem', fontWeight: 600,
+                                    background: tab === t ? 'var(--color-bg-secondary)' : 'transparent',
+                                    color: tab === t ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
+                                    borderBottom: tab === t ? '2px solid #16A34A' : '2px solid transparent',
+                                }}>
+                                {t === 'full' ? 'Full Payment' : 'Partial Payment'}
+                            </button>
+                        ))}
                     </div>
-                    <div>
-                        <label className="form-label">Payment Date *</label>
-                        <input className="form-input" type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
-                    </div>
-                </div>
+                )}
 
+                {(tab === 'full' || !showPaidAmountFeature) ? (
+                    <>
+                        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                            <div>
+                                <label className="form-label">Payment Method *</label>
+                                <select className="form-input" value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
+                                    <option value="">Select method...</option>
+                                    {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="form-label">Payment Date *</label>
+                                <input className="form-input" type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
+                            </div>
+                        </div>
+                        <div className="modal-footer">
+                            <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                            <button className="btn btn-primary" disabled={saving} onClick={handleFullSubmit}>{saving ? 'Saving...' : 'Mark as Paid'}</button>
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'var(--color-bg-secondary)', borderRadius: '8px' }}>
+                                <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Due Amount</span>
+                                <span style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#DC2626' }}>৳{dueAmount.toLocaleString()}</span>
+                            </div>
+                            <div>
+                                <label className="form-label">Paid Amount *</label>
+                                <input className="form-input" type="text" inputMode="decimal" value={partialAmount}
+                                    onChange={e => { if (/^\d*\.?\d*$/.test(e.target.value)) setPartialAmount(e.target.value) }} placeholder="0" />
+                            </div>
+                            <div>
+                                <label className="form-label">Payment Method</label>
+                                <select className="form-input" value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
+                                    <option value="">Select method...</option>
+                                    {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="form-label">Payment Date *</label>
+                                <input className="form-input" type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
+                            </div>
+                        </div>
+                        <div className="modal-footer">
+                            <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                            <button className="btn btn-primary" disabled={saving} onClick={handlePartialSubmit}>{saving ? 'Saving...' : 'Record Payment'}</button>
+                        </div>
+                    </>
+                )}
+            </motion.div>
+        </div>
+    )
+}
+
+interface PayrollLogEntry {
+    id: string
+    details: { actor_name?: string; changes?: string[] } | null
+    created_at: string
+}
+
+// Change history for one salary entry — reads the same generic audit_log table Daily
+// Attendance's own edit modal already writes to (module scoped to 'payroll' here instead of
+// 'attendance'), populated by the Activity Log entries PUT /api/payroll/salary-entries now
+// writes on every save (see that route for the exact "before → after" comparison logic).
+function ActivityLogModal({ entry, onClose }: { entry: SalaryEntry; onClose: () => void }) {
+    const [logs, setLogs] = useState<PayrollLogEntry[]>([])
+    const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+        setLoading(true)
+        fetch(`/api/activity-log?module=payroll&target_id=${entry.id}`)
+            .then(r => r.json())
+            .then(d => { if (Array.isArray(d)) setLogs(d) })
+            .catch(() => { })
+            .finally(() => setLoading(false))
+    }, [entry.id])
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <motion.div initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 10 }}
+                className="modal" style={{ maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                    <div className="modal-title">{entry.employee.name} — Activity Log</div>
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: 'var(--color-text-tertiary)' }}><IconX size={18} /></button>
+                </div>
+                <div className="modal-body">
+                    {loading ? (
+                        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', textAlign: 'center', padding: '16px' }}>Loading...</div>
+                    ) : logs.length === 0 ? (
+                        <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)', textAlign: 'center', padding: '16px' }}>No changes recorded yet</div>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '400px', overflow: 'auto' }}>
+                            {logs.map(log => (
+                                <div key={log.id} style={{ padding: '10px 12px', background: 'var(--color-bg-secondary)', borderRadius: '8px', fontSize: '0.8125rem' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
+                                        <span style={{ fontWeight: 600 }}>{log.details?.actor_name || '?'}</span>
+                                        <span title={timeAgo(log.created_at)} style={{ color: 'var(--color-text-tertiary)', fontSize: '0.75rem', flexShrink: 0 }}>{formatLogDateTime(log.created_at)}</span>
+                                    </div>
+                                    <div style={{ color: 'var(--color-text-secondary)' }}>
+                                        {log.details?.changes?.join(', ') || 'Updated'}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
                 <div className="modal-footer">
-                    <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-                    <button className="btn btn-primary" disabled={saving} onClick={handleSubmit}>{saving ? 'Saving...' : 'Mark as Paid'}</button>
+                    <button className="btn btn-secondary" onClick={onClose}>Close</button>
                 </div>
             </motion.div>
         </div>
