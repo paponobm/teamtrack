@@ -9,10 +9,10 @@ export async function GET() {
 
     const { rows } = await auth.db.query(
         `SELECT lr.id, lr.reason,
-            json_build_object('id', e.id, 'name', e.name, 'avatar_url', e.avatar_url, 'designation', e.designation, 'is_active', e.is_active) AS employee
+            json_build_object('id', e.id, 'name', e.name, 'avatar_url', e.avatar_url, 'designation', e.designation) AS employee
          FROM leave_records lr
          LEFT JOIN employees e ON e.id = lr.employee_id
-         WHERE lr.leave_date = CURRENT_DATE AND lr.status = 'approved'`
+         WHERE lr.leave_date = CURRENT_DATE AND lr.status = 'approved' AND e.is_active = true`
     )
 
     return NextResponse.json(rows)
