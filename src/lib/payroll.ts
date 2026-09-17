@@ -206,25 +206,42 @@ export function computeLeaveDeduction(basicSalary: number, presentDays: number, 
 // cutover onward: an employee who takes FEWER Leave days than their monthly allowance is
 // credited one day's pay (Basic Salary / STANDARD_MONTH_DAYS) for each such day given up — e.g.
 // an 8-day-allowance employee who only takes 7 Leave days gets 1 day's bonus, regardless of the
-// actual calendar month length or how many of the remaining days were genuinely worked vs.
-// Absent (Absences are already docked separately by Leave Deduction's present-vs-required check
-// above — deliberately NOT re-derived from presentDays here, since doing so would tie this bonus
-// to the sheet month's actual day count and silently hand out an extra "free" bonus day in every
-// 31-day month purely from the calendar being longer than the STANDARD_MONTH_DAYS baseline, even
-// for an employee who used their leave exactly down to the allowance and did nothing "extra").
+// actual calendar month length (deliberately NOT re-derived from presentDays/daysInMonth, since
+// doing so would silently hand out an extra "free" bonus day in every 31-day month purely from
+// the calendar being longer than the STANDARD_MONTH_DAYS baseline).
 // Shown as an addition to Extra Duty on the sheet (see SalarySheet.tsx), but deliberately kept as
 // its own separate live-computed value rather than being merged into the stored `extra_duty`
 // column itself — that column is also a manually-typed admin field (real extra-duty work), and
 // baking a live-computed bonus into it would double-count on the next edit/save round-trip.
-// `leaveDays` should be the same effective value shown in the Attendance (Day) column
-// (attendance_leave_override when set, otherwise the live-computed count) — same rule
-// computeLeaveDeduction's `leaveDays` param already follows.
+// `leaveDays` should be the same effective value shown in the Attendance (Day) column's Leave
+// figure (attendance_leave_override when set, otherwise the live-computed count, which itself
+// already folds Absent days in for a cutover-eligible month — see effectiveLeaveDays below) —
+// same rule computeLeaveDeduction's `leaveDays` param already follows. Deliberately does NOT
+// take a separate absentDays parameter of its own: Absent must count the same as Leave for this
+// bonus (an employee who's simply Absent hasn't "given up" any Leave, but they still didn't
+// work, so a low Leave count alone must never earn them a bonus), and folding it in once at the
+// shared effectiveLeaveDays() call keeps that rule in exactly one place instead of every caller
+// needing to remember to combine leave+absent themselves.
 export function computeLeaveSurplusBonus(basicSalary: number, leaveDays: number, allowedLeaveDays: number, month: string): number {
     if (!usesPresentDayLeaveLogic(month)) return 0
     const surplus = allowedLeaveDays - leaveDays
     if (surplus <= 0) return 0
     const perDayRate = (Number(basicSalary) || 0) / STANDARD_MONTH_DAYS
     return Math.round(surplus * perDayRate * 100) / 100
+}
+
+// The Leave figure used everywhere else in this file (the Attendance (Day) column's "Leave"
+// count, Leave Deduction's `leaveDays` param, and computeLeaveSurplusBonus's `leaveDays` param
+// above) — from LEAVE_LOGIC_V2_CUTOVER_MONTH onward, Absent days are folded into it, since an
+// employee who's simply Absent still didn't work that day and must never be treated as having
+// "used less Leave than their allowance" just because those missing days weren't formally
+// recorded as Leave. Before the cutover, Absent and Leave stay the separate categories they
+// always were (the original flat rule never combined them). `leaveOverride` is a Super Admin's
+// own typed correction (attendance_leave_override) — taken verbatim, never re-merged with
+// Absent on top, since that figure already IS the number they explicitly want shown/used.
+export function effectiveLeaveDays(rawLeave: number, rawAbsent: number, leaveOverride: number | null | undefined, month: string): number {
+    if (leaveOverride != null) return leaveOverride
+    return usesPresentDayLeaveLogic(month) ? rawLeave + rawAbsent : rawLeave
 }
 
 // Net Payable = Basic Salary + Extra Duty + Leave Surplus Bonus + Transportation Bill + Snacks

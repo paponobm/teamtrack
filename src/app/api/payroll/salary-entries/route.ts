@@ -1,6 +1,6 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { getMonthRangeFromString } from '@/lib/dateRange'
-import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus, createOrSyncSalaryExpense, SALARY_EXPENSE_CATEGORY, usesPaidAmountFeature } from '@/lib/payroll'
+import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus, createOrSyncSalaryExpense, SALARY_EXPENSE_CATEGORY, usesPaidAmountFeature, effectiveLeaveDays } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
 import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
@@ -219,7 +219,7 @@ export async function PUT(request: Request) {
             attendance = {
                 ...computed,
                 present: data.attendance_present_override ?? computed.present,
-                leave: data.attendance_leave_override ?? computed.leave,
+                leave: effectiveLeaveDays(computed.leave, computed.absent, data.attendance_leave_override, sheet.month),
             }
             leaveDeductionForResponse = computeLeaveDeduction(Number(data.basic_salary) || 0, attendance.present, attendance.leave, monthlyLeaveAllowance, sheet.month)
             leaveSurplusBonusForResponse = computeLeaveSurplusBonus(Number(data.basic_salary) || 0, attendance.leave, monthlyLeaveAllowance, sheet.month)
@@ -328,7 +328,7 @@ export async function PUT(request: Request) {
             // Same effective Present/Leave counts the Attendance (Day) column shows (override,
             // else computed) — the linked Finance expense amount must match Payable Salary exactly.
             const effectivePresent = data.attendance_present_override ?? (attendanceStats[data.employee_id]?.present || 0)
-            const effectiveLeave = data.attendance_leave_override ?? (attendanceStats[data.employee_id]?.leave || 0)
+            const effectiveLeave = effectiveLeaveDays(attendanceStats[data.employee_id]?.leave || 0, attendanceStats[data.employee_id]?.absent || 0, data.attendance_leave_override, sheet.month)
             const leaveDeduction = computeLeaveDeduction(Number(data.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, sheet.month)
             const leaveSurplusBonus = computeLeaveSurplusBonus(Number(data.basic_salary) || 0, effectiveLeave, monthlyLeaveAllowance, sheet.month)
             const netPayable = computeNetPayable(

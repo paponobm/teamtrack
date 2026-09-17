@@ -1,5 +1,5 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus, usesPresentDayLeaveLogic } from '@/lib/payroll'
+import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus, usesPresentDayLeaveLogic, effectiveLeaveDays } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
 import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
@@ -163,10 +163,11 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
         const emiDetail = emis[r.employee_id] || { total: 0, records: [] }
         const providentFundDetail = providentFunds[r.employee_id] || { total: 0, records: [] }
         // Same effective Present/Leave counts the Attendance (Day) columns show — override if a
-        // Super Admin has set one, otherwise the live-computed value. The deduction is driven by
-        // Present (worked days short of the required count), not Leave alone — see
-        // computeLeaveDeduction for why.
-        const effectiveLeave = r.attendance_leave_override ?? (attendance[r.employee_id]?.leave || 0)
+        // Super Admin has set one, otherwise the live-computed value (Absent folded in for a
+        // cutover-eligible month — see effectiveLeaveDays). The deduction is driven by Present
+        // (worked days short of the required count), not Leave alone — see computeLeaveDeduction
+        // for why.
+        const effectiveLeave = effectiveLeaveDays(attendance[r.employee_id]?.leave || 0, attendance[r.employee_id]?.absent || 0, r.attendance_leave_override, month)
         const effectivePresent = r.attendance_present_override ?? (attendance[r.employee_id]?.present || 0)
         const monthlyLeaveAllowance = Number(r.employee?.monthly_leave_allowance) || 0
         const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, month)

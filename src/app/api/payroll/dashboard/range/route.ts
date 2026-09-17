@@ -1,5 +1,5 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
-import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus, usesPaidAmountFeature } from '@/lib/payroll'
+import { getAttendanceStatsForMonth, getFineTotalsForMonth, getAdvanceDetailsForMonth, computeNetPayable, computeLeaveDeduction, computeLeaveSurplusBonus, usesPaidAmountFeature, effectiveLeaveDays } from '@/lib/payroll'
 import { getProductBuyDetailsForMonth } from '@/lib/productBuys'
 import { getEmiLoanDetailsForMonth } from '@/lib/emis'
 import { getProvidentFundDetailsForMonth } from '@/lib/providentFunds'
@@ -119,7 +119,7 @@ export async function GET(request: Request) {
             // computeLeaveSurplusBonus in src/lib/payroll.ts for why Present (not Leave alone)
             // drives this, and why a surplus bonus exists alongside the deduction.
             const effectivePresent = r.attendance_present_override ?? (attendanceStats[r.employee_id]?.present || 0)
-            const effectiveLeave = r.attendance_leave_override ?? (attendanceStats[r.employee_id]?.leave || 0)
+            const effectiveLeave = effectiveLeaveDays(attendanceStats[r.employee_id]?.leave || 0, attendanceStats[r.employee_id]?.absent || 0, r.attendance_leave_override, sheet.month)
             const monthlyLeaveAllowance = Number(r.employee?.monthly_leave_allowance) || 0
             const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, sheet.month)
             const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.basic_salary) || 0, effectiveLeave, monthlyLeaveAllowance, sheet.month)
