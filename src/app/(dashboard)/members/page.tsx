@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import MemberModal from '@/components/members/MemberModal'
+import MembersExportModal from '@/components/members/MembersExportModal'
 import { usePermissions } from '@/lib/PermissionsContext'
 import { useToast } from '@/lib/ToastContext'
 import {
@@ -95,6 +96,7 @@ export default function MembersPage() {
     const [deactivatingMember, setDeactivatingMember] = useState<Employee | null>(null)
     const [terminationDateInput, setTerminationDateInput] = useState('')
     const [deactivating, setDeactivating] = useState(false)
+    const [showExportModal, setShowExportModal] = useState(false)
     const [initialTab, setInitialTab] = useState<'profile' | 'access' | 'logs' | 'performance'>('profile')
     const [birthdayMembers, setBirthdayMembers] = useState<BirthdayMember[]>([])
     const [showBirthday, setShowBirthday] = useState(true)
@@ -373,9 +375,16 @@ export default function MembersPage() {
                     <h1 className="page-title">Members</h1>
                     <p className="page-subtitle">{members.length} team member{members.length !== 1 ? 's' : ''}</p>
                 </div>
-                <button className="btn btn-primary" onClick={handleAdd} id="add-member-btn">
-                    <IconPlus size={16} /> Add Member
-                </button>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                    {isSuperAdmin && (
+                        <button className="btn btn-secondary" onClick={() => setShowExportModal(true)}>
+                            <IconFileText size={16} /> Export PDF
+                        </button>
+                    )}
+                    <button className="btn btn-primary" onClick={handleAdd} id="add-member-btn">
+                        <IconPlus size={16} /> Add Member
+                    </button>
+                </div>
             </motion.div>
 
             {/* Filters */}
@@ -720,6 +729,13 @@ export default function MembersPage() {
                             </div>
                         </motion.div>
                     </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Export Members (custom column-order PDF export) */}
+            <AnimatePresence>
+                {showExportModal && (
+                    <MembersExportModal members={members} onClose={() => setShowExportModal(false)} />
                 )}
             </AnimatePresence>
 
