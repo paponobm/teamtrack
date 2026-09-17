@@ -19,6 +19,8 @@ export default function FloatingCalculator() {
     // them across reloads so the button stays wherever they left it.
     const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
     const dragState = useRef<{ startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null)
+    const panelRef = useRef<HTMLDivElement>(null)
+    const buttonRef = useRef<HTMLButtonElement>(null)
 
     useEffect(() => {
         try {
@@ -79,6 +81,21 @@ export default function FloatingCalculator() {
         if (!isOpen) return
         const interval = setInterval(() => setCursorVisible(v => !v), 530)
         return () => clearInterval(interval)
+    }, [isOpen])
+
+    // Clicking anywhere outside the open panel (and outside the toggle button itself, which
+    // already handles its own open/close on click) closes it — same behavior as any other
+    // floating popover/menu in the app.
+    useEffect(() => {
+        if (!isOpen) return
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as Node
+            if (panelRef.current?.contains(target)) return
+            if (buttonRef.current?.contains(target)) return
+            setIsOpen(false)
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
     }, [isOpen])
 
     const handleInput = useCallback((char: string) => {
@@ -180,6 +197,32 @@ export default function FloatingCalculator() {
         }
     }, [expr])
 
+    // Keyboard support for the standard keypad — mirrors exactly what each button already does,
+    // so it can never drift out of sync with click behavior. Skipped while focus is inside any
+    // input/textarea/contenteditable (e.g. typing in the Converter panel's own fields, or in a
+    // page field elsewhere while the calculator happens to be left open) so it never hijacks
+    // normal typing there.
+    useEffect(() => {
+        if (!isOpen || activePanel !== 'main') return
+        const handleKeyDown = (e: KeyboardEvent) => {
+            const target = e.target as HTMLElement | null
+            if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+            const key = e.key
+            if (/^[0-9]$/.test(key)) { e.preventDefault(); handleInput(key); return }
+            if (key === '.') { e.preventDefault(); handleInput('.'); return }
+            if (key === '+') { e.preventDefault(); handleInput('+'); return }
+            if (key === '-') { e.preventDefault(); handleInput('-'); return }
+            if (key === '*') { e.preventDefault(); handleInput('×'); return }
+            if (key === '/') { e.preventDefault(); handleInput('÷'); return }
+            if (key === '%') { e.preventDefault(); handleInput('%'); return }
+            if (key === '(' || key === ')') { e.preventDefault(); handleParens(); return }
+            if (key === 'Enter' || key === '=') { e.preventDefault(); handleEquals(); return }
+            if (key === 'Backspace') { e.preventDefault(); handleBackspace(); return }
+        }
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [isOpen, activePanel, handleInput, handleParens, handleEquals, handleBackspace])
+
     const getButtonStyle = (bg: string, color: string): React.CSSProperties => ({
         width: '100%',
         aspectRatio: '1/1',
@@ -203,6 +246,7 @@ export default function FloatingCalculator() {
             {/* Floating Toggle Button — draggable; a small movement (mouse or touch) repositions
                 it anywhere on screen, while a plain click/tap still opens the calculator. */}
             <motion.button
+                ref={buttonRef}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
@@ -241,6 +285,7 @@ export default function FloatingCalculator() {
             <AnimatePresence>
                 {isOpen && (
                     <motion.div
+                        ref={panelRef}
                         initial={{ opacity: 0, y: 20, scale: 0.9 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 20, scale: 0.9 }}
