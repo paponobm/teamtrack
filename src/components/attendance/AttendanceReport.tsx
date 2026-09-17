@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { getMonthRangeFromString } from '@/lib/dateRange'
 import { IconChevronLeft, IconChevronRight, IconSearch, IconX, IconDownload } from '@/components/icons/Icons'
 import EmployeeMonthDetailModal from './EmployeeMonthDetailModal'
+import OutBadge from '@/components/common/OutBadge'
 
 interface EmployeeSummary {
     id: string
@@ -12,6 +13,7 @@ interface EmployeeSummary {
     employee_id: string | null
     avatar_url: string | null
     duty_start_time: string | null
+    is_active: boolean
     department: string | null
     total_attendance: number
     total_late: number
@@ -254,7 +256,10 @@ export default function AttendanceReport() {
                                                 ) : (emp.name || '?')[0]?.toUpperCase()}
                                             </div>
                                             <div>
-                                                <div style={{ fontWeight: 500 }}>{emp.name || '-'}</div>
+                                                <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                    {emp.name || '-'}
+                                                    {emp.is_active === false && <OutBadge />}
+                                                </div>
                                                 {(emp.employee_id || emp.department) && (
                                                     <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
                                                         {emp.employee_id}

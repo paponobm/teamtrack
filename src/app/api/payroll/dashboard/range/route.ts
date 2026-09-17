@@ -80,7 +80,7 @@ export async function GET(request: Request) {
                 se.performance_bonus, se.festival_bonus, se.other_deduction, se.payment_status, se.paid_amount,
                 se.attendance_present_override, se.attendance_leave_override,
                 json_build_object('basic_salary_effective_month', e.basic_salary_effective_month,
-                    'monthly_leave_allowance', e.monthly_leave_allowance) AS employee
+                    'monthly_leave_allowance', e.monthly_leave_allowance, 'termination_date', e.termination_date) AS employee
              FROM salary_entries se LEFT JOIN employees e ON e.id = se.employee_id
              WHERE se.salary_sheet_id = $1`,
             [sheet.id]
@@ -89,10 +89,13 @@ export async function GET(request: Request) {
         // Same visibility rule as the Salary Sheet itself (see buildSheetResponse in
         // src/app/api/payroll/salary-sheets/route.ts): an employee whose Basic Salary Starting
         // Month isn't configured yet, or hasn't been reached by this sheet's month, doesn't
-        // count here either.
+        // count here either — and one terminated before this sheet's month doesn't either.
         const rows = entries.filter(r => {
             const startMonth: string | null = r.employee?.basic_salary_effective_month || null
-            return !!startMonth && sheet.month >= startMonth
+            if (!startMonth || sheet.month < startMonth) return false
+            const terminationMonth: string | null = r.employee?.termination_date ? String(r.employee.termination_date).slice(0, 7) : null
+            if (terminationMonth && sheet.month > terminationMonth) return false
+            return true
         })
         if (rows.length === 0) continue
 

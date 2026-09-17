@@ -6,11 +6,12 @@ import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString } from '@/lib/dateRange'
 import { IconFileText, IconX, IconPrinter, IconCheckCircle, IconEdit, IconTrash, IconClock } from '@/components/icons/Icons'
 import PaySlipModal from './PaySlipModal'
+import OutBadge from '@/components/common/OutBadge'
 
 export interface SalaryEntry {
     id: string
     employee_id: string
-    employee: { id: string; name: string; employee_id: string | null; avatar_url: string | null; joining_date: string | null; department: string | null }
+    employee: { id: string; name: string; employee_id: string | null; avatar_url: string | null; joining_date: string | null; department: string | null; is_active: boolean }
     basic_salary: number
     extra_duty: number
     // Credited for taking fewer Leave days than monthly_leave_allowance (see
@@ -338,7 +339,10 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                                 ) : (e.employee.name || 'U')[0].toUpperCase()}
                                             </div>
                                             <div>
-                                                <div style={{ fontWeight: 600 }}>{e.employee.name}</div>
+                                                <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                    {e.employee.name}
+                                                    {!e.employee.is_active && <OutBadge />}
+                                                </div>
                                                 <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{e.employee.employee_id || '—'}</div>
                                             </div>
                                         </div>

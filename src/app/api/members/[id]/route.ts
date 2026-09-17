@@ -176,9 +176,19 @@ export async function DELETE(
         return NextResponse.json({ error: 'You cannot deactivate a user at your own or a higher access level' }, { status: 403 })
     }
 
+    // Termination Date — required, since it's what drives whether this employee still shows up
+    // in a given month's Salary Sheet, Attendance Report, or the Mark Leave employee picker (see
+    // the matching termination_date filters in those routes): anything dated on/before it still
+    // shows them (they were employed then), anything after does not.
+    const body = await request.json().catch(() => ({}))
+    const terminationDate = body?.termination_date
+    if (!terminationDate || !/^\d{4}-\d{2}-\d{2}$/.test(terminationDate)) {
+        return NextResponse.json({ error: 'termination_date is required (YYYY-MM-DD)' }, { status: 400 })
+    }
+
     const { rows: [data] } = await db.query(
-        `UPDATE employees SET is_active = false, updated_at = NOW() WHERE id = $1 RETURNING *`,
-        [id]
+        `UPDATE employees SET is_active = false, termination_date = $2, updated_at = NOW() WHERE id = $1 RETURNING *`,
+        [id, terminationDate]
     )
 
     if (!data) {

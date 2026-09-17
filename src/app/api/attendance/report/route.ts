@@ -39,18 +39,27 @@ export async function GET(request: Request) {
         // Same "not configured yet = hidden" rule as the Daily Attendance list and the backfill
         // itself (see src/lib/attendanceBackfill.ts) — an employee with no Duty Schedule set has
         // no real reporting time to compute Present/Late/Absent against.
-        const empConditions = [`e.is_active = true`, `e.duty_start_time IS NOT NULL`, `e.duty_end_time IS NOT NULL`]
-        const empParams: unknown[] = []
+        const empParams: unknown[] = [startDate, endDate]
+        const startIdx = 1
+        const endIdx = 2
+        // A currently-active employee always shows (even with zero attendance this range, same
+        // as before) — a deactivated one only shows if they actually have an attendance record
+        // somewhere in this exact range, so a former employee's report footprint doesn't clutter
+        // every unrelated month with an all-zero row forever. Once they do show, the frontend
+        // marks them with the "OUT" badge (see is_active in the SELECT/response below).
+        const empConditions = [
+            `(e.is_active = true OR EXISTS (SELECT 1 FROM attendance ax WHERE ax.employee_id = e.id AND ax.date >= $${startIdx} AND ax.date <= $${endIdx}))`,
+            `e.duty_start_time IS NOT NULL`, `e.duty_end_time IS NOT NULL`,
+        ]
         if (employeeId) { empParams.push(employeeId); empConditions.push(`e.id = $${empParams.length}`) }
         if (search) { empParams.push(`%${search}%`); empConditions.push(`LOWER(e.name) LIKE $${empParams.length}`) }
-        empParams.push(startDate)
-        const startIdx = empParams.length
-        empParams.push(endDate)
-        const endIdx = empParams.length
         // Someone who joined after this report's own end date wasn't employed at all during the
         // selected month — leave them off entirely, same "not employed yet = hidden" rule the
         // Payroll Sheet already applies via basic_salary_effective_month.
         empConditions.push(`(e.joining_date IS NULL OR e.joining_date <= $${endIdx})`)
+        // Mirror at the other end: someone terminated before this report's own start date wasn't
+        // employed at all during the selected range either.
+        empConditions.push(`(e.termination_date IS NULL OR e.termination_date >= $${startIdx})`)
 
         let having = ''
         if (status === 'present') having = `HAVING COUNT(*) FILTER (WHERE a.status IN ('present','late')) > 0`
@@ -59,7 +68,7 @@ export async function GET(request: Request) {
         else if (status === 'leave') having = `HAVING COUNT(*) FILTER (WHERE a.status IN ('leave','half_day','on_duty')) > 0`
 
         const { rows } = await db.query(
-            `SELECT e.id, e.name, e.employee_id, e.avatar_url, e.duty_start_time, d.name AS department_name,
+            `SELECT e.id, e.name, e.employee_id, e.avatar_url, e.duty_start_time, e.is_active, d.name AS department_name,
                 COUNT(*) FILTER (WHERE a.status IN ('present','late')) AS total_attendance,
                 COUNT(*) FILTER (WHERE a.status = 'late') AS total_late,
                 COUNT(*) FILTER (WHERE a.status = 'absent') AS total_absent,
@@ -73,8 +82,9 @@ export async function GET(request: Request) {
              LEFT JOIN departments d ON d.id = e.department_id
              LEFT JOIN attendance a ON a.employee_id = e.id AND a.date >= $${startIdx} AND a.date <= $${endIdx}
                 AND (e.joining_date IS NULL OR a.date >= e.joining_date)
+                AND (e.termination_date IS NULL OR a.date <= e.termination_date)
              WHERE ${empConditions.join(' AND ')}
-             GROUP BY e.id, d.name
+             GROUP BY e.id, e.is_active, d.name
              ${having}
              ORDER BY e.sort_order ASC NULLS LAST, e.created_at DESC`,
             empParams
@@ -104,6 +114,7 @@ export async function GET(request: Request) {
                 employee_id: r.employee_id,
                 avatar_url: r.avatar_url,
                 duty_start_time: r.duty_start_time,
+                is_active: r.is_active,
                 department: r.department_name,
                 total_attendance: Number(r.total_attendance),
                 total_late: Number(r.total_late),
@@ -125,7 +136,7 @@ export async function GET(request: Request) {
         return NextResponse.json({ employees: employeesOut, counts })
     }
 
-    const conditions = [`a.date >= $1`, `a.date <= $2`, `(e.joining_date IS NULL OR a.date >= e.joining_date)`]
+    const conditions = [`a.date >= $1`, `a.date <= $2`, `(e.joining_date IS NULL OR a.date >= e.joining_date)`, `(e.termination_date IS NULL OR a.date <= e.termination_date)`]
     const params: unknown[] = [startDate, endDate]
     if (employeeId) { params.push(employeeId); conditions.push(`a.employee_id = $${params.length}`) }
     if (status) { params.push(status); conditions.push(`a.status = $${params.length}`) }

@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import OutBadge from '@/components/common/OutBadge'
 
 interface LeaveRecord {
     id: string
@@ -13,6 +14,7 @@ interface LeaveRecord {
         name: string
         avatar_url: string | null
         designation?: string
+        is_active?: boolean
     } | null
 }
 
@@ -54,11 +56,11 @@ export default function LeaveCalendar({ records }: { records: LeaveRecord[] }) {
 
     // Leave summary: who took the most approved days this month.
     const leaveSummary = useMemo(() => {
-        const tally: Record<string, { id: string; name: string; avatar_url: string | null; days: number }> = {}
+        const tally: Record<string, { id: string; name: string; avatar_url: string | null; is_active: boolean; days: number }> = {}
         monthLeaves.forEach(r => {
             const name = r.employee?.name || 'Unknown'
             const eid = r.employee?.id || r.employee_id
-            if (!tally[eid]) tally[eid] = { id: eid, name, avatar_url: r.employee?.avatar_url || null, days: 0 }
+            if (!tally[eid]) tally[eid] = { id: eid, name, avatar_url: r.employee?.avatar_url || null, is_active: r.employee?.is_active !== false, days: 0 }
             tally[eid].days++
         })
         return Object.values(tally).sort((a, b) => b.days - a.days)
@@ -164,7 +166,10 @@ export default function LeaveCalendar({ records }: { records: LeaveRecord[] }) {
                                         : (p.name[0]?.toUpperCase() || '?')}
                                 </div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontSize: '0.8125rem', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                                    <div style={{ fontSize: '0.8125rem', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+                                        {!p.is_active && <OutBadge />}
+                                    </div>
                                     <div style={{ height: 5, borderRadius: 3, background: 'var(--color-bg-secondary)', marginTop: '4px', overflow: 'hidden' }}>
                                         <div style={{ height: '100%', width: `${maxDays ? (p.days / maxDays) * 100 : 0}%`, background: 'var(--color-primary)', borderRadius: 3, transition: 'width 0.4s' }} />
                                     </div>
@@ -225,7 +230,10 @@ export default function LeaveCalendar({ records }: { records: LeaveRecord[] }) {
                                                 : (l.employee?.name?.[0]?.toUpperCase() || '?')}
                                         </div>
                                         <div>
-                                            <div style={{ fontSize: '0.875rem', fontWeight: 600 }}>{l.employee?.name}</div>
+                                            <div style={{ fontSize: '0.875rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                {l.employee?.name}
+                                                {l.employee?.is_active === false && <OutBadge />}
+                                            </div>
                                             {l.employee?.designation && <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{l.employee.designation}</div>}
                                         </div>
                                     </div>

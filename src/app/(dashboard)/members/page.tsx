@@ -39,6 +39,7 @@ interface Employee {
     photo_url: string | null
     is_active: boolean
     joining_date: string
+    termination_date: string | null
     department: Department | null
     role: Role | null
     address: string
@@ -87,6 +88,13 @@ export default function MembersPage() {
     const [showModal, setShowModal] = useState(false)
     const [editingMember, setEditingMember] = useState<Employee | null>(null)
     const [viewingMember, setViewingMember] = useState<Employee | null>(null)
+    // Deactivate now requires a Termination Date (drives whether this employee still shows up
+    // in a later month's Salary Sheet, Attendance Report, or the Mark Leave picker — see the
+    // termination_date filters in those routes), so it opens a small confirm modal instead of
+    // deactivating on a plain confirm().
+    const [deactivatingMember, setDeactivatingMember] = useState<Employee | null>(null)
+    const [terminationDateInput, setTerminationDateInput] = useState('')
+    const [deactivating, setDeactivating] = useState(false)
     const [initialTab, setInitialTab] = useState<'profile' | 'access' | 'logs' | 'performance'>('profile')
     const [birthdayMembers, setBirthdayMembers] = useState<BirthdayMember[]>([])
     const [showBirthday, setShowBirthday] = useState(true)
@@ -227,15 +235,30 @@ export default function MembersPage() {
         setShowModal(true)
         setViewingMember(null)
     }
-    const handleDeactivate = async (id: string) => {
-        if (!confirm('Are you sure you want to deactivate this member?')) return
-        const res = await fetch(`/api/members/${id}`, { method: 'DELETE' })
-        if (!res.ok) { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Failed to deactivate member'); return }
-        toast.success('Member deactivated')
-        fetchMembers(); setViewingMember(null)
+    const openDeactivateModal = (member: Employee) => {
+        setDeactivatingMember(member)
+        setTerminationDateInput(new Date().toISOString().slice(0, 10))
+    }
+    const confirmDeactivate = async () => {
+        if (!deactivatingMember || !terminationDateInput) return
+        setDeactivating(true)
+        try {
+            const res = await fetch(`/api/members/${deactivatingMember.id}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ termination_date: terminationDateInput }),
+            })
+            if (!res.ok) { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Failed to deactivate member'); return }
+            toast.success('Member deactivated')
+            fetchMembers(); setViewingMember(null); setDeactivatingMember(null)
+        } finally {
+            setDeactivating(false)
+        }
     }
     const handleReactivate = async (id: string) => {
-        const res = await fetch(`/api/members/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_active: true }) })
+        // Clears termination_date back to null alongside is_active — a reactivated employee has
+        // no termination anymore, so they must stop being excluded from anywhere that filters on it.
+        const res = await fetch(`/api/members/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_active: true, termination_date: null }) })
         if (!res.ok) { const e = await res.json().catch(() => ({})); toast.error(e.error || 'Failed to reactivate member'); return }
         toast.success('Member reactivated')
         fetchMembers(); setViewingMember(null)
@@ -555,6 +578,7 @@ export default function MembersPage() {
                                     { label: 'NID No.', value: viewingMember.nid_no },
                                     { label: 'Blood Group', value: viewingMember.blood_group },
                                     { label: 'Joining Date', value: formatDate(viewingMember.joining_date) },
+                                    ...(!viewingMember.is_active ? [{ label: 'Termination Date', value: formatDate(viewingMember.termination_date) }] : []),
                                     { label: 'Family Contact 1', value: viewingMember.family_contact_1 },
                                     { label: 'Family Contact 2', value: viewingMember.family_contact_2 },
                                 ].map(field => (
@@ -625,7 +649,7 @@ export default function MembersPage() {
                             {/* Actions */}
                             <div className="modal-footer">
                                 {viewingMember.is_active ? (
-                                    <button className="btn btn-sm" onClick={() => handleDeactivate(viewingMember.id)} style={{ background: '#DC2626', color: 'white', border: 'none' }}>Deactivate</button>
+                                    <button className="btn btn-sm" onClick={() => openDeactivateModal(viewingMember)} style={{ background: '#DC2626', color: 'white', border: 'none' }}>Deactivate</button>
                                 ) : (
                                     <button className="btn btn-sm" onClick={() => handleReactivate(viewingMember.id)} style={{ background: '#16A34A', color: 'white', border: 'none' }}>Reactivate</button>
                                 )}
@@ -662,6 +686,36 @@ export default function MembersPage() {
                                 <button className="btn btn-ghost btn-sm" disabled={reorderSaving} onClick={() => setConfirmReorder(null)}>Cancel</button>
                                 <button className="btn btn-primary btn-sm" disabled={reorderSaving} onClick={confirmReorderAction}>
                                     {reorderSaving ? 'Saving...' : 'Confirm'}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Deactivate Confirm — requires a Termination Date, which drives whether this
+                employee still shows up in a later month's Salary Sheet, Attendance Report, or
+                the Mark Leave picker (see the termination_date filters in those routes). */}
+            <AnimatePresence>
+                {deactivatingMember && (
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        onClick={() => !deactivating && setDeactivatingMember(null)}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <motion.div className="card" initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ padding: '24px', width: '380px', maxWidth: '90vw' }}>
+                            <div style={{ fontSize: '0.9375rem', fontWeight: 600, marginBottom: '8px' }}>Deactivate {deactivatingMember.name}</div>
+                            <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', marginBottom: '16px' }}>
+                                After this date, {deactivatingMember.name} will no longer appear in the Salary Sheet, Attendance Report, or the Mark Leave employee list.
+                            </p>
+                            <label className="form-label">Termination Date *</label>
+                            <input className="form-input" type="date" value={terminationDateInput}
+                                onChange={e => setTerminationDateInput(e.target.value)} style={{ marginBottom: '20px' }} />
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                                <button className="btn btn-ghost btn-sm" disabled={deactivating} onClick={() => setDeactivatingMember(null)}>Cancel</button>
+                                <button className="btn btn-sm" disabled={deactivating || !terminationDateInput}
+                                    onClick={confirmDeactivate} style={{ background: '#DC2626', color: 'white', border: 'none' }}>
+                                    {deactivating ? 'Deactivating...' : 'Deactivate'}
                                 </button>
                             </div>
                         </motion.div>

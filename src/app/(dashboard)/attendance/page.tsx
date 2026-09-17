@@ -8,6 +8,7 @@ import AttendanceReport from '@/components/attendance/AttendanceReport'
 import { usePermissions } from '@/lib/PermissionsContext'
 import { useToast } from '@/lib/ToastContext'
 import { formatLongDate } from '@/lib/format'
+import OutBadge from '@/components/common/OutBadge'
 
 interface AttendanceRecord {
     id: string
@@ -26,6 +27,7 @@ interface AttendanceRecord {
         avatar_url: string | null
         duty_start_time: string | null
         duty_end_time: string | null
+        is_active: boolean
         department: { id: string; name: string } | null
     }
 }
@@ -192,8 +194,9 @@ export default function AttendancePage() {
     useEffect(() => { fetchAttendance() }, [fetchAttendance])
 
     useEffect(() => {
-        // Fetch all members for standalone leave
-        fetch('/api/members').then(r => r.json()).then(d => {
+        // Fetch all members for standalone leave — active only, since a deactivated employee
+        // (Members → Deactivate) can't have a new Leave marked for them anymore.
+        fetch('/api/members?status=active').then(r => r.json()).then(d => {
             if (Array.isArray(d)) setAllMembers(d.map((m: { id: string; name: string; employee_id: string; designation: string; avatar_url: string | null }) => ({ id: m.id, name: m.name, employee_id: m.employee_id, designation: m.designation, avatar_url: m.avatar_url || null })))
         }).catch(() => { })
     }, [])
@@ -678,7 +681,10 @@ export default function AttendancePage() {
                                                     ) : record.employee.name[0]?.toUpperCase()}
                                                 </div>
                                                 <div>
-                                                    <div style={{ fontWeight: 500 }}>{record.employee.name}</div>
+                                                    <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                        {record.employee.name}
+                                                        {record.employee.is_active === false && <OutBadge />}
+                                                    </div>
                                                     {record.employee.employee_id && <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>{record.employee.employee_id}</div>}
                                                     {formatDutyRange(record.employee.duty_start_time, record.employee.duty_end_time) && (
                                                         <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>{formatDutyRange(record.employee.duty_start_time, record.employee.duty_end_time)}</div>

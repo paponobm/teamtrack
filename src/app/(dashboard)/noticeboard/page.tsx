@@ -5,6 +5,7 @@ import RequireFeature from '@/components/common/RequireFeature'
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { usePermissions } from '@/lib/PermissionsContext'
+import OutBadge from '@/components/common/OutBadge'
 import { useToast } from '@/lib/ToastContext'
 
 interface Notice {
@@ -677,7 +678,10 @@ export default function NoticeboardPage() {
                                             ) : (l.employee?.name || 'U')[0]}
                                         </div>
                                         <div style={{ flex: 1, minWidth: 0 }}>
-                                            <div style={{ fontSize: '0.8125rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--color-text-primary)' }}>{l.employee?.name || 'Unknown'}</div>
+                                            <div style={{ fontSize: '0.8125rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--color-text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.employee?.name || 'Unknown'}</span>
+                                                {l.employee?.is_active === false && <OutBadge />}
+                                            </div>
                                             <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.employee?.designation || 'Team Member'}</div>
                                         </div>
                                         <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: '#D97706', background: '#FEF3C7', padding: '2px 6px', borderRadius: '4px' }} title={l.reason || 'Personal'}>

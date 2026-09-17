@@ -1,6 +1,7 @@
 'use client'
 
 import RequireFeature from '@/components/common/RequireFeature'
+import OutBadge from '@/components/common/OutBadge'
 
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -36,7 +37,7 @@ interface WorkEntry {
     verifier: { id: string; name: string } | null
     date: string
     management_check: boolean
-    employee: { id: string; name: string; employee_id: string } | null
+    employee: { id: string; name: string; employee_id: string; is_active: boolean } | null
 }
 
 interface Stats {
@@ -732,7 +733,10 @@ export default function WorkLogPage() {
                                                     <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#2563EB', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.625rem', fontWeight: 600, flexShrink: 0 }}>
                                                         {entry.employee?.name?.[0]?.toUpperCase() || '?'}
                                                     </div>
-                                                    <span style={{ fontSize: '0.8125rem' }}>{entry.employee?.name || '-'}</span>
+                                                    <span style={{ fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                        {entry.employee?.name || '-'}
+                                                        {entry.employee?.is_active === false && <OutBadge />}
+                                                    </span>
                                                 </div>
                                             </td>
                                             <td>

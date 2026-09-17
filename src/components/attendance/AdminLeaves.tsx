@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { IconCheckCircle } from '@/components/icons/Icons'
 import LeaveCalendar from '@/components/attendance/LeaveCalendar'
+import OutBadge from '@/components/common/OutBadge'
 
 interface PendingLeave {
     id: string
@@ -17,6 +18,7 @@ interface PendingLeave {
         name: string
         avatar_url: string | null
         designation: string
+        is_active: boolean
     }
 }
 
@@ -199,7 +201,10 @@ export default function AdminLeaves() {
                                                         ) : l.employee.name[0]?.toUpperCase()}
                                                     </div>
                                                     <div>
-                                                        <div style={{ fontWeight: 500 }}>{l.employee.name}</div>
+                                                        <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                            {l.employee.name}
+                                                            {l.employee.is_active === false && <OutBadge />}
+                                                        </div>
                                                         <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>{l.employee.designation}</div>
                                                     </div>
                                                 </div>

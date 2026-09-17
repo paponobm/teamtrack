@@ -6,6 +6,7 @@ const EMPLOYEE_JOIN = `
     json_build_object(
         'id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'designation', e.designation,
         'avatar_url', e.avatar_url, 'duty_start_time', e.duty_start_time, 'duty_end_time', e.duty_end_time,
+        'is_active', e.is_active,
         'department', json_build_object('id', d.id, 'name', d.name)
     ) AS employee
 `
@@ -41,6 +42,9 @@ export async function GET(request: Request) {
         // Someone who joined on the 15th has no attendance obligation on the 14th or earlier —
         // don't show them on a date before they actually joined, even if a stray record exists.
         conditions.push(`(e.joining_date IS NULL OR e.joining_date <= a.date)`)
+        // Mirror at the other end of employment: a date after their own Termination Date (Members
+        // → Deactivate) is never shown either, even if a stray record exists for it.
+        conditions.push(`(e.termination_date IS NULL OR e.termination_date >= a.date)`)
         if (employeeId) {
             params.push(employeeId)
             conditions.push(`a.employee_id = $${params.length}`)

@@ -57,7 +57,7 @@ export async function GET(request: Request) {
 
     const { rows: entries } = await db.query(
         `SELECT w.*,
-            json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id) AS employee,
+            json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'is_active', e.is_active) AS employee,
             json_build_object('id', mc.id, 'name', mc.name) AS manager_checked,
             json_build_object('id', ac.id, 'name', ac.name) AS authority_checked,
             json_build_object('id', vf.id, 'name', vf.name) AS verifier

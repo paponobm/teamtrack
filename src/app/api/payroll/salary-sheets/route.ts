@@ -55,10 +55,13 @@ const EMPLOYEE_PAYROLL_FIELDS = 'id, payroll_basic_salary, payroll_transportatio
 // this sheet — covers members added (or reactivated) after the sheet was first created, who
 // would otherwise never appear on it. Safe to call every time the sheet is loaded: employees
 // already on the sheet are left untouched (their row stays frozen as-is).
+// Also picks up someone deactivated partway through THIS exact month (their termination_date
+// falls in it) — they were still employed for part of it, so this month's row is legitimately
+// theirs; a termination from an EARLIER month must never get newly added to a later sheet.
 async function syncNewEmployeesIntoSheet(db: Db, sheetId: string, month: string) {
     const [{ rows: existingEntries }, { rows: activeEmployees }] = await Promise.all([
         db.query(`SELECT employee_id FROM salary_entries WHERE salary_sheet_id = $1`, [sheetId]),
-        db.query(`SELECT ${EMPLOYEE_PAYROLL_FIELDS} FROM employees WHERE is_active = true`),
+        db.query(`SELECT ${EMPLOYEE_PAYROLL_FIELDS} FROM employees WHERE is_active = true OR to_char(termination_date, 'YYYY-MM') = $1`, [month]),
     ])
 
     const existingIds = new Set(existingEntries.map((r: { employee_id: string }) => r.employee_id))
@@ -127,7 +130,8 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
             json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url,
                 'joining_date', e.joining_date, 'festival_bonus_percentage', e.festival_bonus_percentage,
                 'basic_salary_effective_month', e.basic_salary_effective_month,
-                'monthly_leave_allowance', e.monthly_leave_allowance,
+                'monthly_leave_allowance', e.monthly_leave_allowance, 'is_active', e.is_active,
+                'termination_date', e.termination_date,
                 'department', json_build_object('id', d.id, 'name', d.name)) AS employee
          FROM salary_entries se
          LEFT JOIN employees e ON e.id = se.employee_id
@@ -142,9 +146,16 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
     // an employee whose payroll hasn't been set up yet (still empty) or whose start month is
     // still in the future is left off the sheet entirely, not shown with ৳0. Filtered here (not
     // at insert time) so it also self-corrects rows already created before this was configured.
+    // A deactivated employee's own OUT badge (see is_active above) still surfaces on the month
+    // they were terminated in (they were employed for at least part of it), but any LATER month
+    // is fully hidden — mirrors the joining_date rule at the other end of employment, just with
+    // the inequality flipped.
     const rows = entries.filter(r => {
         const startMonth: string | null = r.employee?.basic_salary_effective_month || null
-        return !!startMonth && month >= startMonth
+        if (!startMonth || month < startMonth) return false
+        const terminationMonth: string | null = r.employee?.termination_date ? String(r.employee.termination_date).slice(0, 7) : null
+        if (terminationMonth && month > terminationMonth) return false
+        return true
     })
     const employeeIds = rows.map((r: { employee_id: string }) => r.employee_id)
     const [attendance, fines, advances, productBuys, emis, providentFunds] = await Promise.all([
@@ -182,6 +193,10 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
                 avatar_url: r.employee?.avatar_url,
                 joining_date: r.employee?.joining_date || null,
                 department: r.employee?.department?.name || null,
+                // Whether this employee has since been deactivated (Members → deactivate) — the
+                // salary entry itself is never removed just because the employee later left, so
+                // the sheet still needs to know this to show the "OUT" badge next to their name.
+                is_active: r.employee?.is_active ?? true,
             },
             basic_salary: Number(r.basic_salary) || 0,
             extra_duty: Number(r.extra_duty) || 0,
@@ -323,7 +338,9 @@ export async function POST(request: Request) {
     // Festival Bonus months (Members → Edit Member → Festival Bonus tab) — otherwise 0.
     // Attendance/leave/fine/advance/product buy/loan are never stored here, they're computed
     // live on every read.
-    const { rows: activeEmployees } = await db.query(`SELECT ${EMPLOYEE_PAYROLL_FIELDS} FROM employees WHERE is_active = true`)
+    // Same termination-aware condition as syncNewEmployeesIntoSheet above — someone terminated
+    // partway through this exact month still gets seeded into it.
+    const { rows: activeEmployees } = await db.query(`SELECT ${EMPLOYEE_PAYROLL_FIELDS} FROM employees WHERE is_active = true OR to_char(termination_date, 'YYYY-MM') = $1`, [month])
 
     if (activeEmployees.length > 0) {
         const rows = (activeEmployees as EmployeePayrollFields[]).map(e => buildSeedRow(sheet.id, month, e))
