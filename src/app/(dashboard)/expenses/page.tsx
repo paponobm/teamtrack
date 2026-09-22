@@ -593,9 +593,9 @@ export default function ExpensesPage() {
                 <motion.div variants={item} style={{ display: 'flex', gap: '24px', borderBottom: '1px solid var(--color-border-light)', marginBottom: '24px', paddingTop: '12px', paddingBottom: '0' }}>
                     {[
                         { id: 'expenses' as const, label: 'Overview' },
+                        ...(isAdmin ? [{ id: 'advance' as const, label: 'Salary , Advance & EMI' }] : []),
                         { id: 'budgets' as const, label: 'Budgets' },
                         { id: 'funds' as const, label: 'Funds' },
-                        ...(isAdmin ? [{ id: 'advance' as const, label: 'Salary Advance & EMI' }] : []),
                         ...(isAdmin ? [{ id: 'providentFund' as const, label: 'Provident Fund' }] : []),
                         { id: 'categories' as const, label: 'Categories' },
                     ].map(tab => (
@@ -604,7 +604,7 @@ export default function ExpensesPage() {
                             onClick={() => setActiveTab(tab.id)}
                             style={{
                                 background: 'none', border: 'none', padding: '0 0 10px 0',
-                                fontSize: '0.8125rem', fontWeight: activeTab === tab.id ? 600 : 500,
+                                fontSize: '0.9375rem', fontWeight: activeTab === tab.id ? 600 : 500,
                                 color: activeTab === tab.id ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)',
                                 cursor: 'pointer', position: 'relative'
                             }}

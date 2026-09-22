@@ -21,6 +21,20 @@ interface Advance {
     created_by_employee: { id: string; name: string } | null
 }
 
+// A manual/off-cycle salary disbursement (Finance Hub "Salary" tab) — structurally identical
+// to Advance, minus payment_status: this money is never repaid by the employee, so there's
+// nothing to track beyond who/how much/when (see src/lib/salaryPayments.ts).
+interface SalaryPayment {
+    id: string
+    employee_id: string
+    amount: number
+    payment_date: string
+    note: string | null
+    created_at: string
+    employee: { id: string; name: string; employee_id: string | null; avatar_url: string | null } | null
+    created_by_employee: { id: string; name: string } | null
+}
+
 interface Emi {
     id: string
     employee_id: string
@@ -48,23 +62,26 @@ interface EmployeeOption {
     avatar_url: string | null
 }
 
-// Advance and EMI are two distinct tables/deduction types (see src/lib/emis.ts) merged
-// client-side into one "Advance/EMI" list, matching how the Salary Sheet already keeps them
-// as separate Advance/Loan columns while showing them together here for admin convenience.
+// Advance, EMI, and Salary are three distinct tables (see src/lib/emis.ts / src/lib/
+// salaryPayments.ts) merged client-side into one "Advance/EMI/Salary" list, matching how the
+// Salary Sheet already keeps Advance/Loan as separate columns while showing them together here
+// for admin convenience.
 interface CombinedRow {
     id: string
-    record_type: 'Advance' | 'EMI'
+    record_type: 'Advance' | 'EMI' | 'Salary'
     employee_id: string
     employee: EmployeeOption | null
     date: string
     amount: number
     // Advance has no installments — Paid/Due here is simply the full amount, gated by its own
     // payment_status. EMI is installment-based (see getEmiPaidSummaries in src/lib/emis.ts),
-    // same Paid/Due semantics as Provident Fund.
+    // same Paid/Due semantics as Provident Fund. Salary has no repayment concept at all — it's
+    // always fully "paid" (paid = amount, due = 0) the moment the record exists.
     paid: number
     due: number
     advance?: Advance
     emi?: Emi
+    salary?: SalaryPayment
 }
 
 type DateRangeMode = 'all' | 'today' | 'week' | 'month' | 'custom'
@@ -95,6 +112,7 @@ export default function AdvanceManager() {
 
     const [advances, setAdvances] = useState<Advance[]>([])
     const [emis, setEmis] = useState<Emi[]>([])
+    const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>([])
     const [employees, setEmployees] = useState<EmployeeOption[]>([])
     const [loading, setLoading] = useState(true)
     const [search, setSearch] = useState('')
@@ -104,13 +122,13 @@ export default function AdvanceManager() {
     const [customStart, setCustomStart] = useState('')
     const [customEnd, setCustomEnd] = useState('')
     const [showModal, setShowModal] = useState(false)
-    const [addType, setAddType] = useState<'Advance' | 'EMI'>('Advance')
+    const [addType, setAddType] = useState<'Advance' | 'EMI' | 'Salary'>('Advance')
     const [editing, setEditing] = useState<CombinedRow | null>(null)
     const [payslipRow, setPayslipRow] = useState<CombinedRow | null>(null)
     // Set by clicking a summary card above the table — narrows the table to just that card's
     // records (e.g. Total Advance → Advance rows only, Total EMI Due → EMI rows still owing
     // money). Clicking the same card again (or Total Employees) clears back to 'all'.
-    const [cardFilter, setCardFilter] = useState<'all' | 'advance' | 'emi' | 'advancePaid' | 'advanceDue' | 'emiPaid' | 'emiDue'>('all')
+    const [cardFilter, setCardFilter] = useState<'all' | 'advance' | 'emi' | 'salary' | 'advancePaid' | 'advanceDue' | 'emiPaid' | 'emiDue'>('all')
 
     const fetchData = useCallback(async () => {
         setLoading(true)
@@ -125,13 +143,18 @@ export default function AdvanceManager() {
             } else if (dateRangeMode === 'custom' && customStart && customEnd) {
                 params.set('start_date', customStart); params.set('end_date', customEnd)
             }
-            const [advRes, emiRes] = await Promise.all([
+            const [advRes, emiRes, salaryRes] = await Promise.all([
                 fetch(`/api/advances?${params}`),
                 fetch(`/api/emis?${params}`),
+                fetch(`/api/salary-payments?${params}`),
             ])
             if (advRes.ok) {
                 const json = await advRes.json()
                 setAdvances(json.advances || [])
+            }
+            if (salaryRes.ok) {
+                const json = await salaryRes.json()
+                setSalaryPayments(json.salaryPayments || [])
             }
             if (emiRes.ok) {
                 const json = await emiRes.json()
@@ -159,12 +182,18 @@ export default function AdvanceManager() {
             paid: e.paid, due: e.due,
             emi: e,
         })),
+        ...salaryPayments.map(s => ({
+            id: s.id, record_type: 'Salary' as const, employee_id: s.employee_id, employee: s.employee, date: s.payment_date, amount: s.amount,
+            paid: s.amount, due: 0,
+            salary: s,
+        })),
     ].sort((a, b) => b.date.localeCompare(a.date))
 
     const filtered = combined.filter(row => {
         if (employeeFilter && row.employee_id !== employeeFilter) return false
         if (cardFilter === 'advance' && row.record_type !== 'Advance') return false
         if (cardFilter === 'emi' && row.record_type !== 'EMI') return false
+        if (cardFilter === 'salary' && row.record_type !== 'Salary') return false
         if (cardFilter === 'advancePaid' && !(row.record_type === 'Advance' && row.due <= 0)) return false
         if (cardFilter === 'advanceDue' && !(row.record_type === 'Advance' && row.due > 0)) return false
         if (cardFilter === 'emiPaid' && !(row.record_type === 'EMI' && row.due <= 0)) return false
@@ -174,17 +203,17 @@ export default function AdvanceManager() {
         return (row.employee?.name || '').toLowerCase().includes(q) || (row.employee?.employee_id || '').toLowerCase().includes(q)
     })
 
-    // Total Advance/Total EMI each stay scoped to their own record type (principal amount,
-    // matching the Amount column); Paid/Due are kept separate per record type too (Advance's
-    // own payment_status vs. EMI's installment-based Paid/Due, see CombinedRow above), rather
-    // than summed together, so each card reads as a single, unambiguous figure. Total
-    // Employees reflects everyone with either in view.
+    // Total Advance/Total EMI/Total Salary each stay scoped to their own record type
+    // (principal amount, matching the Amount column); Paid/Due are kept separate per record
+    // type too (Advance's own payment_status vs. EMI's installment-based Paid/Due, see
+    // CombinedRow above), rather than summed together, so each card reads as a single,
+    // unambiguous figure. Total Employees reflects everyone with any of the three in view.
     const summary = filtered.reduce((acc, row) => {
         if (row.record_type === 'Advance') {
             acc.totalAdvance += row.amount
             acc.totalAdvancePaid += row.paid
             acc.totalAdvanceDue += row.due
-        } else {
+        } else if (row.record_type === 'EMI') {
             acc.totalEmi += row.amount
             acc.totalEmiPaid += row.paid
             acc.totalEmiDue += row.due
@@ -196,25 +225,30 @@ export default function AdvanceManager() {
                 acc.totalEmiInterestPaid += row.emi.interest_paid
                 if (row.emi.amount > 0) acc.emiInterestRates.add(row.emi.interest_rate)
             }
+        } else {
+            // Salary is always fully settled the moment it's recorded — no Paid/Due split to
+            // track, just the one running total.
+            acc.totalSalary += row.amount
         }
         acc.employeeIds.add(row.employee_id)
         return acc
-    }, { totalAdvance: 0, totalEmi: 0, totalAdvancePaid: 0, totalAdvanceDue: 0, totalEmiPaid: 0, totalEmiDue: 0, totalEmiInterestPaid: 0, emiInterestRates: new Set<number>(), employeeIds: new Set<string>() })
+    }, { totalAdvance: 0, totalEmi: 0, totalSalary: 0, totalAdvancePaid: 0, totalAdvanceDue: 0, totalEmiPaid: 0, totalEmiDue: 0, totalEmiInterestPaid: 0, emiInterestRates: new Set<number>(), employeeIds: new Set<string>() })
 
     const emiInterestRateLabel = summary.emiInterestRates.size > 0
         ? [...summary.emiInterestRates].sort((a, b) => a - b).map(r => `${r}%`).join(', ')
         : 'No EMI loans in view'
 
     const handleDelete = async (row: CombinedRow) => {
-        const label = row.record_type === 'Advance' ? 'advance' : 'EMI'
+        const label = row.record_type === 'Advance' ? 'advance' : row.record_type === 'EMI' ? 'EMI' : 'salary'
         const extra = ' This also removes its linked Finance Hub expense entry.'
         if (!confirm(`Delete this ${label} record for ${row.employee?.name || 'this employee'}?${extra}`)) return
-        const url = row.record_type === 'Advance' ? `/api/advances/${row.id}` : `/api/emis/${row.id}`
+        const url = row.record_type === 'Advance' ? `/api/advances/${row.id}` : row.record_type === 'EMI' ? `/api/emis/${row.id}` : `/api/salary-payments/${row.id}`
         const res = await fetch(url, { method: 'DELETE' })
         if (res.ok) {
             if (row.record_type === 'Advance') setAdvances(prev => prev.filter(a => a.id !== row.id))
-            else setEmis(prev => prev.filter(e => e.id !== row.id))
-            toastSuccess(`${label === 'advance' ? 'Advance' : 'EMI'} record deleted`)
+            else if (row.record_type === 'EMI') setEmis(prev => prev.filter(e => e.id !== row.id))
+            else setSalaryPayments(prev => prev.filter(s => s.id !== row.id))
+            toastSuccess(`${row.record_type} record deleted`)
         } else {
             const err = await res.json()
             toastError(err.error || 'Failed to delete')
@@ -225,15 +259,15 @@ export default function AdvanceManager() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
                 <div>
-                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Salary Advance & EMI</h2>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Salary , Advance & EMI</h2>
                     <p style={{ fontSize: '0.875rem', color: 'var(--color-text-tertiary)', margin: '4px 0 0' }}>Manage employee advances, EMI loans and payment records</p>
                 </div>
                 <button className="btn btn-primary" onClick={() => { setEditing(null); setAddType('Advance'); setShowModal(true) }}>
-                    <IconPlus size={16} /> Add Advance / EMI
+                    <IconPlus size={16} /> Add Advance / EMI / Salary
                 </button>
             </div>
 
-            <motion.div variants={item} initial="hidden" animate="show" style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '14px', marginBottom: '20px' }}>
+            <motion.div variants={item} initial="hidden" animate="show" style={{ display: 'grid', gridTemplateColumns: 'repeat(9, 1fr)', gap: '14px', marginBottom: '20px' }}>
                 <div className="stat-card" style={{ cursor: 'pointer', ...(cardFilter === 'advance' ? { boxShadow: '0 0 0 2px #2563EB' } : {}) }}
                     onClick={() => setCardFilter(f => f === 'advance' ? 'all' : 'advance')} title="Show only Advance records">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconWallet size={14} color="var(--color-text-tertiary)" /> Total Advance</span>
@@ -243,6 +277,11 @@ export default function AdvanceManager() {
                     onClick={() => setCardFilter(f => f === 'emi' ? 'all' : 'emi')} title="Show only EMI records">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconBanknote size={14} color="var(--color-text-tertiary)" /> Total EMI</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#D97706' }}>৳{summary.totalEmi.toLocaleString()}</span>
+                </div>
+                <div className="stat-card" style={{ cursor: 'pointer', ...(cardFilter === 'salary' ? { boxShadow: '0 0 0 2px #16A34A' } : {}) }}
+                    onClick={() => setCardFilter(f => f === 'salary' ? 'all' : 'salary')} title="Show only Salary records">
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconBanknote size={14} color="var(--color-text-tertiary)" /> Total Salary</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A' }}>৳{summary.totalSalary.toLocaleString()}</span>
                 </div>
                 <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setCardFilter('all')} title="Show all records">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconUsers size={14} color="var(--color-text-tertiary)" /> Total Employees</span>
@@ -341,7 +380,7 @@ export default function AdvanceManager() {
                         <tr>
                             <th>SL</th>
                             <th>Employee</th>
-                            <th>Advance/EMI</th>
+                            <th>Type</th>
                             <th>Date</th>
                             <th>Amount</th>
                             <th>Paid</th>
@@ -373,10 +412,10 @@ export default function AdvanceManager() {
                                         title={row.record_type === 'EMI' && row.emi ? `${row.emi.term_months} months, ${row.emi.interest_rate}% interest, ৳${row.emi.monthly_installment.toLocaleString()}/mo` : undefined}
                                         style={{
                                             display: 'inline-block', padding: '3px 10px', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 600,
-                                            background: row.record_type === 'Advance' ? 'rgba(37,99,235,0.1)' : 'rgba(217,119,6,0.1)',
-                                            color: row.record_type === 'Advance' ? '#2563EB' : '#D97706',
+                                            background: row.record_type === 'Advance' ? 'rgba(37,99,235,0.1)' : row.record_type === 'EMI' ? 'rgba(217,119,6,0.1)' : 'rgba(22,163,74,0.1)',
+                                            color: row.record_type === 'Advance' ? '#2563EB' : row.record_type === 'EMI' ? '#D97706' : '#16A34A',
                                         }}>
-                                        {row.record_type === 'Advance' ? 'Advance' : 'EMI'}
+                                        {row.record_type}
                                     </span>
                                 </td>
                                 <td>{formatDate(row.date)}</td>
@@ -409,16 +448,22 @@ export default function AdvanceManager() {
                                         (Paid once the whole amount is recovered), EMI is
                                         installment-based so it shows progress as a fraction
                                         (paid_installments/total_installments) instead of a
-                                        plain binary, per row.emi's own live-computed summary. */}
+                                        plain binary, per row.emi's own live-computed summary.
+                                        Salary has no repayment cycle at all — it's always
+                                        settled the moment the record exists. */}
                                     {row.record_type === 'Advance' ? (
                                         <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: row.due <= 0 ? '#16A34A' : '#DC2626', background: row.due <= 0 ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)' }}>
                                             {row.due <= 0 ? 'Paid' : 'Pending'}
                                         </span>
-                                    ) : row.emi && (
+                                    ) : row.record_type === 'EMI' ? row.emi && (
                                         <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: row.emi.remaining_installments <= 0 ? '#16A34A' : '#DC2626', background: row.emi.remaining_installments <= 0 ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)' }}>
                                             {row.emi.remaining_installments <= 0
                                                 ? `Paid ${row.emi.total_installments}/${row.emi.total_installments}`
                                                 : `Pending ${row.emi.paid_installments}/${row.emi.total_installments}`}
+                                        </span>
+                                    ) : (
+                                        <span style={{ padding: '2px 10px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: '#16A34A', background: 'rgba(22,163,74,0.1)' }}>
+                                            Paid
                                         </span>
                                     )}
                                 </td>
@@ -438,7 +483,7 @@ export default function AdvanceManager() {
                             </tr>
                         ))}
                         {!loading && filtered.length === 0 && (
-                            <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No advance or EMI records found.</td></tr>
+                            <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No advance, EMI, or salary records found.</td></tr>
                         )}
                         {loading && (
                             <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
@@ -463,6 +508,10 @@ export default function AdvanceManager() {
                             setEmis(prev => isNew ? [saved, ...prev] : prev.map(e => e.id === saved.id ? saved : e))
                             setShowModal(false)
                         }}
+                        onSavedSalary={(saved, isNew) => {
+                            setSalaryPayments(prev => isNew ? [saved, ...prev] : prev.map(s => s.id === saved.id ? saved : s))
+                            setShowModal(false)
+                        }}
                     />
                 )}
             </AnimatePresence>
@@ -476,18 +525,20 @@ export default function AdvanceManager() {
     )
 }
 
-function AddEditModal({ editing, addType, setAddType, employees, onClose, onSavedAdvance, onSavedEmi }: {
+function AddEditModal({ editing, addType, setAddType, employees, onClose, onSavedAdvance, onSavedEmi, onSavedSalary }: {
     editing: CombinedRow | null
-    addType: 'Advance' | 'EMI'
-    setAddType: (t: 'Advance' | 'EMI') => void
+    addType: 'Advance' | 'EMI' | 'Salary'
+    setAddType: (t: 'Advance' | 'EMI' | 'Salary') => void
     employees: EmployeeOption[]
     onClose: () => void
     onSavedAdvance: (advance: Advance, isNew: boolean) => void
     onSavedEmi: (emi: Emi, isNew: boolean) => void
+    onSavedSalary: (salary: SalaryPayment, isNew: boolean) => void
 }) {
     const isEdit = !!editing
     // Editing locks the type to whatever record is being edited — you can't turn an Advance
-    // into an EMI mid-edit. Adding shows a picker so the same "Add Record" button covers both.
+    // into an EMI/Salary mid-edit. Adding shows a picker so the same "Add Record" button
+    // covers all three.
     const recordType = isEdit ? editing!.record_type : addType
 
     return (
@@ -495,13 +546,13 @@ function AddEditModal({ editing, addType, setAddType, employees, onClose, onSave
             <motion.div initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 10 }}
                 className="modal" style={{ maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
-                    <div className="modal-title">{isEdit ? `Edit ${recordType}` : 'Add  Advance / EMI'}</div>
+                    <div className="modal-title">{isEdit ? `Edit ${recordType}` : 'Add Advance / EMI / Salary'}</div>
                     <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: 'var(--color-text-tertiary)' }}><IconX size={18} /></button>
                 </div>
 
                 {!isEdit && (
                     <div style={{ display: 'flex', gap: '2px', margin: '16px 20px 0', background: 'rgba(118,118,128,0.08)', borderRadius: '10px', padding: '2px' }}>
-                        {(['Advance', 'EMI'] as const).map(t => (
+                        {(['Advance', 'EMI', 'Salary'] as const).map(t => (
                             <button key={t} onClick={() => setAddType(t)} type="button"
                                 style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: 'none', fontSize: '0.8125rem', fontWeight: 600, cursor: 'pointer', background: addType === t ? 'var(--color-bg-primary)' : 'transparent', color: addType === t ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)', boxShadow: addType === t ? '0 1px 3px rgba(0,0,0,0.08)' : 'none' }}>
                                 {t}
@@ -512,8 +563,10 @@ function AddEditModal({ editing, addType, setAddType, employees, onClose, onSave
 
                 {recordType === 'Advance' ? (
                     <AdvanceForm advance={editing?.advance || null} employees={employees} onClose={onClose} onSaved={onSavedAdvance} />
-                ) : (
+                ) : recordType === 'EMI' ? (
                     <EmiForm emi={editing?.emi || null} employees={employees} onClose={onClose} onSaved={onSavedEmi} />
+                ) : (
+                    <SalaryForm salary={editing?.salary || null} employees={employees} onClose={onClose} onSaved={onSavedSalary} />
                 )}
             </motion.div>
         </div>
@@ -610,6 +663,105 @@ function AdvanceForm({ advance, employees, onClose, onSaved }: {
                 <div>
                     <label className="form-label">Note</label>
                     <textarea className="form-input" rows={3} placeholder="Advance for personal emergency" value={note} onChange={e => setNote(e.target.value)} />
+                </div>
+            </div>
+
+            <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                <button className="btn btn-primary" disabled={saving} onClick={handleSave}>{saving ? 'Saving...' : 'Save'}</button>
+            </div>
+        </>
+    )
+}
+
+// Structurally identical to AdvanceForm above, minus the Paid/Unpaid picker — a salary payment
+// has no repayment cycle, so there's nothing to track beyond who/how much/when/why.
+function SalaryForm({ salary, employees, onClose, onSaved }: {
+    salary: SalaryPayment | null
+    employees: EmployeeOption[]
+    onClose: () => void
+    onSaved: (salary: SalaryPayment, isNew: boolean) => void
+}) {
+    const { success: toastSuccess, error: toastError } = useToast()
+    const [employeeId, setEmployeeId] = useState(salary?.employee_id || '')
+    const [amount, setAmount] = useState(salary?.amount ?? 0)
+    const [paymentDate, setPaymentDate] = useState(salary?.payment_date || getLocalDateString())
+    const [note, setNote] = useState(salary?.note || '')
+    const [saving, setSaving] = useState(false)
+
+    const isEdit = !!salary
+
+    const handleSave = async () => {
+        if (!employeeId) { toastError('Please select an employee'); return }
+        if (!Number.isFinite(amount) || amount <= 0) { toastError('Amount must be greater than 0'); return }
+
+        setSaving(true)
+        try {
+            if (isEdit) {
+                const res = await fetch(`/api/salary-payments/${salary.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ employee_id: employeeId, amount, payment_date: paymentDate, note }),
+                })
+                if (res.ok) {
+                    const selectedEmployee = employees.find(e => e.id === employeeId)
+                    onSaved({
+                        ...salary, employee_id: employeeId, amount, payment_date: paymentDate, note,
+                        employee: selectedEmployee ? { id: selectedEmployee.id, name: selectedEmployee.name, employee_id: selectedEmployee.employee_id, avatar_url: selectedEmployee.avatar_url } : salary.employee,
+                    }, false)
+                    toastSuccess('Salary payment updated')
+                } else {
+                    const err = await res.json()
+                    toastError(err.error || 'Failed to update')
+                }
+            } else {
+                const res = await fetch('/api/salary-payments', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ employee_id: employeeId, amount, payment_date: paymentDate, note }),
+                })
+                if (res.ok) {
+                    const json = await res.json()
+                    onSaved(json.salaryPayment, true)
+                    toastSuccess('Salary payment added')
+                } else {
+                    const err = await res.json()
+                    toastError(err.error || 'Failed to add salary payment')
+                }
+            }
+        } finally {
+            setSaving(false)
+        }
+    }
+
+    return (
+        <>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div>
+                    <label className="form-label">Employee *</label>
+                    <select className="form-input" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
+                        <option value="">Select employee...</option>
+                        {employees.map(emp => (
+                            <option key={emp.id} value={emp.id}>{emp.name}{emp.employee_id ? ` (${emp.employee_id})` : ''}</option>
+                        ))}
+                    </select>
+                </div>
+
+                <div>
+                    <label className="form-label">Amount (৳) *</label>
+                    <input className="form-input" type="number" min={1} value={amount}
+                        onFocus={e => e.target.select()}
+                        onChange={e => setAmount(Math.max(0, Number(e.target.value) || 0))} />
+                </div>
+
+                <div>
+                    <label className="form-label">Date *</label>
+                    <input className="form-input" type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
+                </div>
+
+                <div>
+                    <label className="form-label">Note</label>
+                    <textarea className="form-input" rows={3} placeholder="Off-cycle salary payment" value={note} onChange={e => setNote(e.target.value)} />
                 </div>
             </div>
 

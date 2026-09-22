@@ -40,6 +40,30 @@ model advances {
   @@index([employee_id], map: "idx_advances_employee")
 }
 
+// Standalone/manual salary payments — a simple lump-sum disbursement to an employee outside
+// the monthly Payroll Salary Sheet flow (e.g. an off-cycle or cash payment), structured exactly
+// like `advances` above. Unlike an advance, this money is never "repaid" by the employee, so
+// there is no payment_status column here — it's mirrored into Finance Hub as a permanently
+// 'paid' Expense (category "Salary Payment", see src/lib/salaryPayments.ts) the moment it's
+// created, same as advances.expense_id / EMI's own linked expense.
+model salary_payments {
+  id                                              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id                                     String     @db.Uuid
+  amount                                          Decimal    @db.Decimal(10, 2)
+  payment_date                                    DateTime   @db.Date
+  note                                            String?
+  created_by                                      String?    @db.Uuid
+  created_at                                      DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at                                      DateTime?  @default(now()) @db.Timestamptz(6)
+  expense_id                                      String?    @db.Uuid
+  employees_salary_payments_created_byToemployees employees? @relation("salary_payments_created_byToemployees", fields: [created_by], references: [id], onUpdate: NoAction)
+  employees_salary_payments_employee_idToemployees employees @relation("salary_payments_employee_idToemployees", fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  expenses                                        expenses?  @relation(fields: [expense_id], references: [id], onUpdate: NoAction)
+
+  @@index([payment_date], map: "idx_salary_payments_date")
+  @@index([employee_id], map: "idx_salary_payments_employee")
+}
+
 // Singleton content for the public-facing "About Us" page (story, policies, journey timeline,
 // footer banner) — visible to every employee, editable only by Admin/Super Admin. Team members
 // are NOT stored here; that section is rendered live from `employees` ordered by sort_order.
@@ -320,6 +344,8 @@ model employees {
   activity_log                                                           activity_log[]
   advances_advances_created_byToemployees                                advances[]                @relation("advances_created_byToemployees")
   advances_advances_employee_idToemployees                               advances[]                @relation("advances_employee_idToemployees")
+  salary_payments_salary_payments_created_byToemployees                  salary_payments[]         @relation("salary_payments_created_byToemployees")
+  salary_payments_salary_payments_employee_idToemployees                 salary_payments[]         @relation("salary_payments_employee_idToemployees")
   attendance                                                             attendance[]
   audit_log                                                              audit_log[]
   common_reports                                                         common_reports[]
@@ -410,6 +436,7 @@ model expenses {
   fund_id                                    String?          @db.Uuid
   advances                                   advances[]
   emis                                       emis[]
+  salary_payments                            salary_payments[]
   employees_expenses_approved_byToemployees  employees?       @relation("expenses_approved_byToemployees", fields: [approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   finance_funds                              finance_funds?   @relation(fields: [fund_id], references: [id], onUpdate: NoAction)
   employees_expenses_submitted_byToemployees employees?       @relation("expenses_submitted_byToemployees", fields: [submitted_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
