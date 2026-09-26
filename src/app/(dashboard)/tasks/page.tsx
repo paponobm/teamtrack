@@ -7,6 +7,7 @@ import RequireFeature from '@/components/common/RequireFeature'
 import { usePermissions } from '@/lib/PermissionsContext'
 import DailyWorkReport from '@/components/work-reports/DailyWorkReport'
 import WorkComparison from '@/components/work-comparison/WorkComparison'
+import ReportAccessManager from '@/components/work-reports/ReportAccessManager'
 
 interface TaskAssignment {
     id: string
@@ -123,7 +124,7 @@ const emptyForm = { titles: [{ id: 'init', val: '' }], description: '', due_date
 
 export default function TasksPage() {
     const { data: perms } = usePermissions()
-    const [activeMainTab, setActiveMainTab] = useState<'tasks' | 'reports' | 'comparison'>('tasks')
+    const [activeMainTab, setActiveMainTab] = useState<'tasks' | 'reports' | 'comparison' | 'reportAccess'>('tasks')
     const [tasks, setTasks] = useState<Task[]>([])
     const [loading, setLoading] = useState(true)
     const [isAdmin, setIsAdmin] = useState(false)
@@ -538,6 +539,19 @@ export default function TasksPage() {
                             Work Comparison
                         </button>
                     )}
+                    {/* Managing WHO gets the "Daily Work Report (View All)" exception is
+                        Super-Admin-only, same tier as Members/Finance/Payroll Management in
+                        MemberModal's PAGE_DEFINITIONS — an Admin can use the report views
+                        themselves but can't hand that access to anyone else. */}
+                    {isSuperAdmin && (
+                        <button
+                            className={`tab-btn ${activeMainTab === 'reportAccess' ? 'active' : ''}`}
+                            onClick={() => setActiveMainTab('reportAccess')}
+                            style={{ padding: '8px 16px', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 600, color: activeMainTab === 'reportAccess' ? '#fff' : 'var(--color-text-secondary)', background: activeMainTab === 'reportAccess' ? '#2563EB' : 'transparent', border: 'none', cursor: 'pointer', transition: 'all 0.2s' }}
+                        >
+                            Report Access
+                        </button>
+                    )}
                 </div>
             </motion.div>
 
@@ -545,6 +559,8 @@ export default function TasksPage() {
                 <DailyWorkReport />
             ) : activeMainTab === 'comparison' ? (
                 <WorkComparison />
+            ) : activeMainTab === 'reportAccess' ? (
+                <ReportAccessManager />
             ) : (
             <>
             {/* Stats */}

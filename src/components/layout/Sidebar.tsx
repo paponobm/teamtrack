@@ -113,6 +113,7 @@ export default function Sidebar({ user, onClose, isOpen }: SidebarProps) {
     const [pendingLeavesCount, setPendingLeavesCount] = useState(0)
     const [unreadLeavesCount, setUnreadLeavesCount] = useState(0)
     const [pendingTasksCount, setPendingTasksCount] = useState(0)
+    const [openProblemsCount, setOpenProblemsCount] = useState(0)
 
     useEffect(() => {
         let mounted = true // guard against setState after unmount (e.g. fast logout)
@@ -156,6 +157,18 @@ export default function Sidebar({ user, onClose, isOpen }: SidebarProps) {
                 .catch(err => console.error('Failed to fetch pending tasks count:', err))
         }
         fetchPendingTasks()
+
+        // Fetch open problems count — GET /api/problems already computes stats.open for free
+        // (same response the Problem Box page itself reads its "Open" stat card from), so no
+        // separate count-only endpoint is needed here.
+        fetch('/api/problems')
+            .then(res => res.json())
+            .then(data => {
+                if (mounted && data?.stats?.open !== undefined) {
+                    setOpenProblemsCount(data.stats.open)
+                }
+            })
+            .catch(err => console.error('Failed to fetch open problems count:', err))
 
         // Listen for leaves-updated event
         const handleLeavesUpdated = () => {
@@ -374,6 +387,25 @@ export default function Sidebar({ user, onClose, isOpen }: SidebarProps) {
                                             textAlign: 'center'
                                         }}>
                                             {pendingTasksCount}
+                                        </div>
+                                    )}
+                                    {navItem.href === '/problems' && openProblemsCount > 0 && (
+                                        <div style={{
+                                            marginLeft: isCollapsed ? '0' : 'auto',
+                                            position: isCollapsed ? 'absolute' : 'static',
+                                            top: isCollapsed ? '8px' : 'auto',
+                                            right: isCollapsed ? '8px' : 'auto',
+                                            background: '#ef4444',
+                                            color: 'white',
+                                            fontSize: '0.75rem',
+                                            fontWeight: 'bold',
+                                            padding: isCollapsed ? '2px 4px' : '2px 8px',
+                                            borderRadius: '12px',
+                                            lineHeight: 1,
+                                            minWidth: isCollapsed ? '16px' : 'auto',
+                                            textAlign: 'center'
+                                        }}>
+                                            {openProblemsCount}
                                         </div>
                                     )}
                                 </Link>

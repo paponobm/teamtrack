@@ -77,6 +77,13 @@ const PAGE_DEFINITIONS = [
             { name: 'PR Management', slug: 'pr-sending', desc: 'Manage influencer PR sends and follow-ups' },
             { name: 'Problem Box', slug: 'problem-box', desc: 'Report and resolve team problems' },
             { name: 'Tasks', slug: 'tasks', desc: 'View and manage assigned tasks' },
+            // Normally Daily Work Report visibility follows role hierarchy alone (a Member sees
+            // only their own, a Manager also sees Members', an Admin also sees Managers'+
+            // Members', Super Admin/Owner sees everyone) — this is the one grantable exception,
+            // letting a specific person see everyone's report regardless of role. Super-Admin-only
+            // to grant, same as Finance/Payroll/Members below, since it exposes what Admins wrote
+            // too, not just people below the grantee in the hierarchy.
+            { name: 'Daily Work Report (View All)', slug: 'work-report-view-all', desc: "See every employee's Daily Work Report, including Admins' — bypasses the normal role hierarchy", superOnly: true },
         ]
     },
     {

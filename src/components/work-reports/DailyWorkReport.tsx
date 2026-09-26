@@ -90,6 +90,14 @@ export default function DailyWorkReport() {
     const { data: perms } = usePermissions()
     const toast = useToast()
     const isAdmin = !!(perms.is_super || perms.is_admin)
+    // Grantable exception to the normal role-hierarchy visibility (Members → Edit Member →
+    // Access → Work → "Daily Work Report (View All)", Super-Admin-only to grant — see
+    // PAGE_DEFINITIONS in MemberModal.tsx and canViewAllWorkReports in src/lib/workReports.ts,
+    // which GET /api/work-reports uses server-side). Deliberately only widens VIEW-related UI
+    // here (summary cards, employee/department filters, search scope) — Edit/Delete stay exactly
+    // as they already were (canEdit/perms.is_super below, untouched), and Export CSV stays
+    // Admin+-only since /api/export's own access check isn't part of this permission.
+    const viewsAllReports = isAdmin || !!(perms.permissions && perms.permissions['work-report-view-all'] && perms.permissions['work-report-view-all'] !== 'no_access')
 
     const [entries, setEntries] = useState<WorkReportEntry[]>([])
     const [summary, setSummary] = useState<Record<string, number>>({})
@@ -152,10 +160,10 @@ export default function DailyWorkReport() {
     }, [dateRangeMode, refDate, appliedCustomStart, appliedCustomEnd, filterEmployeeId, filterDepartmentId, filterStatus, searchQuery])
 
     useEffect(() => {
-        if (!isAdmin) return
+        if (!viewsAllReports) return
         fetch('/api/members?status=active').then(r => r.json()).then(d => { if (Array.isArray(d)) setEmployees(d) }).catch(() => { })
         fetch('/api/departments').then(r => r.json()).then(d => { if (Array.isArray(d)) setDepartments(d) }).catch(() => { })
-    }, [isAdmin])
+    }, [viewsAllReports])
 
     // Re-measures every Work Description row's height whenever its text changes programmatically
     // (a Common Report pick reusing/filling a row, opening the edit modal with existing lines,
@@ -174,8 +182,8 @@ export default function DailyWorkReport() {
             const params = new URLSearchParams()
             params.set('start_date', range.start)
             params.set('end_date', range.end)
-            if (isAdmin && filterEmployeeId) params.set('employee_id', filterEmployeeId)
-            if (isAdmin && filterDepartmentId) params.set('department_id', filterDepartmentId)
+            if (viewsAllReports && filterEmployeeId) params.set('employee_id', filterEmployeeId)
+            if (viewsAllReports && filterDepartmentId) params.set('department_id', filterDepartmentId)
             if (filterStatus !== 'all') params.set('status', filterStatus)
             if (searchQuery.trim()) params.set('search', searchQuery.trim())
             params.set('page', String(page))
@@ -193,7 +201,7 @@ export default function DailyWorkReport() {
         } finally {
             setLoading(false)
         }
-    }, [rangeReady, range.start, range.end, isAdmin, filterEmployeeId, filterDepartmentId, filterStatus, searchQuery, page])
+    }, [rangeReady, range.start, range.end, viewsAllReports, filterEmployeeId, filterDepartmentId, filterStatus, searchQuery, page])
 
     useEffect(() => { fetchReports() }, [fetchReports])
 
@@ -466,7 +474,7 @@ export default function DailyWorkReport() {
 
     const totalPages = Math.max(1, Math.ceil(total / LIMIT))
 
-    const summaryCards = isAdmin ? [
+    const summaryCards = viewsAllReports ? [
         { key: 'total', label: 'Total Reports', value: summary.totalReports ?? 0, color: '#2563EB' },
         { key: 'today', label: 'Reports Today', value: summary.reportsToday ?? 0, color: '#16A34A' },
         { key: 'submitted', label: 'Employees Submitted', value: summary.employeesSubmitted ?? 0, color: '#7C3AED' },
@@ -545,13 +553,13 @@ export default function DailyWorkReport() {
 
             {/* Filters */}
             <motion.div variants={item} initial="hidden" animate="show" style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
-                {isAdmin && (
+                {viewsAllReports && (
                     <select className="input" value={filterEmployeeId} onChange={(e) => setFilterEmployeeId(e.target.value)} style={{ width: '170px', padding: '8px 12px', fontSize: '0.8125rem' }}>
                         <option value="">All Employees</option>
                         {employees.map(e => (<option key={e.id} value={e.id}>{e.name}</option>))}
                     </select>
                 )}
-                {isAdmin && (
+                {viewsAllReports && (
                     <select className="input" value={filterDepartmentId} onChange={(e) => setFilterDepartmentId(e.target.value)} style={{ width: '160px', padding: '8px 12px', fontSize: '0.8125rem' }}>
                         <option value="">All Departments</option>
                         {departments.map(d => (<option key={d.id} value={d.id}>{d.name}</option>))}
@@ -565,7 +573,7 @@ export default function DailyWorkReport() {
                 </select>
                 <div style={{ position: 'relative', minWidth: '200px' }}>
                     <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', display: 'flex', opacity: 0.5, pointerEvents: 'none' }}><IconSearch size={14} color="var(--color-text-tertiary)" /></span>
-                    <input className="input" type="text" placeholder={isAdmin ? 'Search employee or project...' : 'Search project...'}
+                    <input className="input" type="text" placeholder={viewsAllReports ? 'Search employee or project...' : 'Search project...'}
                         value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                         style={{ paddingLeft: '32px', width: '100%', padding: '8px 12px 8px 32px', fontSize: '0.8125rem' }} />
                     {searchQuery && (

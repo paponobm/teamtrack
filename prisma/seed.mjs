@@ -105,6 +105,12 @@ async function main() {
             ['Payroll Management', 'পে-রোল ম্যানেজমেন্ট', 'All Department', 'payroll-management', 32],
             ['Members', 'সদস্য', 'All Department', 'members', 33],
             ['Employee Attendance', 'কর্মচারী উপস্থিতি', 'All Department', 'employee-attendance', 34],
+            // Grantable exception to the Daily Work Report's normal role-hierarchy visibility
+            // (Member sees only their own, Manager also sees Members', Admin also sees
+            // Managers'+Members', Super Admin/Owner sees everyone) — see GET /api/work-reports.
+            // Super-Admin-only to grant (see PAGE_DEFINITIONS in MemberModal.tsx), since it lets
+            // one specific person see everyone else's work report, including Admins'.
+            ['Daily Work Report (View All)', 'দৈনিক কাজের প্রতিবেদন (সব দেখুন)', 'All Department', 'work-report-view-all', 35],
         ]
         for (const [name, name_bn, category, slug, sort_order] of features) {
             await client.query(

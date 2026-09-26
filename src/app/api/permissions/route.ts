@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     //    Super Admins/Owner and another Admin (peer-to-peer access changes), and their own
     //    record (self-granting access). Only a Super Admin/Owner can touch an Admin's
     //    permissions at all, same tier included.
-    const SUPER_ADMIN_ONLY_SLUGS = ['members', 'employee-attendance', 'finance', 'product-buy', 'payroll-management']
+    const SUPER_ADMIN_ONLY_SLUGS = ['members', 'employee-attendance', 'finance', 'product-buy', 'payroll-management', 'work-report-view-all']
     const isSuperAdmin = auth.employee.roleLevel <= 2
     if (!isSuperAdmin) {
         const employeeIds = [...new Set(permissions.map(p => p.employee_id))]

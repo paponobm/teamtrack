@@ -1,13 +1,16 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { canViewAllWorkReports, getWorkReportAccessTargets } from '@/lib/workReports'
 import { NextResponse } from 'next/server'
 
-// POST /api/work-reports/[id]/verify - Management Check: a role-hierarchy verification chain,
-// separate from the points-based Work Comparison evaluation. A viewer may record Yes/No on a
-// report only if the report's owner sits strictly below them in the role hierarchy (Manager
-// verifies Member; Admin verifies Manager/Member; Super Admin/Owner verifies anyone) — the same
-// rule GET /api/work-reports uses to decide `can_verify`, so a report only shows the option
-// when this endpoint would actually accept it.
+// POST /api/work-reports/[id]/verify - Management Check, separate from the points-based Work
+// Comparison evaluation. Not role/rank based: a viewer may record Yes/No on a report only if it
+// isn't their own AND they've been explicitly granted access to it — either the blanket "Daily
+// Work Report (View All)" permission (see canViewAllWorkReports in src/lib/workReports.ts,
+// automatic for Super Admin/Owner), or a targeted work_report_access grant naming this report's
+// owner specifically (see getWorkReportAccessTargets) — the same rule GET /api/work-reports uses
+// to decide `can_verify`, so a report only shows the option when this endpoint would actually
+// accept it.
 export async function POST(
     request: Request,
     { params }: { params: Promise<{ id: string }> }
@@ -25,9 +28,7 @@ export async function POST(
     const checkedNote = typeof note === 'string' && note.trim() ? note.trim() : null
 
     const { rows: [report] } = await db.query(
-        `SELECT wr.employee_id, wr.management_check, r.level AS employee_role_level
-         FROM work_reports wr LEFT JOIN employees e ON e.id = wr.employee_id LEFT JOIN roles r ON r.id = e.role_id
-         WHERE wr.id = $1`,
+        `SELECT wr.employee_id, wr.management_check FROM work_reports wr WHERE wr.id = $1`,
         [id]
     )
     if (!report) return NextResponse.json({ error: 'Report not found' }, { status: 404 })
@@ -42,10 +43,11 @@ export async function POST(
         return NextResponse.json({ error: 'This report has already been checked and cannot be changed' }, { status: 409 })
     }
 
-    const isSuperAdmin = auth.employee.roleLevel <= 2
-    const canVerify = isSuperAdmin || (report.employee_role_level != null && report.employee_role_level > auth.employee.roleLevel)
+    const canViewAll = await canViewAllWorkReports(db, auth.employee.id, auth.employee.roleLevel)
+    const grantedTargetIds = canViewAll ? [] : await getWorkReportAccessTargets(db, auth.employee.id)
+    const canVerify = canViewAll || grantedTargetIds.includes(report.employee_id)
     if (!canVerify) {
-        return NextResponse.json({ error: 'You can only verify reports from someone below you in the role hierarchy' }, { status: 403 })
+        return NextResponse.json({ error: 'You do not have access to verify this report' }, { status: 403 })
     }
 
     const { rows: [data] } = await db.query(

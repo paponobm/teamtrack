@@ -64,6 +64,27 @@ model salary_payments {
   @@index([employee_id], map: "idx_salary_payments_employee")
 }
 
+// Granular, additive grant letting a Super Admin give one specific employee (viewer_id)
+// visibility (and approve rights) into one other specific employee's (target_id) Daily Work
+// Report, without giving them the blanket "work-report-view-all" permission (see
+// canViewAllWorkReports in src/lib/workReports.ts) that unlocks EVERYONE's reports. The two
+// mechanisms are independent and additive: a viewer sees a report if the target is below them
+// in the role hierarchy, OR they hold the blanket permission, OR a row here names them as the
+// viewer for that exact target.
+model work_report_access {
+    id                                           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+    viewer_id                                    String     @db.Uuid
+    target_id                                    String     @db.Uuid
+    created_by                                   String?    @db.Uuid
+    created_at                                   DateTime?  @default(now()) @db.Timestamptz(6)
+    employees_work_report_access_viewer_idToemployees  employees  @relation("work_report_access_viewer_idToemployees", fields: [viewer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+    employees_work_report_access_target_idToemployees  employees  @relation("work_report_access_target_idToemployees", fields: [target_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+    employees_work_report_access_created_byToemployees employees? @relation("work_report_access_created_byToemployees", fields: [created_by], references: [id], onUpdate: NoAction)
+
+    @@unique([viewer_id, target_id])
+    @@index([viewer_id], map: "idx_work_report_access_viewer")
+}
+
 // Singleton content for the public-facing "About Us" page (story, policies, journey timeline,
 // footer banner) — visible to every employee, editable only by Admin/Super Admin. Team members
 // are NOT stored here; that section is rendered live from `employees` ordered by sort_order.
@@ -410,6 +431,9 @@ model employees {
   work_evaluations_work_evaluations_evaluated_byToemployees              work_evaluations[]        @relation("work_evaluations_evaluated_byToemployees")
   work_reports_work_reports_employee_idToemployees                       work_reports[]            @relation("work_reports_employee_idToemployees")
   work_reports_work_reports_checked_byToemployees                        work_reports[]            @relation("work_reports_checked_byToemployees")
+  work_report_access_work_report_access_viewer_idToemployees             work_report_access[]      @relation("work_report_access_viewer_idToemployees")
+  work_report_access_work_report_access_target_idToemployees             work_report_access[]      @relation("work_report_access_target_idToemployees")
+  work_report_access_work_report_access_created_byToemployees            work_report_access[]      @relation("work_report_access_created_byToemployees")
 
   @@index([department_id], map: "idx_employees_department")
   @@index([date_of_birth], map: "idx_employees_dob")
