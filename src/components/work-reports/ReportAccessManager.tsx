@@ -37,6 +37,7 @@ export default function ReportAccessManager() {
     const [loading, setLoading] = useState(true)
     const [expandedId, setExpandedId] = useState<string | null>(null)
     const [savingPairKey, setSavingPairKey] = useState<string | null>(null)
+    const [savingAllForViewer, setSavingAllForViewer] = useState<string | null>(null)
     const [search, setSearch] = useState('')
 
     useEffect(() => {
@@ -63,33 +64,57 @@ export default function ReportAccessManager() {
 
     const targetsFor = (viewerId: string) => new Set(grants.filter(g => g.viewer_id === viewerId).map(g => g.target_id))
 
+    // Shared replace-all save used by both a single checkbox toggle and the Select All/Clear All
+    // bulk actions — always sends the viewer's complete target list in one call.
+    const saveTargets = async (viewerId: string, nextTargets: Set<string>, successMessage: string) => {
+        const res = await fetch('/api/work-report-access', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ viewer_id: viewerId, target_ids: [...nextTargets] }),
+        })
+        if (res.ok) {
+            setGrants(prev => {
+                const withoutViewer = prev.filter(g => g.viewer_id !== viewerId)
+                const rebuilt = [...nextTargets].map(t => ({ id: `${viewerId}:${t}`, viewer_id: viewerId, target_id: t }))
+                return [...withoutViewer, ...rebuilt]
+            })
+            toastSuccess(successMessage)
+        } else {
+            const err = await res.json().catch(() => ({}))
+            toastError(err.error || 'Failed to update access')
+        }
+    }
+
     const toggleTarget = async (viewerId: string, targetId: string) => {
         const currentTargets = targetsFor(viewerId)
         const wasGranted = currentTargets.has(targetId)
         const nextTargets = new Set(currentTargets)
         if (wasGranted) nextTargets.delete(targetId); else nextTargets.add(targetId)
 
-        const pairKey = `${viewerId}:${targetId}`
-        setSavingPairKey(pairKey)
+        setSavingPairKey(`${viewerId}:${targetId}`)
         try {
-            const res = await fetch('/api/work-report-access', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ viewer_id: viewerId, target_ids: [...nextTargets] }),
-            })
-            if (res.ok) {
-                setGrants(prev => {
-                    const withoutViewer = prev.filter(g => g.viewer_id !== viewerId)
-                    const rebuilt = [...nextTargets].map(t => ({ id: `${viewerId}:${t}`, viewer_id: viewerId, target_id: t }))
-                    return [...withoutViewer, ...rebuilt]
-                })
-                toastSuccess(wasGranted ? 'Access removed' : 'Access granted')
-            } else {
-                const err = await res.json().catch(() => ({}))
-                toastError(err.error || 'Failed to update access')
-            }
+            await saveTargets(viewerId, nextTargets, wasGranted ? 'Access removed' : 'Access granted')
         } finally {
             setSavingPairKey(null)
+        }
+    }
+
+    const selectAllTargets = async (viewerId: string) => {
+        const allOtherIds = new Set(employees.filter(e => e.id !== viewerId).map(e => e.id))
+        setSavingAllForViewer(viewerId)
+        try {
+            await saveTargets(viewerId, allOtherIds, 'Access granted to everyone')
+        } finally {
+            setSavingAllForViewer(null)
+        }
+    }
+
+    const clearAllTargets = async (viewerId: string) => {
+        setSavingAllForViewer(viewerId)
+        try {
+            await saveTargets(viewerId, new Set(), 'Access cleared')
+        } finally {
+            setSavingAllForViewer(null)
         }
     }
 
@@ -145,31 +170,46 @@ export default function ReportAccessManager() {
                                         <IconChevronRight size={16} color="var(--color-text-tertiary)" />
                                     </span>
                                 </div>
-                                {isExpanded && (
-                                    <div style={{ padding: '4px 16px 14px 52px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', margin: '4px 0 8px' }}>
-                                            Reports {emp.name} can see and approve:
+                                {isExpanded && (() => {
+                                    const otherEmployees = employees.filter(other => other.id !== emp.id)
+                                    const allGranted = otherEmployees.length > 0 && otherEmployees.every(other => targetsFor(emp.id).has(other.id))
+                                    const isSavingAll = savingAllForViewer === emp.id
+                                    return (
+                                        <div style={{ padding: '4px 16px 14px 52px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '4px 0 8px' }}>
+                                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+                                                    Reports {emp.name} can see and approve:
+                                                </div>
+                                                <button
+                                                    className="btn btn-sm btn-secondary"
+                                                    disabled={isSavingAll || otherEmployees.length === 0}
+                                                    onClick={() => allGranted ? clearAllTargets(emp.id) : selectAllTargets(emp.id)}
+                                                    style={{ fontSize: '0.75rem', padding: '4px 10px', height: 'auto' }}
+                                                >
+                                                    {isSavingAll ? 'Saving...' : allGranted ? 'Clear All' : 'Select All'}
+                                                </button>
+                                            </div>
+                                            {otherEmployees.map(other => {
+                                                const checked = targetsFor(emp.id).has(other.id)
+                                                const pairKey = `${emp.id}:${other.id}`
+                                                const isSaving = savingPairKey === pairKey || isSavingAll
+                                                return (
+                                                    <label key={other.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 4px', fontSize: '0.8125rem', cursor: isSaving ? 'wait' : 'pointer', opacity: isSaving ? 0.6 : 1 }}>
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={checked}
+                                                            disabled={isSaving}
+                                                            onChange={() => toggleTarget(emp.id, other.id)}
+                                                            style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                                                        />
+                                                        <span>{other.name}</span>
+                                                        <span style={{ color: 'var(--color-text-tertiary)' }}>{other.designation || other.employee_id || ''}</span>
+                                                    </label>
+                                                )
+                                            })}
                                         </div>
-                                        {employees.filter(other => other.id !== emp.id).map(other => {
-                                            const checked = targetsFor(emp.id).has(other.id)
-                                            const pairKey = `${emp.id}:${other.id}`
-                                            const isSaving = savingPairKey === pairKey
-                                            return (
-                                                <label key={other.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 4px', fontSize: '0.8125rem', cursor: isSaving ? 'wait' : 'pointer', opacity: isSaving ? 0.6 : 1 }}>
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={checked}
-                                                        disabled={isSaving}
-                                                        onChange={() => toggleTarget(emp.id, other.id)}
-                                                        style={{ width: '15px', height: '15px', cursor: 'pointer' }}
-                                                    />
-                                                    <span>{other.name}</span>
-                                                    <span style={{ color: 'var(--color-text-tertiary)' }}>{other.designation || other.employee_id || ''}</span>
-                                                </label>
-                                            )
-                                        })}
-                                    </div>
-                                )}
+                                    )
+                                })()}
                             </div>
                         )
                     })}

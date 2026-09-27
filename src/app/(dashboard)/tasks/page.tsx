@@ -129,6 +129,10 @@ export default function TasksPage() {
     const [loading, setLoading] = useState(true)
     const [isAdmin, setIsAdmin] = useState(false)
     const [isSuperAdmin, setIsSuperAdmin] = useState(false)
+    // Task creation is opened up one level below the rest of the Admin-only task tools (editing,
+    // deleting, Work Comparison, activity log) — a Manager can create and assign tasks, but
+    // everything else on this page stays Admin+ only.
+    const [canCreateTask, setCanCreateTask] = useState(false)
     const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(null)
     const [employees, setEmployees] = useState<Employee[]>([])
     const [activeFilter, setActiveFilter] = useState('all')
@@ -190,6 +194,7 @@ export default function TasksPage() {
     useEffect(() => {
         if (perms.is_super || perms.role === 'Admin' || perms.role === 'Owner' || perms.role === 'Super Admin') setIsAdmin(true)
         if (perms.is_super || perms.role === 'Owner' || perms.role === 'Super Admin') setIsSuperAdmin(true)
+        if (perms.is_super || (perms.role && ['Admin', 'Owner', 'Super Admin', 'Manager'].includes(perms.role))) setCanCreateTask(true)
         if (perms.employee_id) setCurrentEmployeeId(perms.employee_id)
     }, [perms])
 
@@ -505,7 +510,7 @@ export default function TasksPage() {
                     </h1>
                     <p className="page-subtitle">Manage and track team assignments.</p>
                 </div>
-                {isAdmin && (
+                {canCreateTask && (
                     <button className="btn btn-primary btn-sm" onClick={() => { setForm(emptyForm); setDescRows([{ id: Math.random().toString(), val: '', points: '' }]); setShowModal(true) }}>
                         <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
                         Create Task

@@ -85,7 +85,7 @@ export async function GET(request: Request) {
 
 // POST /api/tasks - create a task with assignments
 export async function POST(request: Request) {
-    const auth = await requireAuth(3) // Admin+ only
+    const auth = await requireAuth(4) // Manager+ (Manager, Admin, Super Admin, Owner)
     if (!isAuthed(auth)) return auth
 
     const db = auth.db
