@@ -1,4 +1,5 @@
 import { requireAuth, isAuthed, awardPoints } from '@/lib/auth'
+import { getManageableEmployeeIds } from '@/lib/workReports'
 import { NextResponse } from 'next/server'
 
 // GET /api/tasks - list tasks with assignments
@@ -92,18 +93,34 @@ export async function POST(request: Request) {
     const emp = auth.employee
 
     const body = await request.json()
-    const { title, description, due_date, priority, assignee_ids } = body
+    const { title, description, due_date, start_time, end_time, priority, assignee_ids } = body
 
     if (!title) return NextResponse.json({ error: 'Title is required' }, { status: 400 })
+    if (!due_date) return NextResponse.json({ error: 'Due date is required' }, { status: 400 })
+
+    // A Manager (not Admin+) can only assign a task to people they "manage" — themselves plus
+    // anyone they have Daily Work Report access to (see getManageableEmployeeIds in
+    // src/lib/workReports.ts). This mirrors the Assign To list the Create Task modal shows a
+    // Manager, so a direct API call can't bypass that same scoping.
+    if (Array.isArray(assignee_ids) && assignee_ids.length > 0) {
+        const manageableIds = await getManageableEmployeeIds(db, emp!.id, emp!.roleLevel)
+        if (manageableIds) {
+            const allowedIds = new Set(manageableIds)
+            const hasDisallowed = assignee_ids.some((id: string) => !allowedIds.has(id))
+            if (hasDisallowed) {
+                return NextResponse.json({ error: 'You can only assign tasks to people whose report you have access to' }, { status: 403 })
+            }
+        }
+    }
 
     // Auto-generate task number (TSK-XXXX)
     const { rows: [{ count }] } = await db.query(`SELECT COUNT(*)::int AS count FROM tasks`)
     const taskNo = `TSK-${String((count || 0) + 1).padStart(4, '0')}`
 
     const { rows: [task] } = await db.query(
-        `INSERT INTO tasks (title, description, due_date, priority, created_by, task_no)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [title, description || null, due_date || null, priority || 'medium', emp!.id, taskNo]
+        `INSERT INTO tasks (title, description, due_date, start_time, end_time, priority, created_by, task_no)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [title, description || null, due_date || null, start_time || null, end_time || null, priority || 'medium', emp!.id, taskNo]
     )
 
     // Create assignments and notifications
@@ -166,17 +183,23 @@ export async function PUT(request: Request) {
     const actor = auth.employee
     const isAdmin = actor.roleLevel <= 3
 
-    // Non-admins may ONLY mark a task they have accepted as completed — nothing else.
+    // Non-admins may ONLY mark a task they have accepted as completed, or write a note on a task
+    // assigned to them (any assignment status) — nothing else.
     if (!isAdmin) {
-        const onlyCompleting = Object.keys(updates).length === 1 && updates.status === 'completed'
-        if (!onlyCompleting) {
-            return NextResponse.json({ error: 'You can only complete a task assigned to you' }, { status: 403 })
+        const updateKeys = Object.keys(updates)
+        const onlyCompleting = updateKeys.length === 1 && updates.status === 'completed'
+        const onlyNote = updateKeys.length === 1 && typeof updates.notes !== 'undefined'
+        if (!onlyCompleting && !onlyNote) {
+            return NextResponse.json({ error: 'You can only complete a task assigned to you, or add a note to it' }, { status: 403 })
         }
         const { rows: [myAssignment] } = await db.query(
             `SELECT status FROM task_assignments WHERE task_id = $1 AND employee_id = $2`,
             [id, actor.id]
         )
-        if (!myAssignment || myAssignment.status !== 'accepted') {
+        if (!myAssignment) {
+            return NextResponse.json({ error: 'You can only update a task assigned to you' }, { status: 403 })
+        }
+        if (onlyCompleting && myAssignment.status !== 'accepted') {
             return NextResponse.json({ error: 'You can only complete a task you have accepted' }, { status: 403 })
         }
     }

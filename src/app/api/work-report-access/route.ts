@@ -6,16 +6,25 @@ import { NextResponse } from 'next/server'
 // src/lib/workReports.ts). This is additive to, and independent of, the blanket
 // "work-report-view-all" feature permission (/api/permissions) — a Super Admin uses this to give
 // one specific employee (viewer) visibility into one or more specific OTHER employees' (targets)
-// reports, without unlocking everyone's. Both routes are Super-Admin/Owner only (roleLevel <= 2).
+// reports, without unlocking everyone's. Managing (POST, or GET without/with someone else's
+// viewer_id) is Super-Admin/Owner only; any authenticated employee may GET their OWN grant list
+// (?viewer_id=self) since other features (e.g. who a Manager may assign a task to in
+// /api/tasks) key off "who can I see" for the current user.
 
-// GET /api/work-report-access - list every grant, or just one viewer's via ?viewer_id=
+// GET /api/work-report-access?viewer_id= - Super Admin/Owner: list every grant, or just one
+// viewer's; anyone else: only their own (viewer_id must equal their own employee id).
 export async function GET(request: Request) {
-    const auth = await requireAuth(2) // Super Admin/Owner only
+    const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
     const db = auth.db
 
     const { searchParams } = new URL(request.url)
     const viewerId = searchParams.get('viewer_id')
+    const isSuperAdmin = auth.employee.roleLevel <= 2
+
+    if (!isSuperAdmin && viewerId !== auth.employee.id) {
+        return NextResponse.json({ error: 'Super Admin access required' }, { status: 403 })
+    }
 
     const { rows } = await db.query(
         `SELECT id, viewer_id, target_id, created_by, created_at

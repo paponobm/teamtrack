@@ -1,4 +1,5 @@
 import { requireAuth, isAuthed } from '@/lib/auth'
+import { getManageableEmployeeIds } from '@/lib/workReports'
 import { NextResponse } from 'next/server'
 
 // Tasks store per-line points as a trailing "[Npt]" marker (same convention the
@@ -19,11 +20,12 @@ function parseTaskDescription(description: string | null): { items: { text: stri
     return { items, total }
 }
 
-// GET /api/work-comparison?employee_id&start_date&end_date (admin only)
+// GET /api/work-comparison?employee_id&start_date&end_date (Admin+, or a Manager scoped to
+// people they manage — see getManageableEmployeeIds in src/lib/workReports.ts)
 // Returns the employee's assigned tasks (with parsed points) and daily work reports
-// for the same period, so the admin can compare and score them side by side.
+// for the same period, so the reviewer can compare and score them side by side.
 export async function GET(request: Request) {
-    const auth = await requireAuth(3) // Admin+ only
+    const auth = await requireAuth(4) // Manager+
     if (!isAuthed(auth)) return auth
     const db = auth.db
 
@@ -34,6 +36,11 @@ export async function GET(request: Request) {
 
     if (!employeeId || !startDate || !endDate) {
         return NextResponse.json({ error: 'employee_id, start_date and end_date are required' }, { status: 400 })
+    }
+
+    const manageableIds = await getManageableEmployeeIds(db, auth.employee.id, auth.employee.roleLevel)
+    if (manageableIds && !manageableIds.includes(employeeId)) {
+        return NextResponse.json({ error: 'You do not have access to this employee' }, { status: 403 })
     }
 
     // 1. Tasks assigned to this employee, due within the period.

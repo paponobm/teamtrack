@@ -72,7 +72,14 @@ function formatSubmittedAt(ts: string) {
     return new Date(ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-export default function WorkComparison() {
+interface WorkComparisonProps {
+    // Restricts the employee picker to this id list (a Manager scoped to people they manage —
+    // see getManageableEmployeeIds in src/lib/workReports.ts). Omit/undefined for the existing,
+    // unrestricted Admin+ behavior (every active employee).
+    allowedEmployeeIds?: string[]
+}
+
+export default function WorkComparison({ allowedEmployeeIds }: WorkComparisonProps) {
     const toast = useToast()
 
     const [dateRangeMode, setDateRangeMode] = useState<DateRangeMode>('today')
@@ -105,8 +112,11 @@ export default function WorkComparison() {
     const rangeReady = dateRangeMode !== 'custom' || !!(appliedCustomStart && appliedCustomEnd)
 
     useEffect(() => {
-        fetch('/api/members?status=active').then(r => r.json()).then(d => { if (Array.isArray(d)) setEmployees(d) }).catch(() => { })
-    }, [])
+        fetch('/api/members?status=active').then(r => r.json()).then(d => {
+            if (!Array.isArray(d)) return
+            setEmployees(allowedEmployeeIds ? d.filter((e: { id: string }) => allowedEmployeeIds.includes(e.id)) : d)
+        }).catch(() => { })
+    }, [allowedEmployeeIds])
 
     const fetchComparison = useCallback(async () => {
         if (!selectedEmployeeId || !rangeReady) return

@@ -1,15 +1,22 @@
 import { requireAuth, isAuthed, awardPoints } from '@/lib/auth'
 import { logAudit } from '@/lib/audit'
+import { getManageableEmployeeIds } from '@/lib/workReports'
 import { NextResponse } from 'next/server'
 
-// GET /api/work-comparison/evaluations?employee_id - evaluation history for an employee, newest first
+// GET /api/work-comparison/evaluations?employee_id - evaluation history for an employee, newest
+// first (Admin+, or a Manager scoped to people they manage — see getManageableEmployeeIds)
 export async function GET(request: Request) {
-    const auth = await requireAuth(3) // Admin+ only
+    const auth = await requireAuth(4) // Manager+
     if (!isAuthed(auth)) return auth
 
     const { searchParams } = new URL(request.url)
     const employeeId = searchParams.get('employee_id')
     if (!employeeId) return NextResponse.json({ error: 'employee_id is required' }, { status: 400 })
+
+    const manageableIds = await getManageableEmployeeIds(auth.db, auth.employee.id, auth.employee.roleLevel)
+    if (manageableIds && !manageableIds.includes(employeeId)) {
+        return NextResponse.json({ error: 'You do not have access to this employee' }, { status: 403 })
+    }
 
     const { rows } = await auth.db.query(
         `SELECT we.id, we.period_start, we.period_end, we.total_assigned_points, we.total_earned_points, we.note, we.evaluated_at,
@@ -25,8 +32,9 @@ export async function GET(request: Request) {
 
 // POST /api/work-comparison/evaluations - save an evaluation, score each work report,
 // and award the earned points on top of the employee's existing total (never overwritten).
+// Admin+, or a Manager scoped to people they manage (see getManageableEmployeeIds).
 export async function POST(request: Request) {
-    const auth = await requireAuth(3) // Admin+ only
+    const auth = await requireAuth(4) // Manager+
     if (!isAuthed(auth)) return auth
     const db = auth.db
 
@@ -38,6 +46,11 @@ export async function POST(request: Request) {
     }
     if (!Array.isArray(items)) {
         return NextResponse.json({ error: 'items must be an array of { work_report_id, points }' }, { status: 400 })
+    }
+
+    const manageableIds = await getManageableEmployeeIds(db, auth.employee.id, auth.employee.roleLevel)
+    if (manageableIds && !manageableIds.includes(employee_id)) {
+        return NextResponse.json({ error: 'You do not have access to this employee' }, { status: 403 })
     }
 
     const cleanItems = items

@@ -22,6 +22,9 @@ interface Task {
     title: string
     description: string | null
     due_date: string | null
+    start_time: string | null
+    end_time: string | null
+    notes: string | null
     priority: 'low' | 'medium' | 'high' | 'urgent'
     status: 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'rejected'
     created_by: string
@@ -85,6 +88,15 @@ function getAvatarColor(name: string) {
     return colors[name.charCodeAt(0) % colors.length]
 }
 
+// start_time/end_time come back as plain "HH:MM:SS" TIME values (no date) — format for display.
+function formatTime(t: string | null) {
+    if (!t) return null
+    const [h, m] = t.split(':')
+    const hr = parseInt(h)
+    const ampm = hr >= 12 ? 'PM' : 'AM'
+    return `${hr % 12 || 12}:${m} ${ampm}`
+}
+
 // Description lines optionally carry a trailing "[Npt]" marker set via the Create Task
 // modal's per-item points field; strip it out for display and surface it separately.
 function parseDescriptionLine(line: string): { text: string; points: number | null } {
@@ -120,7 +132,7 @@ function getDateRange(key: string): { start: string; end: string } | null {
     return null
 }
 
-const emptyForm = { titles: [{ id: 'init', val: '' }], description: '', due_date: '', priority: 'medium', assignee_ids: [] as string[] }
+const emptyForm = { titles: [{ id: 'init', val: '' }], description: '', due_date: '', start_time: '', end_time: '', priority: 'medium', assignee_ids: [] as string[] }
 
 export default function TasksPage() {
     const { data: perms } = usePermissions()
@@ -135,12 +147,20 @@ export default function TasksPage() {
     const [canCreateTask, setCanCreateTask] = useState(false)
     const [currentEmployeeId, setCurrentEmployeeId] = useState<string | null>(null)
     const [employees, setEmployees] = useState<Employee[]>([])
+    // Who a Manager (not Admin+) is allowed to assign a task to when creating one — themselves
+    // plus anyone specifically granted via the "Report Access" tab (see
+    // getWorkReportAccessTargets in src/lib/workReports.ts). Admin+ stays unrestricted (full
+    // `employees` list), so this only matters for a Manager's Create Task modal.
+    const [reportAccessTargetIds, setReportAccessTargetIds] = useState<string[]>([])
     const [activeFilter, setActiveFilter] = useState('all')
     const [showModal, setShowModal] = useState(false)
     const [form, setForm] = useState(emptyForm)
     const [descRows, setDescRows] = useState<{ id: string; val: string; points: string }[]>([{ id: 'desc-init', val: '', points: '' }])
     const [saving, setSaving] = useState(false)
     const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+    const [noteDraftTaskId, setNoteDraftTaskId] = useState<string | null>(null)
+    const [noteDraft, setNoteDraft] = useState('')
+    const [savingNote, setSavingNote] = useState(false)
     const [assigneeSearch, setAssigneeSearch] = useState('')
     const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([])
     const [logsLoading, setLogsLoading] = useState(false)
@@ -197,6 +217,34 @@ export default function TasksPage() {
         if (perms.is_super || (perms.role && ['Admin', 'Owner', 'Super Admin', 'Manager'].includes(perms.role))) setCanCreateTask(true)
         if (perms.employee_id) setCurrentEmployeeId(perms.employee_id)
     }, [perms])
+
+    useEffect(() => {
+        if (!canCreateTask || isAdmin || !currentEmployeeId) return
+        fetch(`/api/work-report-access?viewer_id=${currentEmployeeId}`)
+            .then(r => r.json())
+            .then(rows => { if (Array.isArray(rows)) setReportAccessTargetIds(rows.map((r: { target_id: string }) => r.target_id)) })
+            .catch(() => { })
+    }, [canCreateTask, isAdmin, currentEmployeeId])
+
+    // A Manager with the blanket "Daily Work Report (View All)" grant manages everyone, same as
+    // Admin+ — see getManageableEmployeeIds in src/lib/workReports.ts (the server-side source of
+    // truth this mirrors).
+    const hasBlanketReportAccess = !!(perms.permissions && perms.permissions['work-report-view-all'] && perms.permissions['work-report-view-all'] !== 'no_access')
+    const canManageEveryone = isAdmin || hasBlanketReportAccess
+
+    // Admin+ (or a Manager with the blanket grant) can assign a task to anyone (unchanged); any
+    // other Manager can only assign to themselves plus whoever they've been specifically granted
+    // Daily Work Report access to — same scoping POST /api/tasks enforces server-side.
+    const assignableEmployees = canManageEveryone
+        ? employees
+        : employees.filter(e => e.id === currentEmployeeId || reportAccessTargetIds.includes(e.id))
+
+    // Same manageable-employee scope, handed to Work Comparison's own employee picker.
+    // `undefined` means unrestricted (Admin+ or blanket-granted Manager); otherwise the picker is
+    // limited to this exact id list.
+    const workComparisonAllowedIds: string[] | undefined = canManageEveryone
+        ? undefined
+        : [currentEmployeeId, ...reportAccessTargetIds].filter((id): id is string => !!id)
 
     const fetchLogs = async (taskId: string) => {
         if (!isAdmin) return
@@ -269,6 +317,7 @@ export default function TasksPage() {
     const handleSave = async () => {
         const validTitles = form.titles.filter(t => t.val.trim().length > 0)
         if (validTitles.length === 0) return
+        if (!form.due_date) { toast.error('Due date is required'); return }
         setSaving(true)
         try {
             for (const t of validTitles) {
@@ -311,6 +360,29 @@ export default function TasksPage() {
             const updated = (fresh || []).find(t => t.id === taskId)
             if (updated) setSelectedTask(updated)
             fetchLogs(taskId)
+        }
+    }
+
+    const handleSaveNote = async () => {
+        if (!selectedTask) return
+        setSavingNote(true)
+        try {
+            const res = await fetch('/api/tasks', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: selectedTask.id, notes: noteDraft.trim() || null }),
+            })
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}))
+                toast.error(err.error || 'Failed to save note')
+                return
+            }
+            toast.success('Note saved')
+            const fresh = await fetchTasks()
+            const updated = (fresh || []).find(t => t.id === selectedTask.id)
+            if (updated) setSelectedTask(updated)
+        } finally {
+            setSavingNote(false)
         }
     }
 
@@ -442,11 +514,13 @@ export default function TasksPage() {
             })
             if (!isAssigned) return false
         } else if (!isAdmin && currentEmployeeId) {
+            // A non-admin sees tasks assigned to them, plus tasks they created themselves (e.g. a
+            // Manager who created a task and assigned it to someone else should still see it).
             const isAssigned = t.task_assignments.some(a => {
                 const empId = a.employee ? (Array.isArray(a.employee) ? (a.employee as unknown as Employee[])[0]?.id : a.employee.id) : null
                 return empId === currentEmployeeId
             })
-            if (!isAssigned) return false
+            if (!isAssigned && t.created_by !== currentEmployeeId) return false
         }
         if (activeFilter !== 'all' && activeFilter !== 'my_tasks' && t.status !== activeFilter) return false
 
@@ -480,10 +554,11 @@ export default function TasksPage() {
     // Base list respecting member scope (before status filter)
     const scopedTasks = tasks.filter(t => {
         if (!isAdmin && currentEmployeeId) {
-            return t.task_assignments.some(a => {
+            const isAssigned = t.task_assignments.some(a => {
                 const empId = a.employee ? (Array.isArray(a.employee) ? (a.employee as unknown as Employee[])[0]?.id : a.employee.id) : null
                 return empId === currentEmployeeId
             })
+            return isAssigned || t.created_by === currentEmployeeId
         }
         return true
     })
@@ -493,6 +568,14 @@ export default function TasksPage() {
         pending: scopedTasks.filter(t => t.status === 'pending').length,
         active: scopedTasks.filter(t => t.status === 'in_progress').length,
         completed: scopedTasks.filter(t => t.status === 'completed').length,
+    }
+
+    // Reset the note draft only when a different task is opened, not on every refresh of the
+    // same task (which would otherwise clobber an in-progress edit) — adjusted during render
+    // rather than in a useEffect (see https://react.dev/learn/you-might-not-need-an-effect).
+    if ((selectedTask?.id ?? null) !== noteDraftTaskId) {
+        setNoteDraftTaskId(selectedTask?.id ?? null)
+        setNoteDraft(selectedTask?.notes || '')
     }
 
     return (
@@ -535,7 +618,7 @@ export default function TasksPage() {
                     >
                         Daily Work Report
                     </button>
-                    {isAdmin && (
+                    {canCreateTask && (
                         <button
                             className={`tab-btn ${activeMainTab === 'comparison' ? 'active' : ''}`}
                             onClick={() => setActiveMainTab('comparison')}
@@ -563,7 +646,7 @@ export default function TasksPage() {
             {activeMainTab === 'reports' ? (
                 <DailyWorkReport />
             ) : activeMainTab === 'comparison' ? (
-                <WorkComparison />
+                <WorkComparison allowedEmployeeIds={workComparisonAllowedIds} />
             ) : activeMainTab === 'reportAccess' ? (
                 <ReportAccessManager />
             ) : (
@@ -666,11 +749,13 @@ export default function TasksPage() {
 
             {/* Tasks List */}
             {loading ? (
-                <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '12px' }}>
+                <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '16px' }}>
                     {[1, 2, 3].map(i => (
-                        <div key={i} className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            <div className="skeleton" style={{ width: '60%', height: 16 }} />
-                            <div className="skeleton" style={{ width: '40%', height: 12 }} />
+                        <div key={i} className="card" style={{ height: '300px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            <div className="skeleton" style={{ width: '50%', height: 20, borderRadius: '6px' }} />
+                            <div className="skeleton" style={{ width: '85%', height: 14, borderRadius: '4px' }} />
+                            <div className="skeleton" style={{ width: '70%', height: 14, borderRadius: '4px' }} />
+                            <div className="skeleton" style={{ marginTop: 'auto', width: '100%', height: '48px', borderRadius: '8px' }} />
                         </div>
                     ))}
                 </motion.div>
@@ -685,7 +770,7 @@ export default function TasksPage() {
                     </p>
                 </motion.div>
             ) : (
-                <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '12px' }}>
+                <motion.div variants={item} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '16px' }}>
                     {filtered.map(task => {
                         const sc = statusConfig[task.status] || statusConfig.pending
                         const pc = priorityConfig[task.priority] || priorityConfig.medium
@@ -697,79 +782,109 @@ export default function TasksPage() {
 
                         return (
                             <motion.div key={task.id} className="card"
-                                style={{ cursor: 'pointer', position: 'relative', overflow: 'hidden', border: isOverdue ? '1px solid rgba(220,38,38,0.3)' : undefined, background: isOverdue ? 'rgba(220,38,38,0.03)' : undefined }}
+                                style={{
+                                    cursor: 'pointer', position: 'relative', overflow: 'hidden', height: '300px', display: 'flex', flexDirection: 'column',
+                                    border: isOverdue ? '1px solid rgba(220,38,38,0.3)' : undefined, background: isOverdue ? 'rgba(220,38,38,0.03)' : undefined,
+                                }}
                                 whileHover={{ y: -2, boxShadow: '0 8px 30px rgba(0,0,0,0.08)' }}
                                 onClick={() => { setSelectedTask(task); fetchLogs(task.id) }}>
                                 <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: '4px', background: pc.color }} />
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
-                                            <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>
-                                                {task.task_no && (
-                                                    <span style={{ color: '#2563EB', marginRight: '6px', fontFamily: 'monospace', fontWeight: 700 }}>
-                                                        {task.task_no}
-                                                    </span>
-                                                )}
-                                                {task.title}
-                                            </h3>
-                                            <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: sc.bg }}>{sc.label}</span>
-                                            <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 500, color: pc.color, background: `${pc.color}15` }}>{pc.label}</span>
-                                            {isOverdue && <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#DC2626' }}>OVERDUE</span>}
-                                            {myAssignment?.status === 'pending' && (
-                                                <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: '#fff', background: '#F59E0B' }}>Action Required</span>
-                                            )}
+                                <span style={{ position: 'absolute', top: '12px', right: '16px', fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
+                                    {new Date(task.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                </span>
+                                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', flexWrap: 'wrap', flexShrink: 0 }}>
+                                        <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: sc.bg }}>{sc.label}</span>
+                                        <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 500, color: pc.color, background: `${pc.color}15` }}>{pc.label}</span>
+                                        {isOverdue && <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 700, color: '#fff', background: '#DC2626' }}>OVERDUE</span>}
+                                        {myAssignment?.status === 'pending' && (
+                                            <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: '#fff', background: '#F59E0B' }}>Action Required</span>
+                                        )}
+                                    </div>
+                                    <h3 style={{
+                                        fontSize: '1rem', fontWeight: 700, margin: '0 0 8px', lineHeight: 1.35, flexShrink: 0,
+                                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere',
+                                    }}>
+                                        {task.task_no && (
+                                            <span style={{ color: '#2563EB', marginRight: '6px', fontFamily: 'monospace', fontWeight: 700 }}>
+                                                {task.task_no}
+                                            </span>
+                                        )}
+                                        {task.title}
+                                    </h3>
+                                    {task.description && (
+                                        <div style={{ margin: '0 0 8px', minHeight: 0, overflow: 'hidden' }}>
+                                            {task.description.split('\n').slice(0, 3).map((line, i) => {
+                                                const { text, points } = parseDescriptionLine(line)
+                                                return (
+                                                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.8125rem', color: 'var(--color-text-secondary)', lineHeight: 1.5, marginBottom: '2px' }}>
+                                                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text}</span>
+                                                        {points !== null && (
+                                                            <span style={{ padding: '1px 7px', borderRadius: '10px', fontSize: '0.6875rem', fontWeight: 700, color: '#F59E0B', background: 'rgba(245,158,11,0.12)', flexShrink: 0 }}>{points} pt{points !== 1 ? 's' : ''}</span>
+                                                        )}
+                                                    </div>
+                                                )
+                                            })}
                                         </div>
-                                        {task.description && (
-                                            <div style={{ margin: '0 0 8px' }}>
-                                                {task.description.split('\n').map((line, i) => {
-                                                    const { text, points } = parseDescriptionLine(line)
-                                                    return (
-                                                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8125rem', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
-                                                            <span style={{ flex: 1 }}>{text}</span>
-                                                            {points !== null && (
-                                                                <span style={{ padding: '1px 7px', borderRadius: '10px', fontSize: '0.6875rem', fontWeight: 700, color: '#F59E0B', background: 'rgba(245,158,11,0.12)', flexShrink: 0 }}>{points} pt{points !== 1 ? 's' : ''}</span>
-                                                            )}
-                                                        </div>
-                                                    )
-                                                })}
+                                    )}
+
+                                    {/* Footer box — due/time/created + assignees, pinned to the bottom so every
+                                        card lands at the same fixed height regardless of description length. */}
+                                    <div style={{
+                                        marginTop: 'auto', flexShrink: 0, padding: '8px 10px', borderRadius: '8px',
+                                        background: 'rgba(118,118,128,0.05)', display: 'flex', flexDirection: 'column', gap: '6px',
+                                    }}>
+                                        {(task.due_date || task.start_time || task.end_time) && (
+                                            <div style={{
+                                                display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: 'fit-content',
+                                                padding: '4px 8px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 600,
+                                                color: isOverdue ? '#DC2626' : '#7C3AED', background: isOverdue ? 'rgba(220,38,38,0.1)' : 'rgba(124,58,237,0.1)',
+                                            }}>
+                                                {task.due_date && (
+                                                    <span>Due {new Date(task.due_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                                                )}
+                                                {(task.start_time || task.end_time) && (
+                                                    <span>{formatTime(task.start_time) || '-'} - {formatTime(task.end_time) || '-'}</span>
+                                                )}
                                             </div>
                                         )}
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
-                                            {task.due_date && (
-                                                <span style={{ color: isOverdue ? '#DC2626' : undefined, fontWeight: isOverdue ? 600 : undefined }}>
-                                                    Due: {new Date(task.due_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                                </span>
-                                            )}
-                                            <span>{new Date(task.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
                                                 <svg width="12" height="12" viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" /></svg>
                                                 {task.task_assignments.length} assigned
                                             </span>
-                                        </div>
-                                    </div>
-                                    {/* Assignee avatars */}
-                                    <div style={{ display: 'flex', gap: '-8px' }}>
-                                        {task.task_assignments.slice(0, 3).map((a, i) => {
-                                            const empName = a.employee ? (Array.isArray(a.employee) ? (a.employee as unknown as Employee[])[0]?.name : a.employee.name) : '?'
-                                            const asc = assignmentStatusConfig[a.status]
-                                            return (
-                                                <div key={a.id} style={{
-                                                    width: '28px', height: '28px', borderRadius: '50%',
-                                                    background: getAvatarColor(empName || '?'),
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                    color: '#fff', fontSize: '0.5625rem', fontWeight: 600,
-                                                    border: `2px solid ${asc?.color || '#ccc'}`,
-                                                    marginLeft: i > 0 ? '-8px' : '0',
-                                                    position: 'relative', zIndex: 3 - i, overflow: 'hidden',
-                                                }} title={`${empName} - ${asc?.label || 'Unknown'}`}>
-                                                    {(() => { const empAvatar = a.employee ? (Array.isArray(a.employee) ? (a.employee as unknown as Employee[])[0]?.avatar_url : (a.employee as any)?.avatar_url) : null; return empAvatar ? <img src={empAvatar} alt="" onError={(e) => { e.currentTarget.style.display = 'none' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (empName || '?')[0]; })()}
-                                                </div>
-                                            )
-                                        })}
-                                        {task.task_assignments.length > 3 && (
-                                            <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'var(--color-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.5625rem', fontWeight: 600, border: '2px solid var(--color-border-light)', marginLeft: '-8px', zIndex: 0, color: 'var(--color-text-tertiary)' }}>
-                                                +{task.task_assignments.length - 3}
+                                            {/* Assignee avatars */}
+                                            <div style={{ display: 'flex' }}>
+                                                {task.task_assignments.slice(0, 3).map((a, i) => {
+                                                    const empName = a.employee ? (Array.isArray(a.employee) ? (a.employee as unknown as Employee[])[0]?.name : a.employee.name) : '?'
+                                                    const asc = assignmentStatusConfig[a.status]
+                                                    return (
+                                                        <div key={a.id} style={{
+                                                            width: '24px', height: '24px', borderRadius: '50%',
+                                                            background: getAvatarColor(empName || '?'),
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                            color: '#fff', fontSize: '0.5625rem', fontWeight: 600,
+                                                            border: `2px solid ${asc?.color || '#ccc'}`,
+                                                            marginLeft: i > 0 ? '-8px' : '0',
+                                                            position: 'relative', zIndex: 3 - i, overflow: 'hidden',
+                                                        }} title={`${empName} - ${asc?.label || 'Unknown'}`}>
+                                                            {(() => { const empAvatar = a.employee ? (Array.isArray(a.employee) ? (a.employee as unknown as Employee[])[0]?.avatar_url : (a.employee as any)?.avatar_url) : null; return empAvatar ? <img src={empAvatar} alt="" onError={(e) => { e.currentTarget.style.display = 'none' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (empName || '?')[0]; })()}
+                                                        </div>
+                                                    )
+                                                })}
+                                                {task.task_assignments.length > 3 && (
+                                                    <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'var(--color-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.5625rem', fontWeight: 600, border: '2px solid var(--color-border-light)', marginLeft: '-8px', zIndex: 0, color: 'var(--color-text-tertiary)' }}>
+                                                        +{task.task_assignments.length - 3}
+                                                    </div>
+                                                )}
                                             </div>
+                                        </div>
+                                        {task.notes && (
+                                            <div style={{
+                                                fontSize: '0.75rem', color: '#DC2626',
+                                                overflowWrap: 'anywhere', wordBreak: 'break-word',
+                                                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                                            }}><strong>Note:</strong> {task.notes}</div>
                                         )}
                                     </div>
                                 </div>
@@ -822,6 +937,11 @@ export default function TasksPage() {
                                     {selectedTask.due_date && (
                                         <span style={{ fontSize: '0.8125rem', color: new Date(selectedTask.due_date + 'T23:59:59') < new Date() && selectedTask.status !== 'completed' ? '#DC2626' : 'var(--color-text-tertiary)' }}>
                                             Due: {new Date(selectedTask.due_date + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                                        </span>
+                                    )}
+                                    {(selectedTask.start_time || selectedTask.end_time) && (
+                                        <span style={{ padding: '4px 10px', borderRadius: '6px', fontSize: '0.8125rem', fontWeight: 600, color: '#7C3AED', background: 'rgba(124,58,237,0.1)' }}>
+                                            {formatTime(selectedTask.start_time) || '-'} - {formatTime(selectedTask.end_time) || '-'}
                                         </span>
                                     )}
                                     {/* Member Complete button - only for accepted assignees */}
@@ -907,6 +1027,44 @@ export default function TasksPage() {
                                         })}
                                     </div>
                                 </div>
+
+                                {/* Note — free-text note on the task, editable by an admin or anyone assigned to it */}
+                                {(() => {
+                                    const isAssignee = selectedTask.task_assignments.some(a => {
+                                        const empId = a.employee ? (Array.isArray(a.employee) ? (a.employee as unknown as Employee[])[0]?.id : a.employee.id) : null
+                                        return empId === currentEmployeeId
+                                    })
+                                    const canEditNote = isAdmin || isAssignee
+                                    if (!canEditNote && !selectedTask.notes) return null
+                                    return (
+                                        <div>
+                                            <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', marginBottom: '8px' }}>Note</div>
+                                            {canEditNote ? (
+                                                <div>
+                                                    <textarea
+                                                        className="form-input"
+                                                        value={noteDraft}
+                                                        onChange={e => setNoteDraft(e.target.value)}
+                                                        placeholder="Write a note..."
+                                                        rows={3}
+                                                        style={{ fontSize: '0.875rem', resize: 'vertical', width: '100%' }}
+                                                    />
+                                                    {noteDraft !== (selectedTask.notes || '') && (
+                                                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
+                                                            <button className="btn btn-primary btn-sm" disabled={savingNote} onClick={handleSaveNote}>
+                                                                {savingNote ? 'Saving...' : 'Save Note'}
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <div style={{ padding: '12px 16px', background: 'var(--color-surface)', borderRadius: '10px', border: '1px solid var(--color-border-light)', fontSize: '0.875rem', lineHeight: 1.6, whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>
+                                                    {selectedTask.notes}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )
+                                })()}
 
                                 {/* Meta */}
                                 <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', borderTop: '1px solid var(--color-border-light)', paddingTop: '12px' }}>
@@ -1134,7 +1292,7 @@ export default function TasksPage() {
                 {showModal && (
                     <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowModal(false)}>
                         <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                            onClick={e => e.stopPropagation()} style={{ maxWidth: '520px', width: '100%' }}>
+                            onClick={e => e.stopPropagation()} style={{ maxWidth: '680px', width: '100%', maxHeight: '85vh', overflow: 'auto' }}>
                             <div className="modal-header">
                                 <h2 className="modal-title">Create Task</h2>
                                 <button className="btn btn-ghost btn-sm" onClick={() => setShowModal(false)}>
@@ -1243,8 +1401,8 @@ export default function TasksPage() {
                                 </div>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                     <div className="form-group">
-                                        <label className="form-label">Due Date</label>
-                                        <input className="form-input" type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} />
+                                        <label className="form-label">Due Date *</label>
+                                        <input className="form-input" type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} required />
                                     </div>
                                     <div className="form-group">
                                         <label className="form-label">Priority</label>
@@ -1255,6 +1413,14 @@ export default function TasksPage() {
                                             <option value="urgent">Urgent</option>
                                         </select>
                                     </div>
+                                    <div className="form-group">
+                                        <label className="form-label">Start Time</label>
+                                        <input className="form-input" type="time" value={form.start_time} onChange={e => setForm({ ...form, start_time: e.target.value })} />
+                                    </div>
+                                    <div className="form-group">
+                                        <label className="form-label">End Time</label>
+                                        <input className="form-input" type="time" value={form.end_time} onChange={e => setForm({ ...form, end_time: e.target.value })} />
+                                    </div>
                                 </div>
                                 <div className="form-group">
                                     <label className="form-label">Assign To</label>
@@ -1262,7 +1428,7 @@ export default function TasksPage() {
                                     {form.assignee_ids.length > 0 && (
                                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px' }}>
                                             {form.assignee_ids.map(id => {
-                                                const emp = employees.find(e => e.id === id)
+                                                const emp = assignableEmployees.find(e => e.id === id)
                                                 return emp ? (
                                                     <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 8px 3px 6px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 500, background: '#2563EB15', color: '#2563EB', border: '1px solid #2563EB25' }}>
                                                         <span style={{ width: '16px', height: '16px', borderRadius: '50%', background: getAvatarColor(emp.name), color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.5rem', fontWeight: 700, flexShrink: 0 }}>{emp.name[0]}</span>
@@ -1286,7 +1452,7 @@ export default function TasksPage() {
                                     />
                                     {/* Select All / Deselect All */}
                                     <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
-                                        <button type="button" onClick={() => setForm({ ...form, assignee_ids: employees.map(e => e.id) })}
+                                        <button type="button" onClick={() => setForm({ ...form, assignee_ids: assignableEmployees.map(e => e.id) })}
                                             style={{ padding: '3px 10px', fontSize: '0.6875rem', fontWeight: 500, border: '1px solid var(--color-border-light)', borderRadius: '6px', background: 'var(--color-surface)', color: 'var(--color-text-secondary)', cursor: 'pointer' }}>
                                             Select All
                                         </button>
@@ -1299,7 +1465,7 @@ export default function TasksPage() {
                                     </div>
                                     {/* Member list */}
                                     <div style={{ maxHeight: '180px', overflow: 'auto', border: '1px solid var(--color-border-light)', borderRadius: '8px', background: 'var(--color-surface)' }}>
-                                        {employees
+                                        {assignableEmployees
                                             .filter(emp => !assigneeSearch || emp.name.toLowerCase().includes(assigneeSearch.toLowerCase()))
                                             .map(emp => {
                                                 const isSelected = form.assignee_ids.includes(emp.id)
@@ -1328,7 +1494,7 @@ export default function TasksPage() {
                                                     </div>
                                                 )
                                             })}
-                                        {employees.filter(emp => !assigneeSearch || emp.name.toLowerCase().includes(assigneeSearch.toLowerCase())).length === 0 && (
+                                        {assignableEmployees.filter(emp => !assigneeSearch || emp.name.toLowerCase().includes(assigneeSearch.toLowerCase())).length === 0 && (
                                             <div style={{ padding: '16px', textAlign: 'center', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>No members found</div>
                                         )}
                                     </div>
@@ -1341,7 +1507,7 @@ export default function TasksPage() {
                             </div>
                             <div className="modal-footer">
                                 <button className="btn btn-secondary btn-sm" onClick={() => setShowModal(false)}>Cancel</button>
-                                <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving || !form.titles.some(t => t.val.trim().length > 0)}>
+                                <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving || !form.titles.some(t => t.val.trim().length > 0) || !form.due_date}>
                                     {saving ? 'Creating...' : 'Create Tasks'}
                                 </button>
                             </div>

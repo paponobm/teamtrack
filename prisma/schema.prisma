@@ -964,6 +964,9 @@ model tasks {
   title            String
   description      String?
   due_date         DateTime?          @db.Date
+  start_time       DateTime?          @db.Time(6)
+  end_time         DateTime?          @db.Time(6)
+  notes            String?
   priority         String?            @default("medium")
   status           String?            @default("pending")
   created_by       String?            @db.Uuid
