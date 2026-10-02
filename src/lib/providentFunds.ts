@@ -18,23 +18,14 @@ export function computeMonthlyInstallment(principal: number, durationMonths: num
 // back from the company at maturity — shown for reference only, with no bearing on Paid/Due,
 // which track the principal-only deduction against payroll (computeMonthlyInstallment above).
 //
-// The contribution is a *recurring* monthly deposit (the same amount already deducted from
-// salary each month), not a lump sum invested once on day one — so maturity value is the
-// future value of that whole stream of monthly deposits compounding at the fund's interest
-// rate, not a single flat interest add-on applied once to the full principal.
-//
-// Contributions are treated as landing at the END of the month they're deducted for: a given
-// month's deduction only exists once that month's Salary Sheet entry is actually marked Paid
-// (see getProvidentFundPaidSummaries below) — there's no beginning-of-month advance
-// contribution anywhere in this flow — so this uses the ordinary-annuity future-value formula:
-// FV = P × [((1+r)^n − 1) / r], where P is the monthly contribution, r is the monthly rate
-// (annual interestRate ÷ 12 ÷ 100), and n is durationMonths. A 0% rate degenerates to
-// FV = P × n = the total principal contributed, matching what the formula converges to as r → 0.
+// Interest here is a single flat company-policy rate (currently always 100% — see
+// PROVIDENT_FUND_INTEREST_RATE in ProvidentFundManager.tsx) applied once to the whole principal
+// contributed over the fund's duration, not compounded month to month — e.g. ৳1,000/month for
+// 6 months is ৳6,000 principal, and at 100% interest matures to ৳12,000 (principal doubled).
 export function computeMaturityAmount(monthlyContribution: number, interestRate: number, durationMonths: number): number {
     if (!monthlyContribution || !durationMonths) return 0
-    const r = (interestRate || 0) / 12 / 100
-    if (r === 0) return monthlyContribution * durationMonths
-    return monthlyContribution * ((Math.pow(1 + r, durationMonths) - 1) / r)
+    const principal = monthlyContribution * durationMonths
+    return principal * (1 + (interestRate || 0) / 100)
 }
 
 function monthKeyToIndex(month: string): number {
