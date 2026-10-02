@@ -244,7 +244,10 @@ export default function AttendanceReport() {
                             </tr>
                         </thead>
                         <tbody>
-                            {employeeRows.map((emp, i) => (
+                            {/* Deactivated (OUT) employees sink to the bottom of the list instead
+                                of sitting wherever they happen to fall — a stable sort, so
+                                everyone else's relative order is otherwise untouched. */}
+                            {[...employeeRows].sort((a, b) => Number(a.is_active === false) - Number(b.is_active === false)).map((emp, i) => (
                                 <tr key={emp.id} onClick={() => setViewingEmployee({ id: emp.id, name: emp.name || '-' })} style={{ cursor: 'pointer' }} title="View full month attendance">
                                     <td style={{ color: 'var(--color-text-tertiary)' }}>{i + 1}</td>
                                     <td>

@@ -666,7 +666,10 @@ export default function AttendancePage() {
                             </tr>
                         </thead>
                         <tbody>
-                            {(filteredByStatus ?? records).map((record) => {
+                            {/* Deactivated (OUT) employees sink to the bottom of the list instead
+                                of sitting wherever they happen to fall — a stable sort, so
+                                everyone else's relative order is otherwise untouched. */}
+                            {[...(filteredByStatus ?? records)].sort((a, b) => Number(a.employee.is_active === false) - Number(b.employee.is_active === false)).map((record) => {
                                 const sc = statusConfig[record.status] || statusConfig.present
                                 return (
                                     <motion.tr key={record.id}

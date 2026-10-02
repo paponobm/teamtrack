@@ -184,7 +184,10 @@ export default function AdminLeaves() {
                                     }
                                     return acc
                                 }, {} as Record<string, any>))
-                                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                                // Deactivated (OUT) employees' requests sink to the bottom of the
+                                // queue — the existing most-recent-first order is preserved within
+                                // each active/inactive group.
+                                .sort((a, b) => Number(a.employee?.is_active === false) - Number(b.employee?.is_active === false) || new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
                                 .map((l: any) => {
                                     l.dates.sort()
                                     const dateStr = l.dates.length === 1 

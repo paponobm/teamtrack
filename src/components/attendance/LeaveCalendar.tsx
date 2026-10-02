@@ -63,7 +63,9 @@ export default function LeaveCalendar({ records }: { records: LeaveRecord[] }) {
             if (!tally[eid]) tally[eid] = { id: eid, name, avatar_url: r.employee?.avatar_url || null, is_active: r.employee?.is_active !== false, days: 0 }
             tally[eid].days++
         })
-        return Object.values(tally).sort((a, b) => b.days - a.days)
+        // Deactivated (OUT) members still sink to the bottom, even on this leaderboard — the
+        // "most days" ranking below is preserved within each active/inactive group.
+        return Object.values(tally).sort((a, b) => Number(a.is_active === false) - Number(b.is_active === false) || b.days - a.days)
     }, [monthLeaves])
 
     const maxDays = leaveSummary[0]?.days || 0
@@ -222,7 +224,9 @@ export default function LeaveCalendar({ records }: { records: LeaveRecord[] }) {
                             </div>
                             
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '60vh', overflowY: 'auto' }}>
-                                {byDay[parseInt(selectedDate.split('-')[2], 10)]?.map(l => (
+                                {[...(byDay[parseInt(selectedDate.split('-')[2], 10)] || [])]
+                                    .sort((a, b) => Number(a.employee?.is_active === false) - Number(b.employee?.is_active === false))
+                                    .map(l => (
                                     <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '8px', borderRadius: '8px', border: '1px solid var(--color-border-light)' }}>
                                         <div className="avatar" style={{ width: 32, height: 32, fontSize: '0.875rem', background: getAvatarColor(l.employee?.name || '?'), overflow: 'hidden', flexShrink: 0 }}>
                                             {l.employee?.avatar_url
