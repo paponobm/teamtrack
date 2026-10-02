@@ -13,6 +13,7 @@ interface EmployeePayrollFields {
     payroll_basic_salary: number
     payroll_transportation_bill: number
     payroll_snacks_bill: number
+    payroll_extra_duty: number
     basic_salary_effective_month: string | null
     festival_bonus_percentage: number
     festival_bonus_months: number[]
@@ -46,10 +47,17 @@ function buildSeedRow(sheetId: string, month: string, e: EmployeePayrollFields) 
         transportation_bill: Number(e.payroll_transportation_bill) || 0,
         snacks_bill: Number(e.payroll_snacks_bill) || 0,
         festival_bonus: festivalBonus,
+        // Seed-only, unlike the fields above — Extra Duty stays in EDITABLE_AMOUNT_FIELDS
+        // (SalarySheet.tsx), individually typed/adjusted per month same as before. This default
+        // (Members → Edit Member → Payroll tab) only fills in a starting value for a BRAND NEW
+        // row, via the INSERT paths below; syncUnpaidEntriesWithEmployeeDefaults deliberately
+        // never touches extra_duty, so a later change to this default (or a manual per-month
+        // edit) can never silently overwrite what an admin already typed for a given month.
+        extra_duty: Number(e.payroll_extra_duty) || 0,
     }
 }
 
-const EMPLOYEE_PAYROLL_FIELDS = 'id, payroll_basic_salary, payroll_transportation_bill, payroll_snacks_bill, basic_salary_effective_month, festival_bonus_percentage, festival_bonus_months, salary_increment_amount, salary_increment_effective_month'
+const EMPLOYEE_PAYROLL_FIELDS = 'id, payroll_basic_salary, payroll_transportation_bill, payroll_snacks_bill, payroll_extra_duty, basic_salary_effective_month, festival_bonus_percentage, festival_bonus_months, salary_increment_amount, salary_increment_effective_month'
 
 // Adds a salary_entries row for any currently-active employee who doesn't have one yet on
 // this sheet — covers members added (or reactivated) after the sheet was first created, who
@@ -71,9 +79,9 @@ async function syncNewEmployeesIntoSheet(db: Db, sheetId: string, month: string)
     const rows = missing.map(e => buildSeedRow(sheetId, month, e))
     for (const row of rows) {
         await db.query(
-            `INSERT INTO salary_entries (salary_sheet_id, employee_id, basic_salary, transportation_bill, snacks_bill, festival_bonus)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [row.salary_sheet_id, row.employee_id, row.basic_salary, row.transportation_bill, row.snacks_bill, row.festival_bonus]
+            `INSERT INTO salary_entries (salary_sheet_id, employee_id, basic_salary, transportation_bill, snacks_bill, festival_bonus, extra_duty)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [row.salary_sheet_id, row.employee_id, row.basic_salary, row.transportation_bill, row.snacks_bill, row.festival_bonus, row.extra_duty]
         )
     }
 }
@@ -124,14 +132,14 @@ async function syncUnpaidEntriesWithEmployeeDefaults(db: Db, sheetId: string, mo
 // live-computed attendance/fine numbers and derived net_payable for each row.
 async function buildSheetResponse(db: Db, sheetId: string, month: string) {
     const { rows: entries } = await db.query(
-        `SELECT se.id, se.employee_id, se.basic_salary, se.extra_duty, se.transportation_bill, se.snacks_bill,
+        `SELECT se.id, se.employee_id, se.basic_salary, se.extra_duty, se.extra_duty_days, se.transportation_bill, se.snacks_bill,
             se.performance_bonus, se.festival_bonus, se.other_deduction, se.payment_status, se.payment_method,
             se.payment_date, se.updated_at, se.attendance_present_override, se.attendance_leave_override, se.paid_amount,
             json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url,
                 'joining_date', e.joining_date, 'festival_bonus_percentage', e.festival_bonus_percentage,
                 'basic_salary_effective_month', e.basic_salary_effective_month,
                 'monthly_leave_allowance', e.monthly_leave_allowance, 'is_active', e.is_active,
-                'termination_date', e.termination_date,
+                'termination_date', e.termination_date, 'payroll_extra_duty', e.payroll_extra_duty,
                 'department', json_build_object('id', d.id, 'name', d.name)) AS employee
          FROM salary_entries se
          LEFT JOIN employees e ON e.id = se.employee_id
@@ -182,7 +190,7 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
         const effectivePresent = r.attendance_present_override ?? (attendance[r.employee_id]?.present || 0)
         const monthlyLeaveAllowance = Number(r.employee?.monthly_leave_allowance) || 0
         const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, month)
-        const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.basic_salary) || 0, effectiveLeave, monthlyLeaveAllowance, month)
+        const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.employee?.payroll_extra_duty) || 0, effectiveLeave, monthlyLeaveAllowance, month)
         return {
             id: r.id,
             employee_id: r.employee_id,
@@ -197,9 +205,19 @@ async function buildSheetResponse(db: Db, sheetId: string, month: string) {
                 // salary entry itself is never removed just because the employee later left, so
                 // the sheet still needs to know this to show the "OUT" badge next to their name.
                 is_active: r.employee?.is_active ?? true,
+                // This employee's own configured Extra Duty per-day rate (Members → Edit
+                // Member → Payroll tab) — the Edit Entry modal uses it to turn a typed day count
+                // into the extra_duty amount below, entirely client-side (see
+                // src/app/api/payroll/salary-entries/route.ts for why extra_duty_days is never
+                // recomputed server-side).
+                payroll_extra_duty: Number(r.employee?.payroll_extra_duty) || 0,
             },
             basic_salary: Number(r.basic_salary) || 0,
             extra_duty: Number(r.extra_duty) || 0,
+            // How many Extra Duty days this amount was calculated from (0 for a flat
+            // manually-typed amount, same as before this field existed) — purely informational
+            // and editable alongside extra_duty, never recomputed/validated server-side.
+            extra_duty_days: Number(r.extra_duty_days) || 0,
             // Credited for taking fewer Leave days than the monthly allowance (see
             // computeLeaveSurplusBonus) — shown as an addition on top of Extra Duty on the
             // sheet, but kept separate from the `extra_duty` value above (that one is the
@@ -346,9 +364,9 @@ export async function POST(request: Request) {
         const rows = (activeEmployees as EmployeePayrollFields[]).map(e => buildSeedRow(sheet.id, month, e))
         for (const row of rows) {
             await db.query(
-                `INSERT INTO salary_entries (salary_sheet_id, employee_id, basic_salary, transportation_bill, snacks_bill, festival_bonus)
-                 VALUES ($1, $2, $3, $4, $5, $6)`,
-                [row.salary_sheet_id, row.employee_id, row.basic_salary, row.transportation_bill, row.snacks_bill, row.festival_bonus]
+                `INSERT INTO salary_entries (salary_sheet_id, employee_id, basic_salary, transportation_bill, snacks_bill, festival_bonus, extra_duty)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                [row.salary_sheet_id, row.employee_id, row.basic_salary, row.transportation_bill, row.snacks_bill, row.festival_bonus, row.extra_duty]
             )
         }
     }

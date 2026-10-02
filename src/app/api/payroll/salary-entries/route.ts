@@ -11,7 +11,12 @@ import { NextResponse } from 'next/server'
 // 'transportation_bill'/'snacks_bill'/'festival_bonus' are also excluded — frozen at
 // salary-sheet-creation time from the employee's saved payroll defaults (Super Admin, via
 // Members → Edit Member), not editable per month here.
-const NUMERIC_FIELDS = ['extra_duty', 'performance_bonus', 'other_deduction', 'paid_amount'] as const
+// extra_duty_days is a pure convenience field — the client (EditEntryModal) multiplies it by the
+// employee's configured per-day rate (Members → Edit Member → Payroll → Extra Duty) to arrive at
+// extra_duty, and sends both. It's stored verbatim here like any other numeric field, never
+// recomputed server-side, so a manually-typed extra_duty amount (days left at 0, the original
+// flat-entry workflow) keeps working exactly as it always has.
+const NUMERIC_FIELDS = ['extra_duty', 'extra_duty_days', 'performance_bonus', 'other_deduction', 'paid_amount'] as const
 const PAYMENT_METHODS = ['bKash', 'Rocket', 'Nagad', 'Bank', 'Cash'] as const
 
 // PUT /api/payroll/salary-entries — edit one employee's salary amounts/payment status for
@@ -29,7 +34,7 @@ export async function PUT(request: Request) {
     // Fetched once up front — used both for the Paid-guard check below and for the Activity
     // Log's before/after comparison once the update actually runs.
     const { rows: [oldRecord] } = await db.query(
-        `SELECT se.extra_duty, se.performance_bonus, se.other_deduction, se.paid_amount, se.payment_status,
+        `SELECT se.extra_duty, se.extra_duty_days, se.performance_bonus, se.other_deduction, se.paid_amount, se.payment_status,
              se.payment_method, se.payment_date, se.attendance_present_override, se.attendance_leave_override,
              ss.month
          FROM salary_entries se JOIN salary_sheets ss ON ss.id = se.salary_sheet_id
@@ -137,7 +142,7 @@ export async function PUT(request: Request) {
     const { rows: [data] } = await db.query(
         `UPDATE salary_entries SET ${setClauses.join(', ')} WHERE id = $1
          RETURNING id, employee_id, salary_sheet_id, expense_id, payment_date, payment_status,
-             basic_salary, extra_duty, transportation_bill, snacks_bill, performance_bonus, festival_bonus, other_deduction,
+             basic_salary, extra_duty, extra_duty_days, transportation_bill, snacks_bill, performance_bonus, festival_bonus, other_deduction,
              attendance_present_override, attendance_leave_override, paid_amount`,
         [id, ...keys.map(k => update[k])]
     )
@@ -150,7 +155,7 @@ export async function PUT(request: Request) {
     // fields actually present in this request are compared — untouched fields (e.g. an
     // attendance-only save never touching extra_duty) never show up as a false "no change".
     const FIELD_LABELS: Record<string, string> = {
-        extra_duty: 'Extra Duty', performance_bonus: 'Performance Bonus', other_deduction: 'Other Deduction',
+        extra_duty: 'Extra Duty', extra_duty_days: 'Extra Duty Days', performance_bonus: 'Performance Bonus', other_deduction: 'Other Deduction',
         paid_amount: 'Paid Amount', payment_status: 'Payment Status', payment_method: 'Payment Method',
         payment_date: 'Payment Date', attendance_present_override: 'Present Days (override)',
         attendance_leave_override: 'Leave Days (override)',
@@ -196,11 +201,13 @@ export async function PUT(request: Request) {
         )
     }
 
-    // The employee's own configured free Leave days per month (Members → Edit Member → Duty
-    // Schedule) — looked up once here since both the attendance-override recompute below and
-    // the Paid-settlement block further down need it for computeLeaveDeduction.
-    const { rows: [employeeRow] } = await db.query(`SELECT monthly_leave_allowance FROM employees WHERE id = $1`, [data.employee_id])
+    // The employee's own configured free Leave days per month, and Extra Duty per-day rate
+    // (Members → Edit Member → Payroll/Duty Schedule) — looked up once here since both the
+    // attendance-override recompute below and the Paid-settlement block further down need them
+    // for computeLeaveDeduction/computeLeaveSurplusBonus.
+    const { rows: [employeeRow] } = await db.query(`SELECT monthly_leave_allowance, payroll_extra_duty FROM employees WHERE id = $1`, [data.employee_id])
     const monthlyLeaveAllowance = Number(employeeRow?.monthly_leave_allowance) || 0
+    const extraDutyRate = Number(employeeRow?.payroll_extra_duty) || 0
 
     // Present/Leave were touched (most notably "Delete Record" clearing an adjustment back to
     // null) — recompute the live attendance-log value here so the client can show the real
@@ -222,7 +229,7 @@ export async function PUT(request: Request) {
                 leave: effectiveLeaveDays(computed.leave, computed.absent, data.attendance_leave_override, sheet.month),
             }
             leaveDeductionForResponse = computeLeaveDeduction(Number(data.basic_salary) || 0, attendance.present, attendance.leave, monthlyLeaveAllowance, sheet.month)
-            leaveSurplusBonusForResponse = computeLeaveSurplusBonus(Number(data.basic_salary) || 0, attendance.leave, monthlyLeaveAllowance, sheet.month)
+            leaveSurplusBonusForResponse = computeLeaveSurplusBonus(extraDutyRate, attendance.leave, monthlyLeaveAllowance, sheet.month)
 
             const employeeIds = [data.employee_id]
             const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails] = await Promise.all([
@@ -330,7 +337,7 @@ export async function PUT(request: Request) {
             const effectivePresent = data.attendance_present_override ?? (attendanceStats[data.employee_id]?.present || 0)
             const effectiveLeave = effectiveLeaveDays(attendanceStats[data.employee_id]?.leave || 0, attendanceStats[data.employee_id]?.absent || 0, data.attendance_leave_override, sheet.month)
             const leaveDeduction = computeLeaveDeduction(Number(data.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, sheet.month)
-            const leaveSurplusBonus = computeLeaveSurplusBonus(Number(data.basic_salary) || 0, effectiveLeave, monthlyLeaveAllowance, sheet.month)
+            const leaveSurplusBonus = computeLeaveSurplusBonus(extraDutyRate, effectiveLeave, monthlyLeaveAllowance, sheet.month)
             const netPayable = computeNetPayable(
                 data,
                 fineTotals[data.employee_id] || 0,

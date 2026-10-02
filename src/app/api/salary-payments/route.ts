@@ -117,8 +117,9 @@ export async function POST(request: Request) {
                     })]
                 )
 
-                const { rows: [employeeRow] } = await db.query(`SELECT monthly_leave_allowance FROM employees WHERE id = $1`, [employee_id])
+                const { rows: [employeeRow] } = await db.query(`SELECT monthly_leave_allowance, payroll_extra_duty FROM employees WHERE id = $1`, [employee_id])
                 const monthlyLeaveAllowance = Number(employeeRow?.monthly_leave_allowance) || 0
+                const extraDutyRate = Number(employeeRow?.payroll_extra_duty) || 0
 
                 const employeeIds = [employee_id]
                 const [fineTotals, advanceDetails, productBuyDetails, emiDetails, providentFundDetails, attendanceStats] = await Promise.all([
@@ -132,7 +133,7 @@ export async function POST(request: Request) {
                 const effectivePresent = entry.attendance_present_override ?? (attendanceStats[employee_id]?.present || 0)
                 const effectiveLeave = effectiveLeaveDays(attendanceStats[employee_id]?.leave || 0, attendanceStats[employee_id]?.absent || 0, entry.attendance_leave_override, month)
                 const leaveDeduction = computeLeaveDeduction(Number(entry.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, month)
-                const leaveSurplusBonus = computeLeaveSurplusBonus(Number(entry.basic_salary) || 0, effectiveLeave, monthlyLeaveAllowance, month)
+                const leaveSurplusBonus = computeLeaveSurplusBonus(extraDutyRate, effectiveLeave, monthlyLeaveAllowance, month)
                 const netPayable = computeNetPayable(
                     entry,
                     fineTotals[employee_id] || 0,

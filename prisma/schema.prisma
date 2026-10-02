@@ -356,6 +356,7 @@ model employees {
   payroll_basic_salary                                                   Decimal                   @default(0) @db.Decimal(10, 2)
   payroll_transportation_bill                                            Decimal                   @default(0) @db.Decimal(10, 2)
   payroll_snacks_bill                                                    Decimal                   @default(0) @db.Decimal(10, 2)
+  payroll_extra_duty                                                     Decimal                   @default(0) @db.Decimal(10, 2)
   festival_bonus_percentage                                              Decimal                   @default(0) @db.Decimal(5, 2)
   festival_bonus_months                                                  Int[]                     @default([])
   salary_increment_amount                                                Decimal                   @default(0) @db.Decimal(10, 2)
@@ -898,6 +899,7 @@ model salary_entries {
   employee_id                                     String        @db.Uuid
   basic_salary                                    Decimal       @default(0) @db.Decimal(10, 2)
   extra_duty                                      Decimal       @default(0) @db.Decimal(10, 2)
+  extra_duty_days                                 Int           @default(0)
   advance                                         Decimal       @default(0) @db.Decimal(10, 2)
   loan                                            Decimal       @default(0) @db.Decimal(10, 2)
   other_deduction                                 Decimal       @default(0) @db.Decimal(10, 2)

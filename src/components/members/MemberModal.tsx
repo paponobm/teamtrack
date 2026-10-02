@@ -30,6 +30,7 @@ interface MemberModalProps {
         payroll_basic_salary?: number | null
         payroll_transportation_bill?: number | null
         payroll_snacks_bill?: number | null
+        payroll_extra_duty?: number | null
         basic_salary_effective_month?: string | null
         salary_increment_amount?: number | null
         salary_increment_effective_month?: string | null
@@ -211,6 +212,7 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
         basic_salary_effective_month: member?.basic_salary_effective_month || '',
         transportation_bill: String(member?.payroll_transportation_bill ?? 0),
         snacks_bill: String(member?.payroll_snacks_bill ?? 0),
+        extra_duty: String(member?.payroll_extra_duty ?? 0),
         increment_amount: String(member?.salary_increment_amount ?? 0),
         increment_effective_month: member?.salary_increment_effective_month || '',
     })
@@ -1335,7 +1337,7 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                             </div>
                                         </div>
                                     </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
                                         <div className="input-group">
                                             <label className="input-label">Transportation Bill (৳)</label>
                                             <input className="input" type="number" min="0" value={payrollForm.transportation_bill}
@@ -1347,6 +1349,12 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                             <input className="input" type="number" min="0" value={payrollForm.snacks_bill}
                                                 onFocus={e => e.target.select()}
                                                 onChange={e => setPayrollForm(p => ({ ...p, snacks_bill: e.target.value }))} />
+                                        </div>
+                                        <div className="input-group">
+                                            <label className="input-label">Extra Duty (৳)</label>
+                                            <input className="input" type="number" min="0" value={payrollForm.extra_duty}
+                                                onFocus={e => e.target.select()}
+                                                onChange={e => setPayrollForm(p => ({ ...p, extra_duty: e.target.value }))} />
                                         </div>
                                     </div>
 
@@ -1411,6 +1419,7 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                                         basic_salary_effective_month: payrollForm.basic_salary_effective_month,
                                                         payroll_transportation_bill: Math.max(0, Number(payrollForm.transportation_bill) || 0),
                                                         payroll_snacks_bill: Math.max(0, Number(payrollForm.snacks_bill) || 0),
+                                                        payroll_extra_duty: Math.max(0, Number(payrollForm.extra_duty) || 0),
                                                         salary_increment_amount: Math.max(0, Number(payrollForm.increment_amount) || 0),
                                                         salary_increment_effective_month: payrollForm.increment_effective_month || null,
                                                         festival_bonus_percentage: Math.max(0, Number(festivalBonusForm.percentage) || 0),

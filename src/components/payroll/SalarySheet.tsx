@@ -11,9 +11,13 @@ import OutBadge from '@/components/common/OutBadge'
 export interface SalaryEntry {
     id: string
     employee_id: string
-    employee: { id: string; name: string; employee_id: string | null; avatar_url: string | null; joining_date: string | null; department: string | null; is_active: boolean }
+    employee: { id: string; name: string; employee_id: string | null; avatar_url: string | null; joining_date: string | null; department: string | null; is_active: boolean; payroll_extra_duty: number }
     basic_salary: number
     extra_duty: number
+    // How many Extra Duty days extra_duty above was calculated from (0 = a flat manually-typed
+    // amount, same as before this existed) — see EditEntryModal, which multiplies this by the
+    // employee's own payroll_extra_duty rate client-side; never recomputed server-side.
+    extra_duty_days: number
     // Credited for taking fewer Leave days than monthly_leave_allowance (see
     // computeLeaveSurplusBonus in src/lib/payroll.ts) — shown as an addition on top of
     // extra_duty above, kept separate so re-editing/saving Extra Duty never bakes this
@@ -278,9 +282,32 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
     // Non-Paid badge + single-shot Mark as Paid instead.
     const showPaidAmountFeature = month >= '2026-09'
     const q = search.trim().toLowerCase()
-    const filteredEntries = q
+    const filteredEntries = (q
         ? entries.filter(e => e.employee.name.toLowerCase().includes(q) || (e.employee.employee_id || '').toLowerCase().includes(q))
         : entries
+    )
+        // Deactivated (OUT) employees sink to the bottom of the sheet instead of sitting wherever
+        // their sort_order happens to place them — a stable sort, so everyone's relative order
+        // within "still active" and within "OUT" is otherwise untouched.
+        .slice()
+        .sort((a, b) => Number(!a.employee.is_active) - Number(!b.employee.is_active))
+
+    // Columns with no non-zero value anywhere on this sheet are hidden entirely (header + every
+    // row's cell) — decided against the full sheet (`entries`), not the search-filtered list, so
+    // a column never flickers in/out purely from typing a search query. Basic Salary and the
+    // Total Earning/Total Deductions/Payable Salary summary columns are deliberately excluded —
+    // those always show regardless of whether they happen to be zero this month.
+    const showTransportBill = entries.some(e => e.transportation_bill > 0)
+    const showSnacksBill = entries.some(e => e.snacks_bill > 0)
+    const showFestivalBonus = entries.some(e => e.festival_bonus > 0)
+    const showExtraDuty = entries.some(e => (e.extra_duty + e.leave_surplus_bonus) > 0)
+    const showPerformanceBonus = entries.some(e => e.performance_bonus > 0)
+    const showLeaveDeduction = entries.some(e => e.leave_deduction > 0)
+    const showAdvance = entries.some(e => e.advance > 0)
+    const showLoan = entries.some(e => e.loan > 0)
+    const showProvidentFund = entries.some(e => e.provident_fund > 0)
+    const showProductBuy = entries.some(e => e.product_buy > 0)
+    const showFine = entries.some(e => e.fine > 0)
 
     return (
         <div>
@@ -321,18 +348,18 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                 <th>Department</th>
                                 <th>Attendance (Day)</th>
                                 <th className="earn-col">Basic Salary</th>
-                                <th className="earn-col">Transport Bill</th>
-                                <th className="earn-col">Snacks Bill</th>
-                                <th className="earn-col">Festival Bonus</th>
-                                <th className="earn-col">Extra Duty</th>
-                                <th className="earn-col">Performance Bonus</th>
+                                {showTransportBill && <th className="earn-col">Transport Bill</th>}
+                                {showSnacksBill && <th className="earn-col">Snacks Bill</th>}
+                                {showFestivalBonus && <th className="earn-col">Festival Bonus</th>}
+                                {showExtraDuty && <th className="earn-col">Extra Duty</th>}
+                                {showPerformanceBonus && <th className="earn-col">Performance Bonus</th>}
                                 <th className="earning-highlight-col" style={{ fontWeight: 800,color: "#f81dd4"  }}>Total Earning</th>
-                                <th className="deduct-col deduct-col-first">Leave Deduction</th>
-                                <th className="deduct-col">Salary Advance</th>
-                                <th className="deduct-col">Loan</th>
-                                <th className="deduct-col">Provident Fund</th>
-                                <th className="deduct-col">Product Buy</th>
-                                <th className="deduct-col">Monthly Fine</th>
+                                {showLeaveDeduction && <th className="deduct-col deduct-col-first">Leave Deduction</th>}
+                                {showAdvance && <th className="deduct-col">Salary Advance</th>}
+                                {showLoan && <th className="deduct-col">Loan</th>}
+                                {showProvidentFund && <th className="deduct-col">Provident Fund</th>}
+                                {showProductBuy && <th className="deduct-col">Product Buy</th>}
+                                {showFine && <th className="deduct-col">Monthly Fine</th>}
                                 <th className="deduction-highlight-col" style={{ fontWeight: 800,color: "#f81dd4"  }}>Total Deductions</th>
                                 <th className="payable-highlight" style={{ fontWeight: 800,color: "#f81dd4"  }}>Payable Salary</th>
                                 {showPaidAmountFeature && <th>Paid Amount</th>}
@@ -390,57 +417,76 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                         </div>
                                     </td>
                                     <td className="earn-col" style={{ color: e.basic_salary > 0 ? '#16A34A' : undefined }}>৳{e.basic_salary.toLocaleString()}</td>
-                                    <td className="earn-col" style={{ color: e.transportation_bill > 0 ? '#16A34A' : undefined }}>৳{e.transportation_bill.toLocaleString()}</td>
-                                    <td className="earn-col" style={{ color: e.snacks_bill > 0 ? '#16A34A' : undefined }}>৳{e.snacks_bill.toLocaleString()}</td>
-                                    <td className="earn-col" style={{ color: e.festival_bonus > 0 ? '#16A34A' : undefined }}>
-                                        ৳{e.festival_bonus.toLocaleString()}
-                                        {e.festival_bonus_percentage > 0 && (
-                                            <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginLeft: '4px' }}>({e.festival_bonus_percentage}%)</span>
-                                        )}
-                                    </td>
-                                    <td className="earn-col" style={{ color: (e.extra_duty + e.leave_surplus_bonus) > 0 ? '#16A34A' : undefined }}>
-                                        ৳{(e.extra_duty + e.leave_surplus_bonus).toLocaleString()}
-                                        {e.leave_surplus_bonus > 0 && (
-                                            <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
-                                                (+৳{e.leave_surplus_bonus.toLocaleString()} unused leave)
-                                            </div>
-                                        )}
-                                    </td>
-                                    <td className="earn-col" style={{ color: e.performance_bonus > 0 ? '#16A34A' : undefined }}>৳{e.performance_bonus.toLocaleString()}</td>
+                                    {showTransportBill && <td className="earn-col" style={{ color: e.transportation_bill > 0 ? '#16A34A' : undefined }}>৳{e.transportation_bill.toLocaleString()}</td>}
+                                    {showSnacksBill && <td className="earn-col" style={{ color: e.snacks_bill > 0 ? '#16A34A' : undefined }}>৳{e.snacks_bill.toLocaleString()}</td>}
+                                    {showFestivalBonus && (
+                                        <td className="earn-col" style={{ color: e.festival_bonus > 0 ? '#16A34A' : undefined }}>
+                                            ৳{e.festival_bonus.toLocaleString()}
+                                            {e.festival_bonus_percentage > 0 && (
+                                                <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginLeft: '4px' }}>({e.festival_bonus_percentage}%)</span>
+                                            )}
+                                        </td>
+                                    )}
+                                    {showExtraDuty && (
+                                        <td className="earn-col" style={{ color: (e.extra_duty + e.leave_surplus_bonus) > 0 ? '#16A34A' : undefined }}>
+                                            ৳{(e.extra_duty + e.leave_surplus_bonus).toLocaleString()}
+                                            {e.extra_duty_days > 0 && (
+                                                <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
+                                                    ({e.extra_duty_days} day{e.extra_duty_days !== 1 ? 's' : ''} × ৳{e.employee.payroll_extra_duty.toLocaleString()})
+                                                </div>
+                                            )}
+                                            {e.leave_surplus_bonus > 0 && (
+                                                <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
+                                                    (+৳{e.leave_surplus_bonus.toLocaleString()} unused leave)
+                                                </div>
+                                            )}
+                                        </td>
+                                    )}
+                                    {showPerformanceBonus && <td className="earn-col" style={{ color: e.performance_bonus > 0 ? '#16A34A' : undefined }}>৳{e.performance_bonus.toLocaleString()}</td>}
                                     <td className="earning-highlight-col" style={{ color: '#16A34A', fontWeight: 600 }}>
                                         ৳{(e.basic_salary + e.extra_duty + e.leave_surplus_bonus + e.transportation_bill + e.snacks_bill + e.performance_bonus + e.festival_bonus).toLocaleString()}
                                     </td>
-                                    <td className="deduct-col deduct-col-first" style={{ color: e.leave_deduction > 0 ? '#DC2626' : undefined }}>
-                                        ৳{e.leave_deduction.toLocaleString()}
-                                        {e.leave_deduction > 0 && (
-                                            <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
-                                                ({leaveDeductionCaption(e)})
-                                            </div>
-                                        )}
-                                    </td>
-                                    <td className="deduct-col" style={{ color: e.advance > 0 ? '#DC2626' : undefined }}>
-                                        ৳{e.advance.toLocaleString()}
-                                    </td>
-                                    <td className="deduct-col" style={{ color: e.loan > 0 ? '#DC2626' : undefined }}>
-                                        ৳{e.loan.toLocaleString()}
-                                        {e.loan_records.length > 0 && (
-                                            <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
-                                                ({e.loan_records.map(r => `${r.month_number}/${r.term_months}`).join(', ')} Installment)
-                                            </div>
-                                        )}
-                                    </td>
-                                    <td className="deduct-col" style={{ color: e.provident_fund > 0 ? '#DC2626' : undefined }}>
-                                        ৳{e.provident_fund.toLocaleString()}
-                                        {e.provident_fund_records.length > 0 && (
-                                            <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
-                                                ({e.provident_fund_records.map(r => `${r.month_number}/${r.duration_months}`).join(', ')} Installment)
-                                            </div>
-                                        )}
-                                    </td>
-                                    <td className="deduct-col" style={{ color: e.product_buy > 0 ? '#DC2626' : undefined }}>
-                                        ৳{e.product_buy.toLocaleString()}
-                                    </td>
-                                    <td className="deduct-col" style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>
+                                    {showLeaveDeduction && (
+                                        <td className="deduct-col deduct-col-first" style={{ color: e.leave_deduction > 0 ? '#DC2626' : undefined }}>
+                                            ৳{e.leave_deduction.toLocaleString()}
+                                            {e.leave_deduction > 0 && (
+                                                <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
+                                                    ({leaveDeductionCaption(e)})
+                                                </div>
+                                            )}
+                                        </td>
+                                    )}
+                                    {showAdvance && (
+                                        <td className="deduct-col" style={{ color: e.advance > 0 ? '#DC2626' : undefined }}>
+                                            ৳{e.advance.toLocaleString()}
+                                        </td>
+                                    )}
+                                    {showLoan && (
+                                        <td className="deduct-col" style={{ color: e.loan > 0 ? '#DC2626' : undefined }}>
+                                            ৳{e.loan.toLocaleString()}
+                                            {e.loan_records.length > 0 && (
+                                                <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
+                                                    ({e.loan_records.map(r => `${r.month_number}/${r.term_months}`).join(', ')} Installment)
+                                                </div>
+                                            )}
+                                        </td>
+                                    )}
+                                    {showProvidentFund && (
+                                        <td className="deduct-col" style={{ color: e.provident_fund > 0 ? '#DC2626' : undefined }}>
+                                            ৳{e.provident_fund.toLocaleString()}
+                                            {e.provident_fund_records.length > 0 && (
+                                                <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
+                                                    ({e.provident_fund_records.map(r => `${r.month_number}/${r.duration_months}`).join(', ')} Installment)
+                                                </div>
+                                            )}
+                                        </td>
+                                    )}
+                                    {showProductBuy && (
+                                        <td className="deduct-col" style={{ color: e.product_buy > 0 ? '#DC2626' : undefined }}>
+                                            ৳{e.product_buy.toLocaleString()}
+                                        </td>
+                                    )}
+                                    {showFine && <td className="deduct-col" style={{ color: e.fine > 0 ? '#DC2626' : undefined }}>৳{e.fine.toLocaleString()}</td>}
                                     <td className="deduction-highlight-col" style={{ color: '#DC2626', fontWeight: 600 }}>
                                         ৳{(e.fine + e.advance + e.product_buy + e.loan + e.provident_fund + e.leave_deduction + e.other_deduction).toLocaleString()}
                                     </td>
@@ -754,6 +800,10 @@ function EditEntryModal({ entry, showPaidAmountFeature, onClose, onSaved }: { en
     // Held as raw strings while editing (same pattern as the Requisition quantity field) so
     // deleting the "0" to type a fresh number leaves the field genuinely empty instead of
     // snapping back to "0" on every keystroke.
+    // Extra Duty itself is no longer hand-edited here — it's entirely auto-computed (Leave
+    // Surplus Bonus, priced off the employee's Extra Duty rate — see computeLeaveSurplusBonus in
+    // src/lib/payroll.ts), so `extra_duty` below is read-only context for Net Payable/the
+    // caption, carried through unchanged rather than offered as an input.
     const [amounts, setAmounts] = useState({
         extra_duty: String(entry.extra_duty),
         performance_bonus: String(entry.performance_bonus),
@@ -827,26 +877,51 @@ function EditEntryModal({ entry, showPaidAmountFeature, onClose, onSaved }: { en
 
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
                         {EDITABLE_AMOUNT_FIELDS.map(f => {
+                            if (f.key === 'extra_duty') {
+                                const num = Number(amounts.extra_duty)
+                                // This auto-computed-only behavior (Extra Duty entirely driven by
+                                // the Leave Surplus Bonus — see computeLeaveSurplusBonus in
+                                // src/lib/payroll.ts) only applies from
+                                // LEAVE_LOGIC_V2_CUTOVER_MONTH onward, same as every other new
+                                // leave-logic feature in this file. A pre-cutover month never has
+                                // a surplus bonus (it's always 0 there), so it keeps the original
+                                // flat manually-typed Extra Duty field exactly as it always worked.
+                                if (!entry.uses_present_day_leave_calc) {
+                                    return (
+                                        <div key={f.key}>
+                                            <label className="form-label">Extra Duty</label>
+                                            <input className="form-input" type="number" min={0} value={amounts.extra_duty}
+                                                style={{ color: num < 0 ? '#DC2626' : num > 0 ? '#16A34A' : undefined, fontWeight: num !== 0 ? 600 : undefined }}
+                                                onFocus={e => e.target.select()}
+                                                onChange={e => setAmounts(prev => ({ ...prev, extra_duty: e.target.value }))} />
+                                        </div>
+                                    )
+                                }
+                                // Not editable here at all — this cell is just read-only context,
+                                // same figure shown on the sheet's Extra Duty column.
+                                return (
+                                    <div key={f.key}>
+                                        <ReadOnlyField label="Extra Duty" value={`৳${(num + entry.leave_surplus_bonus).toLocaleString()}`} />
+                                        {entry.leave_surplus_bonus > 0 && (
+                                            <div style={{
+                                                marginTop: '6px', padding: '6px 10px', borderRadius: '8px',
+                                                background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.25)',
+                                                fontSize: '0.75rem', color: '#16A34A', fontWeight: 600,
+                                            }}>
+                                                ৳{entry.leave_surplus_bonus.toLocaleString()} Unused Leave Bonus (auto)
+                                            </div>
+                                        )}
+                                    </div>
+                                )
+                            }
                             const num = Number(amounts[f.key])
                             return (
                                 <div key={f.key}>
-                                    <label className="form-label">{f.key === 'extra_duty' && entry.leave_surplus_bonus > 0 ? 'Extra Duty (manual)' : f.label}</label>
+                                    <label className="form-label">{f.label}</label>
                                     <input className="form-input" type="number" min={0} value={amounts[f.key]}
                                         style={{ color: num < 0 ? '#DC2626' : num > 0 ? '#16A34A' : undefined, fontWeight: num !== 0 ? 600 : undefined }}
                                         onFocus={e => e.target.select()}
                                         onChange={e => setAmounts(prev => ({ ...prev, [f.key]: e.target.value }))} />
-                                    {f.key === 'extra_duty' && entry.leave_surplus_bonus > 0 && (
-                                        <div style={{
-                                            marginTop: '6px', padding: '6px 10px', borderRadius: '8px',
-                                            background: 'rgba(22,163,74,0.1)', border: '1px solid rgba(22,163,74,0.25)',
-                                            fontSize: '0.75rem', color: '#16A34A', fontWeight: 600,
-                                        }}>
-                                            + ৳{entry.leave_surplus_bonus.toLocaleString()} Unused Leave Bonus (auto)
-                                            <div style={{ fontWeight: 500, color: 'var(--color-text-tertiary)', marginTop: '2px' }}>
-                                                Not editable here, and never overwrites the manual amount above — always added on top, so Total Extra Duty this month is ৳{(num + entry.leave_surplus_bonus).toLocaleString()}.
-                                            </div>
-                                        </div>
-                                    )}
                                 </div>
                             )
                         })}

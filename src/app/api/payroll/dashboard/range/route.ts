@@ -80,7 +80,8 @@ export async function GET(request: Request) {
                 se.performance_bonus, se.festival_bonus, se.other_deduction, se.payment_status, se.paid_amount,
                 se.attendance_present_override, se.attendance_leave_override,
                 json_build_object('basic_salary_effective_month', e.basic_salary_effective_month,
-                    'monthly_leave_allowance', e.monthly_leave_allowance, 'termination_date', e.termination_date) AS employee
+                    'monthly_leave_allowance', e.monthly_leave_allowance, 'termination_date', e.termination_date,
+                    'payroll_extra_duty', e.payroll_extra_duty) AS employee
              FROM salary_entries se LEFT JOIN employees e ON e.id = se.employee_id
              WHERE se.salary_sheet_id = $1`,
             [sheet.id]
@@ -125,7 +126,7 @@ export async function GET(request: Request) {
             const effectiveLeave = effectiveLeaveDays(attendanceStats[r.employee_id]?.leave || 0, attendanceStats[r.employee_id]?.absent || 0, r.attendance_leave_override, sheet.month)
             const monthlyLeaveAllowance = Number(r.employee?.monthly_leave_allowance) || 0
             const leaveDeduction = computeLeaveDeduction(Number(r.basic_salary) || 0, effectivePresent, effectiveLeave, monthlyLeaveAllowance, sheet.month)
-            const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.basic_salary) || 0, effectiveLeave, monthlyLeaveAllowance, sheet.month)
+            const leaveSurplusBonus = computeLeaveSurplusBonus(Number(r.employee?.payroll_extra_duty) || 0, effectiveLeave, monthlyLeaveAllowance, sheet.month)
             const net = computeNetPayable(r, fine, advance, productBuy, loan, providentFund, leaveDeduction, leaveSurplusBonus)
             const isPaid = r.payment_status === 'Paid'
 

@@ -204,11 +204,14 @@ export function computeLeaveDeduction(basicSalary: number, presentDays: number, 
 // LEAVE_LOGIC_V2_CUTOVER_MONTH — no equivalent existed before, so any earlier month always
 // returns 0 here, same as if the feature had simply never been applied to that sheet. From the
 // cutover onward: an employee who takes FEWER Leave days than their monthly allowance is
-// credited one day's pay (Basic Salary / STANDARD_MONTH_DAYS) for each such day given up — e.g.
-// an 8-day-allowance employee who only takes 7 Leave days gets 1 day's bonus, regardless of the
-// actual calendar month length (deliberately NOT re-derived from presentDays/daysInMonth, since
-// doing so would silently hand out an extra "free" bonus day in every 31-day month purely from
-// the calendar being longer than the STANDARD_MONTH_DAYS baseline).
+// credited one day's Extra Duty pay for each such day given up — e.g. an 8-day-allowance
+// employee who only takes 7 Leave days gets 1 day's bonus. Priced at the employee's own
+// configured Extra Duty per-day rate (Members → Edit Member → Payroll → Extra Duty,
+// `payroll_extra_duty`), NOT a Basic-Salary-derived day rate — unused leave is being paid out
+// as Extra Duty, so it uses the same rate Extra Duty itself is priced at (see the "Extra Duty
+// Days" calculator in SalarySheet.tsx's EditEntryModal, which prices manually-logged days
+// identically). An employee with no Extra Duty rate configured yet simply earns ৳0 bonus until
+// one is set, rather than an approximated salary-based amount.
 // Shown as an addition to Extra Duty on the sheet (see SalarySheet.tsx), but deliberately kept as
 // its own separate live-computed value rather than being merged into the stored `extra_duty`
 // column itself — that column is also a manually-typed admin field (real extra-duty work), and
@@ -222,12 +225,11 @@ export function computeLeaveDeduction(basicSalary: number, presentDays: number, 
 // work, so a low Leave count alone must never earn them a bonus), and folding it in once at the
 // shared effectiveLeaveDays() call keeps that rule in exactly one place instead of every caller
 // needing to remember to combine leave+absent themselves.
-export function computeLeaveSurplusBonus(basicSalary: number, leaveDays: number, allowedLeaveDays: number, month: string): number {
+export function computeLeaveSurplusBonus(extraDutyRate: number, leaveDays: number, allowedLeaveDays: number, month: string): number {
     if (!usesPresentDayLeaveLogic(month)) return 0
     const surplus = allowedLeaveDays - leaveDays
     if (surplus <= 0) return 0
-    const perDayRate = (Number(basicSalary) || 0) / STANDARD_MONTH_DAYS
-    return Math.round(surplus * perDayRate * 100) / 100
+    return Math.round(surplus * (Number(extraDutyRate) || 0) * 100) / 100
 }
 
 // The Leave figure used everywhere else in this file (the Attendance (Day) column's "Leave"
