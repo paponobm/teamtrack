@@ -42,7 +42,7 @@ type DateRangeMode = 'all' | 'today' | 'week' | 'month' | 'custom'
 // option can be added here alone whenever a longer/shorter term is needed.
 const DURATION_OPTIONS = [6, 12] as const
 
-// Provident Fund interest is a fixed company policy, not something set per record — always
+// Security Insurance interest is a fixed company policy, not something set per record — always
 // 100%, never user-editable. Kept as a named constant (rather than inlining the literal) since
 // it's used both for the payload sent to the API and the maturity-amount math below.
 const PROVIDENT_FUND_INTEREST_RATE = 100
@@ -58,9 +58,11 @@ function formatDate(d: string) {
     return new Date(d).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-// Provident Fund, embedded as a Finance Hub tab alongside Salary Advance & EMI. Architecturally
-// identical to EMI (src/lib/providentFunds.ts) — flat interest over a fixed duration, feeding
-// the Salary Sheet's Provident Fund deduction live. No linked Expense record (it's a payroll
+// Security Insurance (displayed name; internally still "Provident Fund" throughout the code —
+// component/table/column names, etc. — only the user-facing label changed), embedded as a
+// Finance Hub tab alongside Salary Advance & EMI. Architecturally identical to EMI
+// (src/lib/providentFunds.ts) — flat interest over a fixed duration, feeding the Salary Sheet's
+// Provident Fund deduction live. No linked Expense record (it's a payroll
 // deduction, not an out-of-pocket expense) — same precedent EMI already established. Paid/Due
 // come from whether each covered month's Salary Sheet entry was marked Paid, so "paying" an
 // installment is just using the Salary Sheet's existing Mark-as-Paid flow — no separate
@@ -136,11 +138,11 @@ export default function ProvidentFundManager() {
     ).sort((a, b) => Number(b[0]) - Number(a[0]))
 
     const handleDelete = async (f: ProvidentFund) => {
-        if (!confirm(`Delete this Provident Fund record for ${f.employee?.name || 'this employee'}? This also removes its remaining Salary Sheet deductions.`)) return
+        if (!confirm(`Delete this Security Insurance record for ${f.employee?.name || 'this employee'}? This also removes its remaining Salary Sheet deductions.`)) return
         const res = await fetch(`/api/provident-funds/${f.id}`, { method: 'DELETE' })
         if (res.ok) {
             setFunds(prev => prev.filter(x => x.id !== f.id))
-            toastSuccess('Provident Fund record deleted')
+            toastSuccess('Security Insurance record deleted')
         } else {
             const err = await res.json()
             toastError(err.error || 'Failed to delete')
@@ -151,17 +153,17 @@ export default function ProvidentFundManager() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
                 <div>
-                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Provident Fund</h2>
-                    <p style={{ fontSize: '0.875rem', color: 'var(--color-text-tertiary)', margin: '4px 0 0' }}>Manage employee provident fund contributions, installments, and returns.</p>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Security Insurance</h2>
+                    <p style={{ fontSize: '0.875rem', color: 'var(--color-text-tertiary)', margin: '4px 0 0' }}>Manage employee security insurance contributions, installments, and returns.</p>
                 </div>
                 <button className="btn btn-primary" onClick={() => { setEditing(null); setShowModal(true) }}>
-                    <IconPlus size={16} /> Add Provident Fund
+                    <IconPlus size={16} /> Add Security Insurance
                 </button>
             </div>
 
             <motion.div variants={item} initial="hidden" animate="show" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '20px' }}>
                 <div className="stat-card">
-                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconBanknote size={14} color="var(--color-text-tertiary)" /> Total Provident Fund</span>
+                    <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconBanknote size={14} color="var(--color-text-tertiary)" /> Total Security Insurance</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>৳{summary.totalProvidentFund.toLocaleString()}</span>
                 </div>
                 <div className="stat-card">
@@ -253,7 +255,7 @@ export default function ProvidentFundManager() {
                             <th>SL</th>
                             <th>Employee</th>
                             <th>Department</th>
-                            <th>Provident Amount</th>
+                            <th>Security Insurance Amount</th>
                             <th>Duration</th>
                             <th>Start Date</th>
                             <th>Interest</th>
@@ -307,7 +309,7 @@ export default function ProvidentFundManager() {
                             </tr>
                         ))}
                         {!loading && filtered.length === 0 && (
-                            <tr><td colSpan={11} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No provident fund records found.</td></tr>
+                            <tr><td colSpan={11} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No security insurance records found.</td></tr>
                         )}
                         {loading && (
                             <tr><td colSpan={11} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
@@ -379,7 +381,7 @@ function ProvidentFundModal({ fund, employees, onClose, onSaved }: {
 
     const handleSave = async () => {
         if (!employeeId) { toastError('Please select an employee'); return }
-        if (!Number.isFinite(monthlyAmountNum) || monthlyAmountNum <= 0) { toastError('Provident Fund Amount must be greater than 0'); return }
+        if (!Number.isFinite(monthlyAmountNum) || monthlyAmountNum <= 0) { toastError('Security Insurance Amount must be greater than 0'); return }
 
         setSaving(true)
         try {
@@ -398,7 +400,7 @@ function ProvidentFundModal({ fund, employees, onClose, onSaved }: {
                         monthly_installment: monthlyInstallment, total_payable: totalPayable, total_amount: totalAmount, due: Math.max(0, totalPayable - totalPaidSoFar),
                         employee: selectedEmployee ? { id: selectedEmployee.id, name: selectedEmployee.name, employee_id: selectedEmployee.employee_id, avatar_url: selectedEmployee.avatar_url, department: fund.employee?.department || null } : fund.employee,
                     }, false)
-                    toastSuccess('Provident Fund updated')
+                    toastSuccess('Security Insurance updated')
                 } else {
                     const err = await res.json()
                     toastError(err.error || 'Failed to update')
@@ -412,10 +414,10 @@ function ProvidentFundModal({ fund, employees, onClose, onSaved }: {
                 if (res.ok) {
                     const json = await res.json()
                     onSaved(json.provident_fund, true)
-                    toastSuccess('Provident Fund added')
+                    toastSuccess('Security Insurance added')
                 } else {
                     const err = await res.json()
-                    toastError(err.error || 'Failed to add Provident Fund')
+                    toastError(err.error || 'Failed to add Security Insurance')
                 }
             }
         } finally {
@@ -428,7 +430,7 @@ function ProvidentFundModal({ fund, employees, onClose, onSaved }: {
             <motion.div initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 10 }}
                 className="modal" style={{ maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
                 <div className="modal-header">
-                    <div className="modal-title">{isEdit ? 'Edit Provident Fund' : 'Add Provident Fund'}</div>
+                    <div className="modal-title">{isEdit ? 'Edit Security Insurance' : 'Add Security Insurance'}</div>
                     <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: 'var(--color-text-tertiary)' }}><IconX size={18} /></button>
                 </div>
 
@@ -444,7 +446,7 @@ function ProvidentFundModal({ fund, employees, onClose, onSaved }: {
                     </div>
 
                     <div>
-                        <label className="form-label">Provident Fund Amount (৳ / month) *</label>
+                        <label className="form-label">Security Insurance Amount (৳ / month) *</label>
                         <input className="form-input" type="number" min={1} value={monthlyAmount}
                             onFocus={e => e.target.select()}
                             onChange={e => setMonthlyAmount(e.target.value.replace(/^0+(?=\d)/, ''))} />
@@ -464,7 +466,7 @@ function ProvidentFundModal({ fund, employees, onClose, onSaved }: {
 
                     <div>
                         <label className="form-label">Note</label>
-                        <textarea className="form-input" rows={3} placeholder="Provident fund note..." value={note} onChange={e => setNote(e.target.value)} />
+                        <textarea className="form-input" rows={3} placeholder="Security insurance note..." value={note} onChange={e => setNote(e.target.value)} />
                     </div>
 
                     {principalAmount > 0 && (

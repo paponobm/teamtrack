@@ -587,8 +587,10 @@ export default function ExpensesPage() {
 
             {/* Expenses sub-nav — the previous single-level Finance Hub tab bar, now nested
                 under the Expenses master tab (Reports moved out to its own master tab; the
-                rest — Overview/Budgets/Funds/Salary Advance & EMI/Provident Fund/Categories —
-                are unchanged from before). */}
+                rest — Overview/Budgets/Funds/Salary Advance & EMI/Security Insurance/Categories —
+                are unchanged from before). "Security Insurance" is the user-facing label for
+                the Provident Fund feature (ProvidentFundManager) — only the display text
+                changed, the tab id/route stays 'providentFund' internally. */}
             {masterTab === 'expenses' && (
                 <motion.div variants={item} style={{ display: 'flex', gap: '24px', borderBottom: '1px solid var(--color-border-light)', marginBottom: '24px', paddingTop: '12px', paddingBottom: '0' }}>
                     {[
@@ -596,7 +598,7 @@ export default function ExpensesPage() {
                         ...(isAdmin ? [{ id: 'advance' as const, label: 'Salary , Advance & EMI' }] : []),
                         { id: 'budgets' as const, label: 'Budgets' },
                         { id: 'funds' as const, label: 'Funds' },
-                        ...(isAdmin ? [{ id: 'providentFund' as const, label: 'Provident Fund' }] : []),
+                        ...(isAdmin ? [{ id: 'providentFund' as const, label: 'Security Insurance' }] : []),
                         { id: 'categories' as const, label: 'Categories' },
                     ].map(tab => (
                         <button
