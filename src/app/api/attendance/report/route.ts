@@ -144,7 +144,8 @@ export async function GET(request: Request) {
     const { rows: data } = await db.query(
         `SELECT a.id, a.date, a.clock_in, a.clock_out, a.status, a.notes,
             json_build_object('id', e.id, 'name', e.name, 'employee_id', e.employee_id, 'avatar_url', e.avatar_url,
-                'duty_start_time', e.duty_start_time, 'department', json_build_object('id', d.id, 'name', d.name)) AS employee
+                'duty_start_time', e.duty_start_time, 'monthly_leave_allowance', e.monthly_leave_allowance,
+                'department', json_build_object('id', d.id, 'name', d.name)) AS employee
          FROM attendance a
          LEFT JOIN employees e ON e.id = a.employee_id
          LEFT JOIN departments d ON d.id = e.department_id
@@ -216,6 +217,7 @@ export async function GET(request: Request) {
                 employee_id: r.employee?.employee_id,
                 avatar_url: r.employee?.avatar_url,
                 duty_start_time: r.employee?.duty_start_time || null,
+                monthly_leave_allowance: r.employee?.monthly_leave_allowance ?? 0,
                 department: r.employee?.department?.name || null,
             },
             workingMs,

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { motion } from 'framer-motion'
 import { usePermissions } from '@/lib/PermissionsContext'
 import { useToast } from '@/lib/ToastContext'
-import { IconX, IconEdit, IconCheckCircle, IconCalendar, IconAlertCircle, IconClock } from '@/components/icons/Icons'
+import { IconX, IconEdit, IconCheckCircle, IconCalendar, IconAlertCircle, IconClock, IconTrendingUp } from '@/components/icons/Icons'
 
 interface DayRecord {
     id: string
@@ -121,6 +121,11 @@ export default function EmployeeMonthDetailModal({ employeeId, employeeName, mon
     const toast = useToast()
 
     const [records, setRecords] = useState<DayRecord[]>([])
+    // This employee's own configured Monthly Leave Allowance (Members → Edit Member → Duty
+    // Schedule) — same figure Payroll's Leave Surplus Bonus is computed against. Read off any
+    // returned row's employee object (same employee on every row, since employee_id is filtered
+    // server-side) rather than a separate request.
+    const [monthlyLeaveAllowance, setMonthlyLeaveAllowance] = useState(0)
     const [loading, setLoading] = useState(true)
     const [editingId, setEditingId] = useState<string | null>(null)
     const [editForm, setEditForm] = useState({ status: '', clock_in: '', clock_out: '', notes: '' })
@@ -145,6 +150,7 @@ export default function EmployeeMonthDetailModal({ employeeId, employeeName, mon
                     id: e.id, date: e.date, clock_in: e.clock_in, clock_out: e.clock_out,
                     status: e.status, notes: e.notes, breakMs: e.breakMs,
                 })).sort((a: DayRecord, b: DayRecord) => a.date.localeCompare(b.date)))
+                setMonthlyLeaveAllowance(Number(data.entries[0]?.employee?.monthly_leave_allowance) || 0)
             }
         } catch {
             toast.error('Failed to load attendance')
@@ -256,10 +262,11 @@ export default function EmployeeMonthDetailModal({ employeeId, employeeName, mon
     // minus Break Time), unlike the table's own "Duration" column which is deliberately gross —
     // a month total should reflect actual hours worked, not include break time in it.
     const summary = useMemo(() => {
-        let present = 0, leaveAbsence = 0, late = 0, workingMs = 0, breakMs = 0
+        let present = 0, leave = 0, absence = 0, late = 0, workingMs = 0, breakMs = 0
         for (const r of records) {
             if (r.status === 'present' || r.status === 'late') present++
-            if (r.status === 'leave' || r.status === 'absent') leaveAbsence++
+            if (r.status === 'leave') leave++
+            if (r.status === 'absent') absence++
             if (r.status === 'late') late++
             breakMs += r.breakMs || 0
             if (r.clock_in && r.clock_out) {
@@ -267,8 +274,13 @@ export default function EmployeeMonthDetailModal({ employeeId, employeeName, mon
                 if (gross > 0) workingMs += Math.max(0, gross - (r.breakMs || 0))
             }
         }
-        return { present, leaveAbsence, late, workingMs, breakMs }
-    }, [records])
+        // Same "unused leave" surplus Payroll's Leave Surplus Bonus already pays out for (see
+        // computeLeaveSurplusBonus in src/lib/payroll.ts) — days of this employee's Monthly
+        // Leave Allowance they didn't end up using, shown here as Extra Duty days. Clamped to 0
+        // rather than going negative once Leave + Absence exceeds the allowance.
+        const extraDuty = Math.max(0, monthlyLeaveAllowance - (leave + absence))
+        return { present, leave, absence, late, workingMs, breakMs, extraDuty }
+    }, [records, monthlyLeaveAllowance])
 
     return (
         <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} style={{ zIndex: 1100 }}>
@@ -281,8 +293,10 @@ export default function EmployeeMonthDetailModal({ employeeId, employeeName, mon
                 {!loading && records.length > 0 && (
                     <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', padding: '16px 24px', borderBottom: '1px solid var(--color-border-light)', background: 'var(--color-bg-secondary)', flexShrink: 0 }}>
                         <SummaryStat label="Present" value={summary.present} color="#16A34A" icon={<IconCheckCircle size={18} />} />
-                        <SummaryStat label="Leave + Absence" value={summary.leaveAbsence} color="#DC2626" icon={<IconCalendar size={18} />} />
+                        <SummaryStat label="Leave" value={summary.leave} color="#7C3AED" icon={<IconCalendar size={18} />} />
+                        <SummaryStat label="Absence" value={summary.absence} color="#DC2626" icon={<IconCalendar size={18} />} />
                         <SummaryStat label="Late" value={summary.late} color="#F59E0B" icon={<IconAlertCircle size={18} />} />
+                        <SummaryStat label="Extra Duty" value={summary.extraDuty} color="#0891B2" icon={<IconTrendingUp size={18} />} />
                         <SummaryStat label="Working Hours" value={formatTotalDuration(summary.workingMs)} color="#2563EB" icon={<IconClock size={18} />} />
                         <SummaryStat label="Break Hours" value={formatTotalDuration(summary.breakMs)} color="#7C3AED" icon={<IconClock size={18} />} />
                     </div>
