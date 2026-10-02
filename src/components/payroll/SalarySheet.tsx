@@ -111,6 +111,23 @@ function leaveDeductionCaption(e: Pick<SalaryEntry, 'attendance' | 'monthly_leav
     return `${e.attendance.leave} Leave, 4 free`
 }
 
+// Splits the combined Leave figure (attendance.leave already folds Absent in for a
+// uses_present_day_leave_calc month — see effectiveLeaveDays in src/lib/payroll.ts) back apart
+// for display only: up to the employee's own Monthly Leave Allowance counts as "Leave", anything
+// BEYOND that is shown as "Abs" (e.g. 7 combined Leave+Absence days against a 4-day allowance
+// displays as Leave: 4, Abs: 3), and anything UNDER the allowance is shown as "Ext" instead — e.g.
+// spending only 3 of a 4-day allowance leaves 1 day unused, displayed as Leave: 3, Ext: 1, the
+// same "surplus" days computeLeaveSurplusBonus already pays a bonus for (so this is never both at
+// once: an entry is either short of its allowance, over it, or exactly on it). Purely a display
+// split; attendance.leave itself (and every amount computed from it — leave_deduction,
+// leave_surplus_bonus) is untouched.
+function leaveAbsenceSplit(e: Pick<SalaryEntry, 'attendance' | 'monthly_leave_allowance'>) {
+    const leave = Math.min(e.attendance.leave, e.monthly_leave_allowance)
+    const abs = Math.max(e.attendance.leave - e.monthly_leave_allowance, 0)
+    const ext = Math.max(e.monthly_leave_allowance - e.attendance.leave, 0)
+    return { leave, abs, ext }
+}
+
 // Paid/Unpaid comes straight from payment_status (the field that actually triggers settlement
 // side effects — see PUT /api/payroll/salary-entries), but "Partial Paid" is purely a display
 // state: payment_status is still 'Unpaid' (nothing has been formally settled yet) while some
@@ -359,7 +376,14 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                             </button>
                                         </div>
                                         <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', marginTop: '2px' }}>
-                                            Leave: {e.attendance.leave}
+                                            {e.uses_present_day_leave_calc ? (() => {
+                                                const { leave, abs, ext } = leaveAbsenceSplit(e)
+                                                return <>
+                                                    Leave: {leave}
+                                                    {abs > 0 && <span style={{ color: '#DC2626' }}> · Abs: {abs}</span>}
+                                                    {ext > 0 && <span style={{ color: '#16A34A' }}> · Ext: {ext}</span>}
+                                                </>
+                                            })() : <>Leave: {e.attendance.leave}</>}
                                             {(e.attendance_present_override != null || e.attendance_leave_override != null) && (
                                                 <span title="Manually adjusted for this month" style={{ marginLeft: '4px', color: '#7C3AED', fontWeight: 600 }}>•adjusted</span>
                                             )}
