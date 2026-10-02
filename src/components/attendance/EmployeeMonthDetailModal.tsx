@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { motion } from 'framer-motion'
 import { usePermissions } from '@/lib/PermissionsContext'
 import { useToast } from '@/lib/ToastContext'
-import { IconX, IconEdit } from '@/components/icons/Icons'
+import { IconX, IconEdit, IconCheckCircle, IconCalendar, IconAlertCircle, IconClock } from '@/components/icons/Icons'
 
 interface DayRecord {
     id: string
@@ -66,6 +66,38 @@ function getGrossDuration(clockIn: string | null, clockOut: string | null) {
 
 function formatDateLabel(dateStr: string) {
     return new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short', day: '2-digit', month: 'short' })
+}
+
+// Same "Xh Ym" shape as formatDuration above, but for a summed total rather than a single row —
+// shows "0h 0m" instead of "-" when the sum is zero, since a zero total is a real answer here
+// (e.g. no break time taken all month), not a missing value.
+function formatTotalDuration(ms: number) {
+    const safeMs = Math.max(0, ms)
+    const hrs = Math.floor(safeMs / 3600000)
+    const mins = Math.floor((safeMs % 3600000) / 60000)
+    return `${hrs}h ${mins}m`
+}
+
+// Same icon-badge treatment (36px rounded square, 15%-tint background) as the main Attendance
+// page's own stat cards (see the clickable stat-card grid in src/app/(dashboard)/attendance/
+// page.tsx) — reused here so this modal's summary reads as the same visual language, not a
+// one-off design.
+function SummaryStat({ label, value, color, icon }: { label: string; value: string | number; color: string; icon: React.ReactNode }) {
+    return (
+        <div style={{
+            display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 16px',
+            background: 'var(--color-surface)', border: '1px solid var(--color-border-light)',
+            borderRadius: 'var(--radius-lg)', flex: '1 1 170px', minWidth: '170px',
+        }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: `${color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color }}>
+                {icon}
+            </div>
+            <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{label}</div>
+                <div style={{ fontSize: '1.0625rem', fontWeight: 700, color: 'var(--color-text-primary)', marginTop: '2px' }}>{value}</div>
+            </div>
+        </div>
+    )
 }
 
 // For populating <input type="time"> from a stored break start/end timestamp — same helper
@@ -218,6 +250,26 @@ export default function EmployeeMonthDetailModal({ employeeId, employeeName, mon
         fetchMonth()
     }
 
+    // Month-at-a-glance totals shown above the per-day table — "late" counts toward "present" too
+    // (they showed up for the day), same convention the Daily Attendance/Attendance Report stat
+    // cards already use elsewhere in this app. Working hours is net (gross Clock Out − Clock In,
+    // minus Break Time), unlike the table's own "Duration" column which is deliberately gross —
+    // a month total should reflect actual hours worked, not include break time in it.
+    const summary = useMemo(() => {
+        let present = 0, leaveAbsence = 0, late = 0, workingMs = 0, breakMs = 0
+        for (const r of records) {
+            if (r.status === 'present' || r.status === 'late') present++
+            if (r.status === 'leave' || r.status === 'absent') leaveAbsence++
+            if (r.status === 'late') late++
+            breakMs += r.breakMs || 0
+            if (r.clock_in && r.clock_out) {
+                const gross = new Date(r.clock_out).getTime() - new Date(r.clock_in).getTime()
+                if (gross > 0) workingMs += Math.max(0, gross - (r.breakMs || 0))
+            }
+        }
+        return { present, leaveAbsence, late, workingMs, breakMs }
+    }, [records])
+
     return (
         <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} style={{ zIndex: 1100 }}>
             <motion.div className="modal" initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 10 }}
@@ -226,7 +278,16 @@ export default function EmployeeMonthDetailModal({ employeeId, employeeName, mon
                     <h2 className="modal-title">{employeeName} — {month}</h2>
                     <button className="btn btn-ghost btn-sm" onClick={onClose}><IconX size={18} /></button>
                 </div>
-                <div className="modal-body" style={{ overflow: 'auto', padding: 0 }}>
+                {!loading && records.length > 0 && (
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', padding: '16px 24px', borderBottom: '1px solid var(--color-border-light)', background: 'var(--color-bg-secondary)', flexShrink: 0 }}>
+                        <SummaryStat label="Present" value={summary.present} color="#16A34A" icon={<IconCheckCircle size={18} />} />
+                        <SummaryStat label="Leave + Absence" value={summary.leaveAbsence} color="#DC2626" icon={<IconCalendar size={18} />} />
+                        <SummaryStat label="Late" value={summary.late} color="#F59E0B" icon={<IconAlertCircle size={18} />} />
+                        <SummaryStat label="Working Hours" value={formatTotalDuration(summary.workingMs)} color="#2563EB" icon={<IconClock size={18} />} />
+                        <SummaryStat label="Break Hours" value={formatTotalDuration(summary.breakMs)} color="#7C3AED" icon={<IconClock size={18} />} />
+                    </div>
+                )}
+                <div className="modal-body employee-month-detail-body" style={{ overflow: 'auto', padding: 0 }}>
                     {loading ? (
                         <div style={{ textAlign: 'center', padding: '40px' }}><span className="spinner" style={{ margin: '0 auto', display: 'block', width: '24px', height: '24px' }} /></div>
                     ) : records.length === 0 ? (
@@ -340,6 +401,16 @@ export default function EmployeeMonthDetailModal({ employeeId, employeeName, mon
                     )}
                 </div>
             </motion.div>
+            {/* Table header stays visible while the rows beneath it scroll — the summary cards
+                above are already outside this scrolling body, so they stay fixed too. */}
+            <style jsx>{`
+                .employee-month-detail-body thead th {
+                    position: sticky;
+                    top: 0;
+                    z-index: 1;
+                    background: var(--color-bg-secondary);
+                }
+            `}</style>
         </motion.div>
     )
 }
