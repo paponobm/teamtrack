@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { usePermissions } from '@/lib/PermissionsContext'
 import { useToast } from '@/lib/ToastContext'
 import { getLocalDateString, getWeekRange, getMonthRange } from '@/lib/dateRange'
-import { IconChevronLeft, IconChevronRight, IconSearch, IconX, IconDownload, IconPlus, IconEdit, IconTrash } from '@/components/icons/Icons'
+import { IconChevronLeft, IconChevronRight, IconSearch, IconX, IconDownload, IconPlus, IconEdit, IconTrash, IconStar } from '@/components/icons/Icons'
 
 type DateRangeMode = 'today' | 'week' | 'month' | 'custom'
 
@@ -147,6 +147,10 @@ export default function DailyWorkReport() {
     const [editingCommonId, setEditingCommonId] = useState<string | null>(null)
     const [commonText, setCommonText] = useState('')
     const [savingCommon, setSavingCommon] = useState(false)
+    // Which Work Description row (by id) is being saved straight to the Common Report library
+    // via the per-row star button — separate from savingCommon (the Add/Edit sub-modal's own
+    // save), so only that one row's button shows a saving state.
+    const [savingRowAsCommonId, setSavingRowAsCommonId] = useState<string | null>(null)
 
     const range = dateRangeMode === 'today' ? { start: refDate, end: refDate }
         : dateRangeMode === 'week' ? getWeekRange(new Date(`${refDate}T00:00:00`))
@@ -301,6 +305,35 @@ export default function DailyWorkReport() {
             fetchCommonReportsList()
         } finally {
             setSavingCommon(false)
+        }
+    }
+
+    // One-click save of a single Work Description row straight into the Common Report library,
+    // without going through the Add/Edit sub-modal — the row's current text becomes a new saved
+    // snippet exactly as typed, so a line written once can be reused on a future report with the
+    // Common Report picker instead of retyping it.
+    const handleSaveRowAsCommon = async (rowId: string, text: string) => {
+        if (!text.trim()) { toast.error('Write something in this line first'); return }
+        if (commonReports.some(cr => cr.text.trim() === text.trim())) {
+            toast.error('Already in Common Report')
+            return
+        }
+        setSavingRowAsCommonId(rowId)
+        try {
+            const res = await fetch('/api/common-reports', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text }),
+            })
+            if (!res.ok) {
+                const e = await res.json().catch(() => ({}))
+                toast.error(e.error || 'Failed to save')
+                return
+            }
+            toast.success('Added to Common Report')
+            fetchCommonReportsList()
+        } finally {
+            setSavingRowAsCommonId(null)
         }
     }
 
@@ -833,10 +866,13 @@ export default function DailyWorkReport() {
                 )}
             </AnimatePresence>
 
-            {/* Create/Edit Modal */}
+            {/* Create/Edit Modal — clicking the overlay deliberately does NOT close this one (unlike
+                other modals in this file): losing an in-progress multi-line report to a stray
+                outside click would be far more costly than for a simple viewer/picker. Cancel or
+                the ✕ button are the only ways out. */}
             <AnimatePresence>
                 {showModal && (
-                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowModal(false)}>
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                         <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
                             onClick={e => e.stopPropagation()} style={{ maxWidth: '860px', width: '100%', maxHeight: '92vh', overflow: 'auto' }}>
                             <div className="modal-header">
@@ -889,6 +925,13 @@ export default function DailyWorkReport() {
                                                         }
                                                     }}
                                                 />
+                                                {row.val.trim() && !commonReports.some(cr => cr.text.trim() === row.val.trim()) && (
+                                                    <button onClick={() => handleSaveRowAsCommon(row.id, row.val)} disabled={savingRowAsCommonId === row.id}
+                                                        className="btn btn-ghost btn-icon" style={{ color: '#F59E0B', flexShrink: 0, padding: '6px', marginTop: '2px' }}
+                                                        title="Add this line to Common Report">
+                                                        <IconStar size={16} />
+                                                    </button>
+                                                )}
                                                 {descRows.length > 1 && (
                                                     <button onClick={() => handleRemoveDescRow(row.id)} className="btn btn-ghost btn-icon" style={{ color: 'var(--color-text-tertiary)', flexShrink: 0, padding: '6px', marginTop: '2px' }}>
                                                         <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
