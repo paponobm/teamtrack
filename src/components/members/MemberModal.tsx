@@ -101,6 +101,7 @@ const PAGE_DEFINITIONS = [
             { name: 'Ideas', slug: 'idea-sharing', desc: 'Share and upvote ideas' },
             { name: 'Content', slug: 'content', desc: 'Draft and manage content' },
             { name: 'Memories', slug: 'memories', desc: 'Team photos and memories' },
+            { name: 'Customer Review', slug: 'customer-review', desc: 'Add and view customer reviews' },
         ]
     },
 ]

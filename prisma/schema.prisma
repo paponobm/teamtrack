@@ -399,6 +399,8 @@ model employees {
   leave_records_leave_records_approved_byToemployees                     leave_records[]           @relation("leave_records_approved_byToemployees")
   leave_records_leave_records_employee_idToemployees                     leave_records[]           @relation("leave_records_employee_idToemployees")
   memories                                                               memories[]
+  customer_reviews                                                       customer_reviews[]
+  customer_review_categories                                             customer_review_categories[]
   notice_reads                                                           notice_reads[]
   notices                                                                notices[]
   notifications                                                          notifications[]
@@ -636,6 +638,31 @@ model memories {
   uploaded_by String?    @db.Uuid
   created_at  DateTime?  @default(now()) @db.Timestamptz(6)
   employees   employees? @relation(fields: [uploaded_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model customer_review_categories {
+  id          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  created_by  String?            @db.Uuid
+  created_at  DateTime?          @default(now()) @db.Timestamptz(6)
+  employees   employees?         @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customer_reviews customer_reviews[]
+
+  @@index([name], map: "idx_customer_review_categories_name")
+}
+
+model customer_reviews {
+  id          String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  category_id String                       @db.Uuid
+  title       String
+  description String
+  image_url   String
+  created_by  String?                      @db.Uuid
+  created_at  DateTime?                    @default(now()) @db.Timestamptz(6)
+  employees   employees?                   @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  category    customer_review_categories   @relation(fields: [category_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([category_id], map: "idx_customer_reviews_category")
 }
 
 model notice_reads {
