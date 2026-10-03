@@ -399,7 +399,7 @@ export default function CustomerReviewPage() {
                                 <button className="btn btn-ghost btn-sm" onClick={() => setViewingReview(null)}>{closeIcon}</button>
                             </div>
                             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                                <img src={viewingReview.image_url} alt={viewingReview.title} style={{ width: '100%', maxHeight: '320px', objectFit: 'cover', borderRadius: '8px' }} />
+                                <img src={viewingReview.image_url} alt={viewingReview.title} style={{ display: 'block', width: '100%', height: 'auto', maxHeight: '70vh', objectFit: 'contain', background: '#F8FAFC', borderRadius: '8px' }} />
                                 <span style={{ alignSelf: 'flex-start', padding: '4px 10px', borderRadius: '8px', background: 'var(--color-bg-secondary, #F1F5F9)', fontSize: '0.75rem', fontWeight: 600 }}>
                                     {viewingReview.category.name}
                                 </span>
