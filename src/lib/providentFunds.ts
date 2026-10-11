@@ -88,6 +88,11 @@ export interface ProvidentFundPaidSummary {
     paid_installments: number
     total_installments: number
     remaining_installments: number
+    // Every 'YYYY-MM' within this record's term that's already been paid — lets a caller
+    // (e.g. the Security Insurance table's month view) tell whether THIS specific month's
+    // installment is paid, which `paid`/`due` above can't: those are lifetime-cumulative
+    // totals across the whole term, not scoped to any one month.
+    paid_months: string[]
 }
 
 interface ProvidentFundForSummary {
@@ -160,10 +165,13 @@ export async function getProvidentFundPaidSummaries(db: Db, pfRecords: Provident
 
         let paid = 0
         let paidInstallments = 0
+        const paidMonths: string[] = []
         for (let i = 0; i < r.duration_months; i++) {
-            if (paidSet.has(indexToMonthKey(startIndex + i))) {
+            const monthKey = indexToMonthKey(startIndex + i)
+            if (paidSet.has(monthKey)) {
                 paid += installment
                 paidInstallments++
+                paidMonths.push(monthKey)
             }
         }
 
@@ -175,6 +183,7 @@ export async function getProvidentFundPaidSummaries(db: Db, pfRecords: Provident
             paid_installments: paidInstallments,
             total_installments: r.duration_months,
             remaining_installments: r.duration_months - paidInstallments,
+            paid_months: paidMonths,
         }
     })
 

@@ -111,6 +111,7 @@ export async function POST(request: Request) {
             paid_installments: 0,
             total_installments: numDuration,
             remaining_installments: numDuration,
+            paid_months: [],
         },
     }, { status: 201 })
 }

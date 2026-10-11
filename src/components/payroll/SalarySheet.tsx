@@ -357,7 +357,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                                 {showLeaveDeduction && <th className="deduct-col deduct-col-first">Leave Deduction</th>}
                                 {showAdvance && <th className="deduct-col">Salary Advance</th>}
                                 {showLoan && <th className="deduct-col">Loan</th>}
-                                {showProvidentFund && <th className="deduct-col">Provident Fund</th>}
+                                {showProvidentFund && <th className="deduct-col">Security Insurance</th>}
                                 {showProductBuy && <th className="deduct-col">Product Buy</th>}
                                 {showFine && <th className="deduct-col">Monthly Fine</th>}
                                 <th className="deduction-highlight-col" style={{ fontWeight: 800,color: "#f81dd4"  }}>Total Deductions</th>
@@ -375,7 +375,7 @@ export default function SalarySheet({ month = currentMonth(), search = '', onPay
                             {filteredEntries.map((e, i) => (
                                 <tr key={e.id} onClick={() => setEditing(e)} style={{ cursor: 'pointer' }}>
                                     <td className="sticky-col-1">{i + 1}</td>
-                                    <td className="sticky-col-2">
+                                    <td className="sticky-col-2" style={e.payment_status === 'Paid' ? { background: '#DCFCE7' } : undefined}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                             <div className="avatar avatar-sm" style={{ background: getAvatarColor(e.employee.name), overflow: 'hidden', flexShrink: 0, width: 28, height: 28, fontSize: '0.75rem' }}>
                                                 {e.employee.avatar_url ? (

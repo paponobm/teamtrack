@@ -3,10 +3,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
-import { getLocalDateString, getWeekRange, getMonthRange } from '@/lib/dateRange'
+import { getLocalDateString } from '@/lib/dateRange'
 import {
     IconUsers, IconPlus, IconX, IconBanknote, IconCheckCircle, IconClock, IconTrendingUp,
-    IconSearch, IconEdit, IconTrash, IconChevronLeft, IconChevronRight, IconCalendar,
+    IconSearch, IconEdit, IconTrash, IconChevronLeft, IconChevronRight,
 } from '@/components/icons/Icons'
 
 interface ProvidentFund {
@@ -28,6 +28,7 @@ interface ProvidentFund {
     paid_installments: number
     total_installments: number
     remaining_installments: number
+    paid_months: string[]
 }
 
 interface EmployeeOption {
@@ -37,7 +38,6 @@ interface EmployeeOption {
     avatar_url: string | null
 }
 
-type DateRangeMode = 'all' | 'today' | 'week' | 'month' | 'custom'
 // Extendable on purpose — the API doesn't restrict duration_months to this list, so a new
 // option can be added here alone whenever a longer/shorter term is needed.
 const DURATION_OPTIONS = [6, 12] as const
@@ -58,6 +58,38 @@ function formatDate(d: string) {
     return new Date(d).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+function currentMonthString(): string {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function monthKeyToIndex(month: string): number {
+    const [y, m] = month.split('-').map(Number)
+    return y * 12 + (m - 1)
+}
+
+// A fund "needs" an installment in a given month when that month falls anywhere inside its
+// start_date → start_date+duration window — regardless of whether that installment has
+// actually been paid yet (Paid/Due is still tracked cumulatively, see getProvidentFundPaidSummaries).
+function fundCoversMonth(f: { start_date: string; duration_months: number }, monthIndex: number): boolean {
+    const startIndex = monthKeyToIndex(f.start_date.slice(0, 7))
+    return monthIndex >= startIndex && monthIndex < startIndex + f.duration_months
+}
+
+// start_date + duration, minus a day — the last day the fund's term actually covers (not the
+// first day of the month after it ends).
+function endDateOf(startDate: string, durationMonths: number): string {
+    const [y, m, d] = startDate.slice(0, 10).split('-').map(Number)
+    const full = new Date(y, m - 1 + durationMonths, d)
+    full.setDate(full.getDate() - 1)
+    return getLocalDateString(full)
+}
+
+function formatMonthLabel(month: string): string {
+    const [y, m] = month.split('-').map(Number)
+    return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+}
+
 // Security Insurance (displayed name; internally still "Provident Fund" throughout the code —
 // component/table/column names, etc. — only the user-facing label changed), embedded as a
 // Finance Hub tab alongside Salary Advance & EMI. Architecturally identical to EMI
@@ -75,27 +107,17 @@ export default function ProvidentFundManager() {
     const [loading, setLoading] = useState(true)
     const [search, setSearch] = useState('')
     const [employeeFilter, setEmployeeFilter] = useState('')
-    const [dateRangeMode, setDateRangeMode] = useState<DateRangeMode>('today')
-    const [refDate, setRefDate] = useState(() => getLocalDateString())
-    const [customStart, setCustomStart] = useState('')
-    const [customEnd, setCustomEnd] = useState('')
+    // Every record is fetched once (no date filter — see fetchFunds); which rows the table
+    // shows is purely a client-side slice by "does this fund's term cover this month"
+    // (fundCoversMonth), not by when the fund started.
+    const [selectedMonth, setSelectedMonth] = useState(() => currentMonthString())
     const [showModal, setShowModal] = useState(false)
     const [editing, setEditing] = useState<ProvidentFund | null>(null)
 
     const fetchFunds = useCallback(async () => {
         setLoading(true)
         try {
-            const params = new URLSearchParams()
-            if (dateRangeMode === 'today') {
-                params.set('start_date', refDate); params.set('end_date', refDate)
-            } else if (dateRangeMode === 'week') {
-                const r = getWeekRange(new Date(refDate)); params.set('start_date', r.start); params.set('end_date', r.end)
-            } else if (dateRangeMode === 'month') {
-                const r = getMonthRange(new Date(refDate)); params.set('start_date', r.start); params.set('end_date', r.end)
-            } else if (dateRangeMode === 'custom' && customStart && customEnd) {
-                params.set('start_date', customStart); params.set('end_date', customEnd)
-            }
-            const res = await fetch(`/api/provident-funds?${params}`)
+            const res = await fetch('/api/provident-funds')
             if (res.ok) {
                 const json = await res.json()
                 setFunds(json.provident_funds || [])
@@ -103,7 +125,7 @@ export default function ProvidentFundManager() {
         } finally {
             setLoading(false)
         }
-    }, [dateRangeMode, refDate, customStart, customEnd])
+    }, [])
 
     useEffect(() => { fetchFunds() }, [fetchFunds])
 
@@ -111,22 +133,43 @@ export default function ProvidentFundManager() {
         fetch('/api/members?status=active').then(r => r.json()).then(d => { if (Array.isArray(d)) setEmployees(d) })
     }, [])
 
-    const filtered = funds.filter(f => {
+    const matchesSearch = useCallback((f: ProvidentFund) => {
         if (employeeFilter && f.employee_id !== employeeFilter) return false
         if (!search) return true
         const q = search.toLowerCase()
         return (f.employee?.name || '').toLowerCase().includes(q) || (f.employee?.employee_id || '').toLowerCase().includes(q)
-    })
+    }, [employeeFilter, search])
 
-    // Computed from the same filtered set the table shows, so the cards always match whatever
-    // combination of date + employee filters is active.
+    const monthIndex = monthKeyToIndex(selectedMonth)
+
+    // The table — only the employees who actually need a Security Insurance installment in
+    // the selected month.
+    const filtered = funds.filter(f => matchesSearch(f) && fundCoversMonth(f, monthIndex))
+
+    // Computed from the same filtered set the table shows, so Total Paid/Total Due/Total
+    // Employees always match whichever month + employee/search filter is active.
+    // Total Paid/Total Due are scoped to the selected month's own installment specifically
+    // (via paid_months), not the fund's lifetime-cumulative paid/due — otherwise every month a
+    // record is active in would show the exact same lifetime figures regardless of which
+    // month was actually paid.
     const summary = filtered.reduce((acc, f) => {
-        acc.totalProvidentFund += f.principal_amount
-        acc.totalPaid += f.paid
-        acc.totalDue += f.due
+        const paidThisMonth = f.paid_months.includes(selectedMonth)
+        if (paidThisMonth) {
+            acc.totalPaid += f.monthly_installment
+            acc.paidEmployeeIds.add(f.employee_id)
+        } else {
+            acc.totalDue += f.monthly_installment
+            acc.dueEmployeeIds.add(f.employee_id)
+        }
         acc.employeeIds.add(f.employee_id)
         return acc
-    }, { totalProvidentFund: 0, totalPaid: 0, totalDue: 0, employeeIds: new Set<string>() })
+    }, { totalPaid: 0, totalDue: 0, employeeIds: new Set<string>(), paidEmployeeIds: new Set<string>(), dueEmployeeIds: new Set<string>() })
+
+    // Total Security Insurance is the one lifetime figure on this page — total collected
+    // across every record (still honoring the employee/search filter), not just the ones due
+    // in the selected month — so it doesn't reset to a smaller number every time you browse to
+    // a different month.
+    const totalCollected = funds.filter(matchesSearch).reduce((sum, f) => sum + f.paid, 0)
 
     // How many records use each interest rate — e.g. "10% — 2, 8% — 1" — so a mix of rates
     // across employees is visible at a glance instead of collapsing to a single misleading number.
@@ -164,19 +207,23 @@ export default function ProvidentFundManager() {
             <motion.div variants={item} initial="hidden" animate="show" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', marginBottom: '20px' }}>
                 <div className="stat-card">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconBanknote size={14} color="var(--color-text-tertiary)" /> Total Security Insurance</span>
-                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>৳{summary.totalProvidentFund.toLocaleString()}</span>
+                    <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>৳{totalCollected.toLocaleString()}</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>Paid in so far, across every record</span>
                 </div>
                 <div className="stat-card">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconUsers size={14} color="var(--color-text-tertiary)" /> Total Employees</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#2563EB' }}>{summary.employeeIds.size}</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>Due an installment in {formatMonthLabel(selectedMonth)}</span>
                 </div>
                 <div className="stat-card">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconCheckCircle size={14} color="var(--color-text-tertiary)" /> Total Paid</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A' }}>৳{summary.totalPaid.toLocaleString()}</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{summary.paidEmployeeIds.size} employee{summary.paidEmployeeIds.size === 1 ? '' : 's'}</span>
                 </div>
                 <div className="stat-card">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconClock size={14} color="var(--color-text-tertiary)" /> Total Due</span>
                     <span className="stat-value" style={{ fontSize: '1.5rem', color: '#DC2626' }}>৳{summary.totalDue.toLocaleString()}</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{summary.dueEmployeeIds.size} employee{summary.dueEmployeeIds.size === 1 ? '' : 's'}</span>
                 </div>
                 <div className="stat-card">
                     <span className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><IconTrendingUp size={14} color="var(--color-text-tertiary)" /> Interest Rate</span>
@@ -210,42 +257,26 @@ export default function ProvidentFundManager() {
                         <option key={emp.id} value={emp.id}>{emp.name}{emp.employee_id ? ` (${emp.employee_id})` : ''}</option>
                     ))}
                 </select>
-                <div style={{ display: 'flex', position: 'relative', background: 'rgba(118,118,128,0.08)', borderRadius: '10px', padding: '2px' }}>
-                    {([{ key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' }, { key: 'month', label: 'This Month' }, { key: 'custom', label: 'Custom' }, { key: 'all', label: 'All' }] as const).map(opt => (
-                        <button key={opt.key} onClick={() => setDateRangeMode(opt.key)}
-                            style={{ position: 'relative', padding: '6px 12px', borderRadius: '8px', border: 'none', fontSize: '0.8125rem', fontWeight: 500, background: 'transparent', color: dateRangeMode === opt.key ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)', cursor: 'pointer', zIndex: 1 }}>
-                            {dateRangeMode === opt.key && (
-                                <motion.div layoutId="providentFundDateTab" style={{ position: 'absolute', inset: 0, background: 'var(--color-bg-primary)', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }} transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
-                            )}
-                            <span style={{ position: 'relative', zIndex: 1 }}>{opt.label}</span>
-                        </button>
-                    ))}
+                {/* Only a month view is needed — this table is always "who owes a Security
+                    Insurance installment this month", so Today/Week/Custom/All were dropped. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', borderRadius: '10px', padding: '4px' }}>
+                    <button className="btn btn-ghost btn-icon" onClick={() => {
+                        const [y, m] = selectedMonth.split('-').map(Number)
+                        const d = new Date(y, m - 2, 1)
+                        setSelectedMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+                    }} style={{ borderRadius: '8px' }}>
+                        <IconChevronLeft size={16} />
+                    </button>
+                    <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="input"
+                        style={{ border: 'none', background: 'transparent', padding: '0 4px', fontSize: '0.8125rem', width: '150px', textAlign: 'center' }} />
+                    <button className="btn btn-ghost btn-icon" onClick={() => {
+                        const [y, m] = selectedMonth.split('-').map(Number)
+                        const d = new Date(y, m, 1)
+                        setSelectedMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+                    }} style={{ borderRadius: '8px' }}>
+                        <IconChevronRight size={16} />
+                    </button>
                 </div>
-                {(dateRangeMode === 'today' || dateRangeMode === 'week' || dateRangeMode === 'month') && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', borderRadius: '10px', padding: '4px' }}>
-                        <button className="btn btn-ghost btn-icon" onClick={() => {
-                            const d = new Date(refDate); d.setDate(d.getDate() - (dateRangeMode === 'week' ? 7 : dateRangeMode === 'month' ? 30 : 1)); setRefDate(getLocalDateString(d))
-                        }} style={{ borderRadius: '8px' }}>
-                            <IconChevronLeft size={16} />
-                        </button>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 4px', fontSize: '0.8125rem' }}>
-                            <IconCalendar size={14} color="var(--color-text-tertiary)" />
-                            <input type="date" value={refDate} onChange={e => setRefDate(e.target.value)} className="input" style={{ border: 'none', background: 'transparent', padding: '0', fontSize: '0.8125rem', width: '130px' }} />
-                        </div>
-                        <button className="btn btn-ghost btn-icon" onClick={() => {
-                            const d = new Date(refDate); d.setDate(d.getDate() + (dateRangeMode === 'week' ? 7 : dateRangeMode === 'month' ? 30 : 1)); setRefDate(getLocalDateString(d))
-                        }} style={{ borderRadius: '8px' }}>
-                            <IconChevronRight size={16} />
-                        </button>
-                    </div>
-                )}
-                {dateRangeMode === 'custom' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} className="input" style={{ padding: '6px 8px', fontSize: '0.8125rem', width: '150px', border: '1px solid var(--color-border-light)', borderRadius: '8px' }} />
-                        <span style={{ color: 'var(--color-text-tertiary)', fontSize: '0.8125rem' }}>to</span>
-                        <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="input" style={{ padding: '6px 8px', fontSize: '0.8125rem', width: '150px', border: '1px solid var(--color-border-light)', borderRadius: '8px' }} />
-                    </div>
-                )}
             </motion.div>
 
             <motion.div variants={item} initial="hidden" animate="show" className="card" style={{ overflowX: 'auto', padding: 0 }}>
@@ -254,11 +285,9 @@ export default function ProvidentFundManager() {
                         <tr>
                             <th>SL</th>
                             <th>Employee</th>
-                            <th>Department</th>
-                            <th>Security Insurance Amount</th>
-                            <th>Duration</th>
                             <th>Start Date</th>
-                            <th>Interest</th>
+                            <th>End Date</th>
+                            <th>Insurance Amount</th>
                             <th>Paid</th>
                             <th>Due</th>
                             <th>Total Amount</th>
@@ -279,14 +308,19 @@ export default function ProvidentFundManager() {
                                         <div>
                                             <div style={{ fontWeight: 600 }}>{f.employee?.name || '—'}</div>
                                             <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{f.employee?.employee_id || '—'}</div>
+                                            {f.employee?.department?.name && (
+                                                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{f.employee.department.name}</div>
+                                            )}
                                         </div>
                                     </div>
                                 </td>
-                                <td>{f.employee?.department?.name || '—'}</td>
-                                <td style={{ fontWeight: 700 }}>৳{f.principal_amount.toLocaleString()}</td>
-                                <td>{f.duration_months} Months</td>
                                 <td>{formatDate(f.start_date)}</td>
-                                <td>{f.interest_rate}%</td>
+                                <td>{formatDate(endDateOf(f.start_date, f.duration_months))}</td>
+                                <td>
+                                    <div style={{ fontWeight: 700 }}>৳{f.principal_amount.toLocaleString()}</div>
+                                    <div style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-tertiary)' }}>{f.duration_months} Months</div>
+                                    <div style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-tertiary)' }}>{f.interest_rate}% interest</div>
+                                </td>
                                 <td style={{ color: '#16A34A' }}>
                                     ৳{f.paid.toLocaleString()}
                                     {f.paid_installments > 0 && (
@@ -299,7 +333,7 @@ export default function ProvidentFundManager() {
                                         <div style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-tertiary)' }}>৳{f.monthly_installment.toLocaleString()} × {f.remaining_installments}</div>
                                     )}
                                 </td>
-                                <td style={{ fontWeight: 700 }}>৳{f.total_amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                                <td style={{ fontWeight: 700, color: '#16A34A' }}>৳{f.paid.toLocaleString()}</td>
                                 <td>
                                     <div style={{ display: 'flex', gap: '4px' }}>
                                         <button className="btn btn-ghost btn-icon" onClick={() => { setEditing(f); setShowModal(true) }} title="Edit"><IconEdit size={15} /></button>
@@ -309,10 +343,10 @@ export default function ProvidentFundManager() {
                             </tr>
                         ))}
                         {!loading && filtered.length === 0 && (
-                            <tr><td colSpan={11} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No security insurance records found.</td></tr>
+                            <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>No one needs a Security Insurance installment in {formatMonthLabel(selectedMonth)}.</td></tr>
                         )}
                         {loading && (
-                            <tr><td colSpan={11} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
+                            <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--color-text-tertiary)', padding: '24px' }}>Loading...</td></tr>
                         )}
                     </tbody>
                 </table>
