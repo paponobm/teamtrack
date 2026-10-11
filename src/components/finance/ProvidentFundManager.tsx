@@ -113,6 +113,7 @@ export default function ProvidentFundManager() {
     const [selectedMonth, setSelectedMonth] = useState(() => currentMonthString())
     const [showModal, setShowModal] = useState(false)
     const [editing, setEditing] = useState<ProvidentFund | null>(null)
+    const [zoomedAvatar, setZoomedAvatar] = useState<{ url: string; name: string } | null>(null)
 
     const fetchFunds = useCallback(async () => {
         setLoading(true)
@@ -300,7 +301,8 @@ export default function ProvidentFundManager() {
                                 <td>{i + 1}</td>
                                 <td>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        <div className="avatar avatar-sm" style={{ background: getAvatarColor(f.employee?.name || 'U'), overflow: 'hidden', flexShrink: 0, width: 28, height: 28, fontSize: '0.75rem' }}>
+                                        <div className="avatar avatar-sm" style={{ background: getAvatarColor(f.employee?.name || 'U'), overflow: 'hidden', flexShrink: 0, width: 28, height: 28, fontSize: '0.75rem', cursor: f.employee?.avatar_url ? 'zoom-in' : undefined }}
+                                            onClick={() => { if (f.employee?.avatar_url) setZoomedAvatar({ url: f.employee.avatar_url, name: f.employee.name }) }}>
                                             {f.employee?.avatar_url ? (
                                                 <img src={f.employee.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                             ) : (f.employee?.name || 'U')[0].toUpperCase()}
@@ -363,6 +365,22 @@ export default function ProvidentFundManager() {
                             setShowModal(false)
                         }}
                     />
+                )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+                {zoomedAvatar && (
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setZoomedAvatar(null)}>
+                        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                            onClick={e => e.stopPropagation()} style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh' }}>
+                            <img src={zoomedAvatar.url} alt={zoomedAvatar.name}
+                                style={{ display: 'block', maxWidth: '90vw', maxHeight: '90vh', borderRadius: '12px', boxShadow: '0 16px 48px rgba(0,0,0,0.3)' }} />
+                            <button onClick={() => setZoomedAvatar(null)} title="Close"
+                                style={{ position: 'absolute', top: '-14px', right: '-14px', width: '32px', height: '32px', borderRadius: '50%', background: '#111827', border: '2px solid #fff', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <IconX size={16} />
+                            </button>
+                        </motion.div>
+                    </motion.div>
                 )}
             </AnimatePresence>
         </motion.div>
