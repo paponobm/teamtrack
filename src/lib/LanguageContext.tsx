@@ -47,7 +47,7 @@ const translations: Record<string, Record<Language, string>> = {
     'nav.finance': { en: 'Finance', bn: 'ফিন্যান্স' },
     'nav.requisitions': { en: 'Requisitions', bn: 'রিকুইজিশন' },
     'nav.ideas': { en: 'Ideas', bn: 'আইডিয়া' },
-    'nav.content': { en: 'Content', bn: 'কনটেন্ট' },
+    'nav.content': { en: 'Content Calendar', bn: 'কন্টেন্ট ক্যালেন্ডার' },
     'nav.tasks': { en: 'Tasks', bn: 'টাস্ক' },
     'nav.todo': { en: 'To Do', bn: 'টু-ডু' },
     'nav.leaderboard': { en: 'Leaderboard', bn: 'লিডারবোর্ড' },

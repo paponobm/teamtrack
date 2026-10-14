@@ -376,6 +376,11 @@ model employees {
   content_entries_content_entries_management_checkToemployees            content_entries[]         @relation("content_entries_management_checkToemployees")
   content_items_content_items_assigned_toToemployees                     content_items[]           @relation("content_items_assigned_toToemployees")
   content_items_content_items_created_byToemployees                      content_items[]           @relation("content_items_created_byToemployees")
+  content_calendar_team_role                                             content_calendar_team_roles?
+  content_calendar_items_assigneeToemployees                             content_calendar_items[]  @relation("content_calendar_items_assigneeToemployees")
+  content_calendar_items_created_byToemployees                           content_calendar_items[]  @relation("content_calendar_items_created_byToemployees")
+  content_calendar_stage_logs                                            content_calendar_stage_logs[]
+  content_calendar_comments                                              content_calendar_comments[]
   courier_issues_courier_issues_call_peekToemployees                     courier_issues[]          @relation("courier_issues_call_peekToemployees")
   courier_issues_courier_issues_management_checkToemployees              courier_issues[]          @relation("courier_issues_management_checkToemployees")
   courier_issues_courier_issues_problem_solverToemployees                courier_issues[]          @relation("courier_issues_problem_solverToemployees")
@@ -1117,4 +1122,136 @@ model work_reports {
   @@index([date], map: "idx_work_reports_date")
   @@index([employee_id], map: "idx_work_reports_employee")
   @@index([status], map: "idx_work_reports_status")
+}
+
+// ---------- Content Calendar (replaces the old content_batches page) ----------
+// Channels are organizational labels only — a name, platform, photo and an optional manual
+// upload link to click through to (e.g. Meta Business Suite) — there is no real social API
+// integration or auto-posting.
+model content_calendar_channels {
+  id          String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  platform    String // facebook | instagram | tiktok | youtube
+  photo_url   String?
+  upload_link String?
+  active      Boolean                    @default(true)
+  sort_order  Int                        @default(0)
+  created_at  DateTime?                  @default(now()) @db.Timestamptz(6)
+  slots       content_calendar_slots[]
+
+  @@index([platform])
+}
+
+// A post "format" — determines which stage pipeline an item follows (see KIND_STAGES in
+// src/lib/contentCalendar.ts) and seeds a default caption.
+model content_calendar_types {
+  id                String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String
+  kind              String // video | photo | design | text | live
+  caption_template  String?
+  sort_order        Int                      @default(0)
+  created_at        DateTime?                @default(now()) @db.Timestamptz(6)
+  items             content_calendar_items[]
+}
+
+// Which content-pipeline roles an employee can be auto-assigned (plan/script/shoot/design/
+// edit/live/post) — only employees doing content work need a row here.
+model content_calendar_team_roles {
+  employee_id String    @id @db.Uuid
+  roles       String[]  @default([])
+  created_at  DateTime? @default(now()) @db.Timestamptz(6)
+  employees   employees @relation(fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model content_calendar_items {
+  id            String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title         String
+  type_id       String                         @db.Uuid
+  product_code  String?
+  caption       String?
+  notes         String?
+  stage         String
+  assignee_id   String?                        @db.Uuid
+  stage_since   DateTime?                      @db.Timestamptz(6)
+  start_date    DateTime                       @db.Date
+  gap_days      Int                            @default(3)
+  occasion_id   String?                        @db.Uuid
+  created_by    String?                        @db.Uuid
+  created_at    DateTime?                      @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime?                      @default(now()) @db.Timestamptz(6)
+  type          content_calendar_types         @relation(fields: [type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  assignee      employees?                     @relation("content_calendar_items_assigneeToemployees", fields: [assignee_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  creator       employees?                     @relation("content_calendar_items_created_byToemployees", fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  occasion      content_calendar_occasions?    @relation(fields: [occasion_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  slots         content_calendar_slots[]
+  stage_logs    content_calendar_stage_logs[]
+  comments      content_calendar_comments[]
+
+  @@index([type_id])
+  @@index([assignee_id])
+  @@index([start_date])
+  @@index([occasion_id])
+}
+
+// Recurring/yearly dates (Eid, Puja, a sale day, …) with a lead time — how many days of
+// prep work start before the date itself. The Month view highlights that lead window and
+// shows the occasion's name on its own day.
+model content_calendar_occasions {
+  id         String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String
+  date       DateTime                   @db.Date
+  lead_days  Int                        @default(14)
+  target     Int?
+  notes      String?
+  created_at DateTime?                  @default(now()) @db.Timestamptz(6)
+  items      content_calendar_items[]
+
+  @@index([date])
+}
+
+// One row per channel a content item posts to — its own date (auto-rotated `gap_days` apart
+// across channels on the same platform), posted flag, and per-channel hook/results.
+model content_calendar_slots {
+  id         String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  item_id    String                      @db.Uuid
+  channel_id String                      @db.Uuid
+  date       DateTime                    @db.Date
+  posted     Boolean                     @default(false)
+  hook       String?
+  reach      Int?
+  msgs       Int?
+  orders     Int?
+  item       content_calendar_items      @relation(fields: [item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  channel    content_calendar_channels   @relation(fields: [channel_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([item_id])
+  @@index([channel_id, date])
+}
+
+// One row per finished stage — who did it and when, so Workload can show "done this month"
+// per person and the item's own history.
+model content_calendar_stage_logs {
+  id              String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  item_id         String                   @db.Uuid
+  stage           String
+  by_employee_id  String?                  @db.Uuid
+  at              DateTime?                @default(now()) @db.Timestamptz(6)
+  item            content_calendar_items   @relation(fields: [item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  employees       employees?               @relation(fields: [by_employee_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([item_id])
+  @@index([at])
+}
+
+model content_calendar_comments {
+  id              String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  item_id         String                   @db.Uuid
+  by_employee_id  String?                  @db.Uuid
+  text            String
+  done            Boolean                  @default(false)
+  created_at      DateTime?                @default(now()) @db.Timestamptz(6)
+  item            content_calendar_items   @relation(fields: [item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  employees       employees?               @relation(fields: [by_employee_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([item_id])
 }
