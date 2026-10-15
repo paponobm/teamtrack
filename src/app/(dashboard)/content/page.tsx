@@ -14,7 +14,7 @@ import {
 import {
     IconPlus, IconX, IconChevronLeft, IconChevronRight,
     IconCalendar, IconLayers, IconUsers, IconWrench, IconClipboard, IconFacebook,
-    IconInstagram, IconTikTok, IconYouTube, IconGlobe, IconTarget, IconLightbulb,
+    IconInstagram, IconTikTok, IconYouTube, IconGlobe, IconTarget, IconLightbulb, IconClock, IconTrendingUp, IconBarChart3,
 } from '@/components/icons/Icons'
 
 // ---------- Types ----------
@@ -26,6 +26,9 @@ interface LogEntry { id: string; stage: string; by: string | null; at: string }
 interface CommentEntry { id: string; text: string; done: boolean; by: string | null; by_employee_id: string | null; at: string }
 interface Occasion { id: string; name: string; date: string; lead_days: number; target: number | null; notes: string | null; item_count?: string }
 interface Idea { id: string; title: string; product_code: string | null; notes: string | null; created_at: string; type: { id: string; name: string; kind: Kind } | null; by_employee: { id: string; name: string } | null }
+interface Series { id: string; title: string; gap_days: number; days_of_week: number[]; channel_ids: string[]; notes: string | null; type: { id: string; name: string; kind: Kind; caption_template: string | null } }
+interface ChannelTarget { channel_id: string; posts: number; videos: number; is_month_custom: boolean }
+interface MemberTarget { employee_id: string; target: number; is_month_custom: boolean }
 interface ContentItem {
     id: string; title: string; product_code: string | null; caption: string | null; notes: string | null
     stage: string; start_date: string; gap_days: number; stage_since: string | null; created_at: string
@@ -33,6 +36,7 @@ interface ContentItem {
     assignee: { id: string; name: string } | null
     creator: { id: string; name: string } | null
     occasion: { id: string; name: string; date: string } | null
+    series_id: string | null
     slots: Slot[]; logs: LogEntry[]; comments: CommentEntry[]
 }
 type EditingItem = Partial<ContentItem> & { _channelIds?: string[]; _fromIdea?: string }
@@ -86,7 +90,7 @@ export default function ContentCalendarPage() {
     const { data: perms } = usePermissions()
     const isSuperAdmin = !!(perms.is_super || perms.role === 'Owner' || perms.role === 'Super Admin')
 
-    const [view, setView] = useState<'month' | 'board' | 'work' | 'pages' | 'occ' | 'ideas' | 'settings'>('month')
+    const [view, setView] = useState<'month' | 'board' | 'work' | 'pages' | 'occ' | 'ideas' | 'series' | 'target' | 'report' | 'settings'>('month')
     const [loading, setLoading] = useState(true)
     const [items, setItems] = useState<ContentItem[]>([])
     const [channels, setChannels] = useState<Channel[]>([])
@@ -94,6 +98,7 @@ export default function ContentCalendarPage() {
     const [team, setTeam] = useState<TeamMember[]>([])
     const [occasions, setOccasions] = useState<Occasion[]>([])
     const [ideas, setIdeas] = useState<Idea[]>([])
+    const [series, setSeries] = useState<Series[]>([])
 
     const [month, setMonth] = useState(currentMonthString())
     const [selectedDate, setSelectedDate] = useState(getLocalDateString())
@@ -102,6 +107,12 @@ export default function ContentCalendarPage() {
     const [pageChannel, setPageChannel] = useState('')
     const [showPastOcc, setShowPastOcc] = useState(false)
     const [ideaEdit, setIdeaEdit] = useState<Partial<Idea> & { _byId?: string } | null>(null)
+    const [seriesEdit, setSeriesEdit] = useState<Partial<Series> | null>(null)
+    const [channelTargets, setChannelTargets] = useState<ChannelTarget[]>([])
+    const [memberTargets, setMemberTargets] = useState<MemberTarget[]>([])
+    const [targetsCustom, setTargetsCustom] = useState(false)
+    const [targetScope, setTargetScope] = useState<'default' | 'month'>('default')
+    const [targetDraft, setTargetDraft] = useState<{ channels: Record<string, { posts: string; videos: string }>; members: Record<string, string> }>({ channels: {}, members: {} })
 
     const [editing, setEditing] = useState<EditingItem | null>(null)
     const [showChannelModal, setShowChannelModal] = useState(false)
@@ -120,14 +131,48 @@ export default function ContentCalendarPage() {
             fetch('/api/content-calendar/team').then(r => r.json()),
             fetch('/api/content-calendar/occasions').then(r => r.json()),
             fetch('/api/content-calendar/ideas').then(r => r.json()),
-        ]).then(([i, c, t, m, o, id]) => {
+            fetch('/api/content-calendar/series').then(r => r.json()),
+        ]).then(([i, c, t, m, o, id, sr]) => {
             if (cancelled) return
-            setItems(i.items || []); setChannels(c.channels || []); setTypes(t.types || []); setTeam(m.team || []); setOccasions(o.occasions || []); setIdeas(id.ideas || [])
+            setItems(i.items || []); setChannels(c.channels || []); setTypes(t.types || []); setTeam(m.team || []); setOccasions(o.occasions || []); setIdeas(id.ideas || []); setSeries(sr.series || [])
         }).catch(() => { if (!cancelled) toast.error('কন্টেন্ট ক্যালেন্ডার লোড করা যায়নি।') })
             .finally(() => { if (!cancelled) setLoading(false) })
         return () => { cancelled = true }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
+
+    // Targets are month-specific, so they're fetched separately whenever the displayed month
+    // changes, rather than once up front with everything else.
+    useEffect(() => {
+        let cancelled = false
+        fetch(`/api/content-calendar/targets?month=${month}`).then(r => r.json()).then(d => {
+            if (cancelled) return
+            const ch: ChannelTarget[] = d.channels || []
+            const mem: MemberTarget[] = d.members || []
+            setChannelTargets(ch); setMemberTargets(mem); setTargetsCustom(!!d.is_month_custom)
+            setTargetScope(d.is_month_custom ? 'month' : 'default')
+            const chDraft: Record<string, { posts: string; videos: string }> = {}
+            ch.forEach(c => { chDraft[c.channel_id] = { posts: String(c.posts), videos: String(c.videos) } })
+            const memDraft: Record<string, string> = {}
+            mem.forEach(m => { memDraft[m.employee_id] = m.target ? String(m.target) : '' })
+            setTargetDraft({ channels: chDraft, members: memDraft })
+        }).catch(() => {})
+        return () => { cancelled = true }
+    }, [month])
+
+    async function saveTargets() {
+        const payloadChannels = activeChannels.map(c => ({ channel_id: c.id, posts: Number(targetDraft.channels[c.id]?.posts) || 0, videos: Number(targetDraft.channels[c.id]?.videos) || 0 }))
+        const payloadMembers = team.map(m => ({ employee_id: m.id, target: Number(targetDraft.members[m.id]) || 0 }))
+        const res = await fetch('/api/content-calendar/targets', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scope: targetScope, month, channels: payloadChannels, members: payloadMembers }),
+        })
+        if (res.ok) {
+            toast.success('টার্গেট সেভ হয়েছে')
+            const d = await (await fetch(`/api/content-calendar/targets?month=${month}`)).json()
+            setChannelTargets(d.channels || []); setMemberTargets(d.members || []); setTargetsCustom(!!d.is_month_custom)
+        } else toast.error((await res.json()).error || 'টার্গেট সেভ করা যায়নি')
+    }
 
     const channelById = (id: string) => channels.find(c => c.id === id) || { id, name: '(মুছে ফেলা চ্যানেল)', platform: 'facebook' as Platform, photo_url: null, upload_link: null, active: false, sort_order: 0 }
     const activeChannels = channels.filter(c => c.active)
@@ -366,13 +411,65 @@ export default function ContentCalendarPage() {
         })
     }
 
+    // ---------- Recurring series ----------
+    function openNewSeries() {
+        setSeriesEdit({ title: '', type: types[0] ? { id: types[0].id, name: types[0].name, kind: types[0].kind, caption_template: types[0].caption_template } : undefined, gap_days: 0, days_of_week: [5], channel_ids: activeChannels.filter(c => c.platform === 'facebook').map(c => c.id), notes: '' })
+    }
+    function openEditSeries(s: Series) { setSeriesEdit({ ...s }) }
+    async function saveSeries() {
+        const f = seriesEdit
+        if (!f || !f.title?.trim()) { toast.error('সিরিজের নাম লিখুন'); return }
+        if (!f.days_of_week?.length) { toast.error('অন্তত একটা বার বেছে নিন'); return }
+        if (!f.channel_ids?.length) { toast.error('অন্তত একটা চ্যানেল বেছে নিন'); return }
+        const payload = { id: f.id, title: f.title.trim(), type_id: f.type?.id, gap_days: f.gap_days ?? 0, days_of_week: f.days_of_week, channel_ids: f.channel_ids, notes: f.notes || '' }
+        const res = await fetch('/api/content-calendar/series', {
+            method: f.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        })
+        if (res.ok) {
+            const row = await res.json()
+            setSeries(prev => f.id ? prev.map(x => x.id === row.id ? row : x) : [...prev, row])
+            setSeriesEdit(null); toast.success('সিরিজ সেভ হয়েছে')
+        } else toast.error((await res.json()).error || 'সিরিজ সেভ করা যায়নি')
+    }
+    async function deleteSeries(s: Series) {
+        if (!confirm(`"${s.title}" সিরিজ মুছে ফেলবেন?`)) return
+        const res = await fetch(`/api/content-calendar/series?id=${s.id}`, { method: 'DELETE' })
+        if (res.ok) { setSeries(prev => prev.filter(x => x.id !== s.id)); toast.success('সিরিজ মুছে ফেলা হয়েছে') }
+        else toast.error((await res.json()).error || 'মুছে ফেলা যায়নি')
+    }
+    function seriesDatesNeeded(s: Series): string[] {
+        const days = new Set(s.days_of_week)
+        const out: string[] = []
+        for (let ds = monthStart > todayStr ? monthStart : todayStr; ds <= monthEnd; ds = addDaysStr(ds, 1)) {
+            if (!days.has(new Date(ds).getDay())) continue
+            if (items.some(i => i.series_id === s.id && i.start_date === ds)) continue
+            out.push(ds)
+        }
+        return out
+    }
+    async function genSeries(s: Series) {
+        const dates = seriesDatesNeeded(s)
+        if (!dates.length) return
+        for (const ds of dates) {
+            const res = await fetch('/api/content-calendar/items', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: s.title, type_id: s.type.id, start_date: ds, gap_days: s.gap_days, channel_ids: s.channel_ids, series_id: s.id, notes: s.notes }),
+            })
+            if (res.ok) { const created = await res.json(); setItems(prev => [created, ...prev]) }
+        }
+        toast.success(`${bn(dates.length)}টা কন্টেন্ট ক্যালেন্ডারে বসানো হয়েছে`)
+    }
+
     const TABS: { key: typeof view; label: string; icon: React.ReactNode }[] = [
         { key: 'month', label: 'মাস', icon: <IconCalendar size={14} /> },
         { key: 'board', label: 'প্রোডাকশন', icon: <IconLayers size={14} /> },
         { key: 'work', label: 'কার কী কাজ', icon: <IconUsers size={14} /> },
-        // { key: 'pages', label: 'পেজ অনুযায়ী', icon: <IconGlobe size={14} /> },
-        // { key: 'occ', label: 'উপলক্ষ', icon: <IconTarget size={14} /> },
+        { key: 'pages', label: 'পেজ অনুযায়ী', icon: <IconGlobe size={14} /> },
+        { key: 'occ', label: 'উপলক্ষ', icon: <IconTarget size={14} /> },
         // { key: 'ideas', label: 'আইডিয়া', icon: <IconLightbulb size={14} /> },
+        // { key: 'series', label: 'সিরিজ', icon: <IconClock size={14} /> },
+        // { key: 'target', label: 'টার্গেট', icon: <IconTrendingUp size={14} /> },
+        // { key: 'report', label: 'রিপোর্ট', icon: <IconBarChart3 size={14} /> },
         // { key: 'settings', label: 'সেটিংস', icon: <IconWrench size={14} /> },
     ]
 
@@ -411,7 +508,7 @@ export default function ContentCalendarPage() {
                             <MonthView {...{ month, setMonth, selectedDate, setSelectedDate, monthStart, monthEnd, todayStr, slotsInRange, channelById, occasions, openAdd, openEdit, togglePosted, copyCaption }} />
                         )}
                         {view === 'board' && (
-                            <BoardView {...{ items, month, setMonth, openEdit, advanceStage }} />
+                            <BoardView {...{ items, team, channelById, month, setMonth, openEdit, advanceStage }} />
                         )}
                         {view === 'work' && (
                             <WorkView {...{ items, team, month, setMonth, workStage, setWorkStage, workPerson, setWorkPerson, openEdit, advanceStage }} />
@@ -432,6 +529,23 @@ export default function ContentCalendarPage() {
                                 ideas, types, team, ideaEdit, setIdeaEdit,
                                 onNew: openNewIdea, onEdit: openEditIdea, onSave: saveIdea, onDelete: deleteIdea, onUse: useIdea,
                             }} />
+                        )}
+                        {view === 'series' && (
+                            <SeriesView {...{
+                                series, items, types, channels: activeChannels, channelById, month, setMonth, monthStart, monthEnd,
+                                seriesEdit, setSeriesEdit,
+                                onNew: openNewSeries, onEdit: openEditSeries, onSave: saveSeries, onDelete: deleteSeries, onGenerate: genSeries, seriesDatesNeeded,
+                            }} />
+                        )}
+                        {view === 'target' && (
+                            <TargetView {...{
+                                items, channels: activeChannels, team, month, setMonth, monthStart, monthEnd, todayStr,
+                                channelTargets, memberTargets, targetsCustom, targetScope, setTargetScope, targetDraft, setTargetDraft,
+                                onSave: saveTargets,
+                            }} />
+                        )}
+                        {view === 'report' && (
+                            <ReportView {...{ items, channels: activeChannels, types, occasions, team, channelTargets, memberTargets, month, setMonth, monthStart, monthEnd }} />
                         )}
                         {view === 'settings' && (
                             <SettingsView {...{
@@ -596,57 +710,80 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
 }
 
 // ================= Production board =================
-function BoardView({ items, month, setMonth, openEdit, advanceStage }: {
-    items: ContentItem[]; month: string; setMonth: (m: string) => void; openEdit: (i: ContentItem) => void; advanceStage: (i: ContentItem) => void
-}) {
-    const cols = STAGE_ORDER.filter(s => s !== 'ready').map(s => ({ key: s, label: STAGE_INFO[s].label, items: items.filter(i => isActivePhase(i) && i.stage === s) }))
-        .filter(c => c.items.length > 0)
-    const ready = items.filter(i => phaseOf(i) === 'ready')
-    const done = items.filter(i => phaseOf(i) === 'done')
-
-    function Card({ it }: { it: ContentItem }) {
-        const phase = phaseOf(it)
-        const next = nextStageOf(it.type.kind, it.stage)
-        return (
-            <div className="card" style={{ padding: 10, borderLeft: `4px solid ${stagePillStyle(phase).color}`, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6 }} onClick={() => openEdit(it)}>
-                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{it.title}</div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                    <Pill label={phase === 'done' ? 'সব পোস্টেড' : phase === 'ready' ? 'পোস্টের জন্য প্রস্তুত' : STAGE_INFO[it.stage as Stage]?.label} {...stagePillStyle(phase)} />
-                    <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{it.type.name}</span>
-                    {isItemLate(it) && <Pill label="দেরি" bg="rgba(220,38,38,0.1)" color="#DC2626" />}
-                    {it.occasion && <Pill label={`🎯 ${it.occasion.name}`} bg="rgba(106,63,200,0.1)" color="#6A3FC8" />}
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{it.assignee ? <>{avatar(it.assignee.name, null, 18)}{it.assignee.name}</> : <span className="hint">দায়িত্ব দেওয়া হয়নি</span>}</span>
-                    {isActivePhase(it) && next && (
-                        <button className="btn btn-sm" style={{ background: 'rgba(176,23,90,0.1)', color: '#B0175A', border: 'none', fontSize: '0.75rem' }}
-                            onClick={e => { e.stopPropagation(); advanceStage(it) }}>{STAGE_INFO[it.stage as Stage].label} শেষ →</button>
-                    )}
-                </div>
+function BoardCard({ it, channelById, onOpen, onAdvance }: { it: ContentItem; channelById: (id: string) => Channel; onOpen: (i: ContentItem) => void; onAdvance: (i: ContentItem) => void }) {
+    const phase = phaseOf(it)
+    const next = nextStageOf(it.type.kind, it.stage)
+    const first = firstDateOf(it)
+    const prodLate = isActivePhase(it) && first && first <= getLocalDateString()
+    return (
+        <div className="card" style={{ padding: 10, borderLeft: `4px solid ${stagePillStyle(phase).color}`, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6 }} onClick={() => onOpen(it)}>
+            <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{it.title}</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Pill label={phase === 'done' ? 'সব পোস্টেড' : phase === 'ready' ? 'পোস্টের জন্য প্রস্তুত' : STAGE_INFO[it.stage as Stage]?.label} {...stagePillStyle(phase)} />
+                {prodLate && <Pill label="পোস্টের দিন চলে এসেছে" bg="rgba(220,38,38,0.1)" color="#DC2626" />}
+                {it.occasion && <Pill label={`🎯 ${it.occasion.name}`} bg="rgba(106,63,200,0.1)" color="#6A3FC8" />}
             </div>
-        )
-    }
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{it.type.name}</span>
+            {it.slots.length > 0 && (
+                <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                    {it.slots.map(s => {
+                        const ch = channelById(s.channel_id)
+                        const Icon = PLATFORM_ICON[ch.platform]
+                        return <span key={(s.id || s.channel_id)} title={ch.name} style={{ width: 20, height: 20, borderRadius: '50%', background: PLATFORM_COLOR[ch.platform], color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: s.posted ? '0 0 0 2px #16A34A' : undefined }}><Icon size={11} /></span>
+                    })}
+                </div>
+            )}
+            <span style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {it.assignee ? <>{avatar(it.assignee.name, null, 18)}{it.assignee.name}</> : <span className="hint">দায়িত্ব দেওয়া হয়নি</span>}
+                {first && <span className="hint">· পোস্ট {formatDate(first)}</span>}
+            </span>
+            {isActivePhase(it) && next && (
+                <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none', fontSize: '0.75rem', width: '100%' }}
+                    onClick={e => { e.stopPropagation(); onAdvance(it) }}>{STAGE_INFO[it.stage as Stage].label} শেষ → {STAGE_INFO[next].label}</button>
+            )}
+        </div>
+    )
+}
+
+function BoardView({ items, team, channelById, month, setMonth, openEdit, advanceStage }: {
+    items: ContentItem[]; team: TeamMember[]; channelById: (id: string) => Channel
+    month: string; setMonth: (m: string) => void; openEdit: (i: ContentItem) => void; advanceStage: (i: ContentItem) => void
+}) {
+    const [who, setWho] = useState('')
+    const visible = items.filter(i => !who || i.assignee?.id === who)
+    // These five always show as their own column, even empty — every format passes through at
+    // least one of them. The rarer stages (plan/collect/prep/thumb — only used by some formats,
+    // e.g. Live or Customer Review) only show up once something's actually in them.
+    const alwaysShown: Stage[] = ['idea', 'shoot', 'design', 'edit', 'review']
+    const cols = STAGE_ORDER.filter(s => s !== 'ready').map(s => ({ key: s, label: STAGE_INFO[s].label, items: visible.filter(i => isActivePhase(i) && i.stage === s) }))
+        .filter(c => alwaysShown.includes(c.key) || c.items.length > 0)
+    const ready = visible.filter(i => phaseOf(i) === 'ready')
+    const done = visible.filter(i => phaseOf(i) === 'done')
 
     return (
         <>
-            <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
                 <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
                 <button className="btn btn-ghost btn-sm" onClick={() => setMonth(currentMonthString())}>এই মাস</button>
                 <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                <select className="form-input" style={{ width: 'auto', height: 34, fontSize: '0.8125rem' }} value={who} onChange={e => setWho(e.target.value)}>
+                    <option value="">সবার কাজ</option>
+                    {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
             </motion.div>
             <p className="hint" style={{ margin: '0 0 12px', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>প্রতিটি ধাপের জন্য আলাদা কলাম। প্রতিটি পোস্ট ফরম্যাটের নিজস্ব ধাপ আছে, আর প্রতি ধাপে সঠিক ব্যক্তি অটো দায়িত্ব পান।</p>
             <motion.div variants={item_} style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
                 {cols.map(c => (
                     <div key={c.key} style={{ flex: '0 0 260px', background: 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 12, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <h3 style={{ fontSize: '0.875rem', display: 'flex', justifyContent: 'space-between' }}>{c.label}<span className="hint">{c.items.length}</span></h3>
-                        {c.items.map(it => <Card key={it.id} it={it} />)}
+                        {c.items.map(it => <BoardCard key={it.id} it={it} channelById={channelById} onOpen={openEdit} onAdvance={advanceStage} />)}
                     </div>
                 ))}
                 {[{ key: 'ready', label: 'পোস্টের জন্য প্রস্তুত', items: ready }, { key: 'done', label: 'সব পোস্টেড', items: done }].map(c => (
                     <div key={c.key} style={{ flex: '0 0 260px', background: 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 12, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <h3 style={{ fontSize: '0.875rem', display: 'flex', justifyContent: 'space-between' }}>{c.label}<span className="hint">{c.items.length}</span></h3>
-                        {c.items.map(it => <Card key={it.id} it={it} />)}
+                        {c.items.map(it => <BoardCard key={it.id} it={it} channelById={channelById} onOpen={openEdit} onAdvance={advanceStage} />)}
                         {!c.items.length && <span className="hint">খালি</span>}
                     </div>
                 ))}
@@ -1030,6 +1167,524 @@ function IdeasView({ ideas, types, team, ideaEdit, setIdeaEdit, onNew, onEdit, o
                     </div>
                 ))}
             </motion.div>
+        </>
+    )
+}
+
+// ================= Recurring series =================
+const WEEK_ORDER = [6, 0, 1, 2, 3, 4, 5] // Saturday-first, matching the rest of this page's week
+
+function SeriesView({ series, items, types, channels, channelById, month, setMonth, monthStart, monthEnd, seriesEdit, setSeriesEdit, onNew, onEdit, onSave, onDelete, onGenerate, seriesDatesNeeded }: {
+    series: Series[]; items: ContentItem[]; types: PostType[]; channels: Channel[]; channelById: (id: string) => Channel
+    month: string; setMonth: (m: string) => void; monthStart: string; monthEnd: string
+    seriesEdit: Partial<Series> | null; setSeriesEdit: (f: Partial<Series> | null) => void
+    onNew: () => void; onEdit: (s: Series) => void; onSave: () => void; onDelete: (s: Series) => void; onGenerate: (s: Series) => void
+    seriesDatesNeeded: (s: Series) => string[]
+}) {
+    const f = seriesEdit
+    const toggleDay = (d: number) => { const days = f?.days_of_week || []; setSeriesEdit({ ...f, days_of_week: days.includes(d) ? days.filter(x => x !== d) : [...days, d] }) }
+    const toggleChannel = (id: string) => { const ids = f?.channel_ids || []; setSeriesEdit({ ...f, channel_ids: ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id] }) }
+
+    return (
+        <>
+            <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
+                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setMonth(currentMonthString())}>এই মাস</button>
+                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+            </motion.div>
+
+            <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <h2 style={{ fontSize: '1.0625rem', flex: 1 }}>নিয়মিত সিরিজ</h2>
+                <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={onNew}><IconPlus size={14} /> নতুন সিরিজ</button>
+            </motion.div>
+            <p className="hint" style={{ margin: '0 0 16px', fontSize: '0.8125rem' }}>যে কন্টেন্ট প্রতি সপ্তাহে একই বারে যায়, যেমন প্রতি শুক্রবার কাস্টমার রিভিউ বা প্রতি মঙ্গলবার লাইভ, সেটা একবার সেট করুন। &quot;বসান&quot; চাপলে বাছাই করা মাসের আজ থেকে বাকি সব তারিখে কন্টেন্ট তৈরি হবে, দায়িত্বও অটো বসবে।</p>
+
+            {f && (
+                <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
+                    <h3 style={{ fontSize: '1.0625rem', marginBottom: 10 }}>{f.id ? 'সিরিজ এডিট' : 'নতুন সিরিজ'}</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div className="form-group"><label className="form-label">সিরিজের নাম</label>
+                            <input className="form-input" value={f.title || ''} onChange={e => setSeriesEdit({ ...f, title: e.target.value })} placeholder="যেমন: শুক্রবারের কাস্টমার রিভিউ" />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            <div className="form-group"><label className="form-label">ফরম্যাট</label>
+                                <select className="form-input" value={f.type?.id || ''} onChange={e => { const t = types.find(x => x.id === e.target.value); setSeriesEdit({ ...f, type: t ? { id: t.id, name: t.name, kind: t.kind, caption_template: t.caption_template } : undefined }) }}>
+                                    {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="form-group"><label className="form-label">পরের চ্যানেলে কত দিন পর</label>
+                                <input className="form-input" type="number" min={0} max={30} value={f.gap_days ?? 0} onChange={e => setSeriesEdit({ ...f, gap_days: Math.max(0, parseInt(e.target.value) || 0) })} />
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">কোন বারে</label>
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                {WEEK_ORDER.map(d => (
+                                    <button key={d} type="button" onClick={() => toggleDay(d)}
+                                        style={{ padding: '4px 10px', borderRadius: 6, fontSize: '0.8125rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: (f.days_of_week || []).includes(d) ? 'var(--color-text-primary)' : 'var(--color-surface)', color: (f.days_of_week || []).includes(d) ? 'var(--color-bg-primary)' : undefined }}>
+                                        {BN_DAYS[d]}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label className="form-label">কোন চ্যানেলে</label>
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                {channels.map(c => {
+                                    const Icon = PLATFORM_ICON[c.platform]
+                                    return (
+                                        <button key={c.id} type="button" onClick={() => toggleChannel(c.id)}
+                                            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 6, fontSize: '0.8125rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: (f.channel_ids || []).includes(c.id) ? PLATFORM_COLOR[c.platform] : 'var(--color-surface)', color: (f.channel_ids || []).includes(c.id) ? '#fff' : undefined }}>
+                                            <Icon size={14} />{c.name}
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                        <div className="form-group"><label className="form-label">নোট / স্ক্রিপ্টের ধরন</label>
+                            <input className="form-input" value={f.notes || ''} onChange={e => setSeriesEdit({ ...f, notes: e.target.value })} />
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <button className="btn btn-primary btn-sm" onClick={onSave}>সেভ করুন</button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => setSeriesEdit(null)}>বাতিল</button>
+                        </div>
+                    </div>
+                </motion.div>
+            )}
+
+            <motion.div variants={item_} className="card">
+                <h3 style={{ fontSize: '1.0625rem', marginBottom: 4 }}>সিরিজ</h3>
+                {!series.length && <p className="hint">এখনো কোনো সিরিজ নেই।</p>}
+                {series.map(s => {
+                    const made = items.filter(i => i.series_id === s.id && i.start_date >= monthStart && i.start_date <= monthEnd).length
+                    const need = seriesDatesNeeded(s).length
+                    return (
+                        <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 0', borderTop: '1px solid var(--color-border-light)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                                    <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{s.title}</div>
+                                    <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>
+                                        {s.type.name} · প্রতি {WEEK_ORDER.filter(d => s.days_of_week.includes(d)).map(d => BN_DAYS[d]).join(', ')} · {s.channel_ids.map(id => channelById(id).name).join(', ')}
+                                    </div>
+                                    <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>
+                                        {formatMonthLabel(month)}-এ বসানো হয়েছে {bn(made)}টা{need ? `, বাকি ${bn(need)}টা তারিখ` : ''}
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+                                        <button className="btn btn-ghost btn-sm" onClick={() => onEdit(s)}>এডিট</button>
+                                        <button className="btn btn-ghost btn-sm" style={{ color: '#DC2626' }} onClick={() => onDelete(s)}>মুছুন</button>
+                                    </div>
+                                </div>
+                                {need > 0
+                                    ? <button className="btn btn-primary btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => onGenerate(s)}>{formatMonthLabel(month)}-এ বসান ({bn(need)})</button>
+                                    : <Pill label="সব বসানো" bg="rgba(22,163,74,0.1)" color="#16A34A" />}
+                            </div>
+                        </div>
+                    )
+                })}
+            </motion.div>
+        </>
+    )
+}
+
+// ================= Targets =================
+interface Clock { elapsed: number; left: number; days: number }
+function monthClockOf(monthStart: string, monthEnd: string, todayStr: string, daysInMonthN: number): Clock {
+    if (todayStr < monthStart) return { elapsed: 0, left: daysInMonthN, days: daysInMonthN }
+    if (todayStr > monthEnd) return { elapsed: daysInMonthN, left: 0, days: daysInMonthN }
+    const d = Number(todayStr.slice(8, 10))
+    return { elapsed: d, left: daysInMonthN - d + 1, days: daysInMonthN }
+}
+function analyseTarget(target: number, planned: number, posted: number, clock: Clock) {
+    const remaining = Math.max(0, target - posted)
+    const needPlan = Math.max(0, target - planned)
+    const extra = Math.max(0, posted - target)
+    const expected = clock.days ? Math.round(target * clock.elapsed / clock.days) : 0
+    const behind = expected - posted
+    const perDay = clock.left > 0 ? Math.ceil(remaining / clock.left) : remaining
+    let status: string, color: string
+    if (!target) { status = 'টার্গেট নেই'; color = 'var(--color-text-tertiary)' }
+    else if (posted >= target) { status = extra ? `টার্গেট পূরণ, ${bn(extra)}টা বেশি` : 'টার্গেট পূরণ'; color = '#16A34A' }
+    else if (clock.left === 0) { status = `${bn(remaining)}টা কম হয়েছে`; color = '#DC2626' }
+    else if (behind > 0) { status = `আজ পর্যন্ত ${bn(behind)}টা পিছিয়ে`; color = '#DC2626' }
+    else { status = 'ঠিক পথে আছে'; color = '#16A34A' }
+    return { remaining, needPlan, extra, perDay, expected, status, color }
+}
+interface TargetRow { channel: Channel; target: number; planned: number; posted: number; a: ReturnType<typeof analyseTarget> }
+interface TargetTableData { rows: TargetRow[]; tT: number; tP: number; tD: number; totalA: ReturnType<typeof analyseTarget> }
+
+function TargetTable({ title, hint, data, clockLeft }: { title: string; hint?: string; data: TargetTableData; clockLeft: number }) {
+    return (
+        <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
+            <h3 style={{ fontSize: '1.0625rem', marginBottom: hint ? 4 : 8 }}>{title}</h3>
+            {hint && <p className="hint" style={{ margin: '0 0 8px', fontSize: '0.8125rem' }}>{hint}</p>}
+            <div style={{ overflowX: 'auto' }}>
+                <table className="table">
+                    <thead><tr><th>অ্যাকাউন্ট</th><th style={{ textAlign: 'right' }}>টার্গেট</th><th style={{ textAlign: 'right' }}>প্ল্যান</th><th style={{ textAlign: 'right' }}>পোস্টেড</th><th>অগ্রগতি</th><th style={{ textAlign: 'right' }}>বাকি</th><th style={{ textAlign: 'right' }}>দিনে লাগবে</th><th>অবস্থা</th></tr></thead>
+                    <tbody>
+                        {data.rows.map(r => {
+                            const Icon = PLATFORM_ICON[r.channel.platform]
+                            return (
+                                <tr key={r.channel.id}>
+                                    <td style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ color: PLATFORM_COLOR[r.channel.platform] }}><Icon size={14} /></span>{r.channel.name}</td>
+                                    <td style={{ textAlign: 'right' }}>{bn(r.target)}</td>
+                                    <td style={{ textAlign: 'right' }}>{bn(r.planned)}</td>
+                                    <td style={{ textAlign: 'right' }}>{bn(r.posted)}</td>
+                                    <td><TargetBar target={r.target} planned={r.planned} posted={r.posted} expected={r.a.expected} /></td>
+                                    <td style={{ textAlign: 'right' }}>{bn(r.a.remaining)}</td>
+                                    <td style={{ textAlign: 'right' }}>{clockLeft && r.a.remaining ? bn(r.a.perDay) : '—'}</td>
+                                    <td style={{ whiteSpace: 'nowrap' }}>
+                                        <span style={{ color: r.a.color, fontWeight: 600 }}>{r.a.status}</span>
+                                        {r.a.needPlan > 0 && r.target > 0 && <div style={{ color: '#A15C00', fontSize: '0.75rem' }}>আরো {bn(r.a.needPlan)}টা প্ল্যান করতে হবে</div>}
+                                    </td>
+                                </tr>
+                            )
+                        })}
+                        <tr style={{ fontWeight: 700 }}>
+                            <td>মোট</td><td style={{ textAlign: 'right' }}>{bn(data.tT)}</td><td style={{ textAlign: 'right' }}>{bn(data.tP)}</td><td style={{ textAlign: 'right' }}>{bn(data.tD)}</td>
+                            <td><TargetBar target={data.tT} planned={data.tP} posted={data.tD} expected={data.totalA.expected} /></td>
+                            <td style={{ textAlign: 'right' }}>{bn(data.totalA.remaining)}</td><td style={{ textAlign: 'right' }}>{clockLeft && data.totalA.remaining ? bn(data.totalA.perDay) : '—'}</td>
+                            <td style={{ color: data.totalA.color }}>{data.totalA.status}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </motion.div>
+    )
+}
+
+function TargetBar({ target, planned, posted, expected }: { target: number; planned: number; posted: number; expected: number }) {
+    const max = Math.max(target, planned, posted, 1)
+    const pw = Math.min(100, planned / max * 100)
+    const po = Math.min(100, posted / max * 100)
+    const met = target > 0 && posted >= target
+    const mk = target && expected ? Math.min(100, expected / max * 100) : null
+    return (
+        <div style={{ position: 'relative', height: 8, borderRadius: 4, background: 'var(--color-surface-secondary, #F1F5F9)', overflow: 'hidden', minWidth: 80 }}>
+            <div style={{ position: 'absolute', inset: '0 auto 0 0', width: `${pw}%`, borderRadius: 4, background: 'rgba(176,23,90,0.25)' }} />
+            <div style={{ position: 'absolute', inset: '0 auto 0 0', width: `${po}%`, borderRadius: 4, background: met ? '#16A34A' : '#B0175A' }} />
+            {mk != null && <div style={{ position: 'absolute', top: -2, bottom: -2, width: 2, background: 'var(--color-text-primary)', opacity: 0.55, left: `${mk}%` }} />}
+        </div>
+    )
+}
+
+function TargetView({ items, channels, team, month, setMonth, monthStart, monthEnd, todayStr, channelTargets, memberTargets, targetsCustom, targetScope, setTargetScope, targetDraft, setTargetDraft, onSave }: {
+    items: ContentItem[]; channels: Channel[]; team: TeamMember[]; month: string; setMonth: (m: string) => void
+    monthStart: string; monthEnd: string; todayStr: string
+    channelTargets: ChannelTarget[]; memberTargets: MemberTarget[]; targetsCustom: boolean
+    targetScope: 'default' | 'month'; setTargetScope: (s: 'default' | 'month') => void
+    targetDraft: { channels: Record<string, { posts: string; videos: string }>; members: Record<string, string> }
+    setTargetDraft: (d: { channels: Record<string, { posts: string; videos: string }>; members: Record<string, string> }) => void
+    onSave: () => void
+}) {
+    const [y, m] = month.split('-').map(Number)
+    const daysInMonthN = new Date(y, m, 0).getDate()
+    const clock = monthClockOf(monthStart, monthEnd, todayStr, daysInMonthN)
+    const mname = formatMonthLabel(month)
+
+    const monthSlots: { item: ContentItem; slot: Slot }[] = []
+    items.forEach(i => i.slots.forEach(s => { if (s.date >= monthStart && s.date <= monthEnd) monthSlots.push({ item: i, slot: s }) }))
+    const targetFor = (channelId: string) => channelTargets.find(t => t.channel_id === channelId) || { posts: 0, videos: 0 }
+
+    function buildRows(kind: 'posts' | 'videos') {
+        let tT = 0, tP = 0, tD = 0
+        const rows = channels.map(c => {
+            const list = monthSlots.filter(x => x.slot.channel_id === c.id && (kind === 'posts' || KIND_INFO[x.item.type.kind].isVideo))
+            const target = kind === 'posts' ? targetFor(c.id).posts : targetFor(c.id).videos
+            const planned = list.length, posted = list.filter(x => x.slot.posted).length
+            tT += target; tP += planned; tD += posted
+            return { channel: c, target, planned, posted, a: analyseTarget(target, planned, posted, clock) }
+        })
+        return { rows, tT, tP, tD, totalA: analyseTarget(tT, tP, tD, clock) }
+    }
+    const P = buildRows('posts')
+    const V = buildRows('videos')
+
+    const logsInMonth = items.flatMap(i => i.logs.map(l => ({ log: l }))).filter(x => x.log.at.slice(0, 7) === month)
+    const memberRows = team.map(mem => {
+        const target = memberTargets.find(t => t.employee_id === mem.id)?.target || 0
+        const mine = logsInMonth.filter(x => x.log.by === mem.name)
+        const done = mine.length
+        const a = analyseTarget(target, Math.max(done, target), done, clock)
+        const byStage: Record<string, number> = {}
+        mine.forEach(x => { byStage[x.log.stage] = (byStage[x.log.stage] || 0) + 1 })
+        const stageText = Object.entries(byStage).map(([k, v]) => `${STAGE_INFO[k as Stage]?.label || k} ${bn(v)}`).join(' · ')
+        return { member: mem, target, done, a, stageText }
+    })
+
+    return (
+        <>
+            <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{mname}</h2>
+                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setMonth(currentMonthString())}>এই মাস</button>
+                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+            </motion.div>
+
+            <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12 }}>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(P.tD)}/{bn(P.tT)}</b><small className="hint">পোস্ট (পোস্টেড / টার্গেট)</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(V.tD)}/{bn(V.tT)}</b><small className="hint">ভিডিও (পোস্টেড / টার্গেট)</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(P.totalA.remaining)}</b><small className="hint">পোস্ট বাকি</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(P.totalA.needPlan)}</b><small className="hint">আরো প্ল্যান করতে হবে</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(clock.left)}</b><small className="hint">মাসের দিন বাকি (আজসহ)</small></div>
+                </div>
+                <p className="hint" style={{ margin: '10px 0 0', fontSize: '0.8125rem' }}>বারে হালকা রং = প্ল্যান করা, গাঢ় রং = পোস্ট হয়েছে, দাগ = আজ পর্যন্ত যতটা হওয়ার কথা। {targetsCustom ? 'এই মাসের জন্য আলাদা টার্গেট সেট করা আছে।' : 'সব মাসের ডিফল্ট টার্গেট দেখাচ্ছে।'}</p>
+            </motion.div>
+
+            <TargetTable title={`পোস্টের টার্গেট — ${mname}`} data={P} clockLeft={clock.left} />
+            <TargetTable title={`ভিডিওর টার্গেট — ${mname}`} hint="রিল, ইউটিউব ভিডিও আর লাইভ ভিডিও হিসেবে গোনা হয়।" data={V} clockLeft={clock.left} />
+
+            <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
+                <h3 style={{ fontSize: '1.0625rem' }}>টিমের টার্গেট — {mname}</h3>
+                <p className="hint" style={{ margin: '0 0 8px', fontSize: '0.8125rem' }}>&quot;শেষ&quot; মানে এ মাসে &quot;… শেষ →&quot; বাটন চেপে যতগুলো ধাপ শেষ করেছেন। এডিটরের জন্য এটা এডিট করা ভিডিওর সংখ্যা।</p>
+                <div style={{ overflowX: 'auto' }}>
+                    <table className="table">
+                        <thead><tr><th>সদস্য</th><th style={{ textAlign: 'right' }}>টার্গেট</th><th style={{ textAlign: 'right' }}>শেষ</th><th>অগ্রগতি</th><th style={{ textAlign: 'right' }}>বাকি</th><th style={{ textAlign: 'right' }}>দিনে লাগবে</th><th>অবস্থা</th></tr></thead>
+                        <tbody>
+                            {memberRows.map(r => (
+                                <tr key={r.member.id}>
+                                    <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{avatar(r.member.name, r.member.avatar_url, 22)}<div><b>{r.member.name}</b><div className="hint" style={{ fontSize: '0.75rem' }}>{r.member.roles.map(k => CONTENT_ROLES.find(cr => cr.key === k)?.label || k).join(', ')}</div></div></td>
+                                    <td style={{ textAlign: 'right' }}>{r.target ? bn(r.target) : '—'}</td>
+                                    <td style={{ textAlign: 'right' }}>{bn(r.done)}</td>
+                                    <td>{r.target ? <TargetBar target={r.target} planned={0} posted={r.done} expected={r.a.expected} /> : null}</td>
+                                    <td style={{ textAlign: 'right' }}>{r.target ? bn(r.a.remaining) : '—'}</td>
+                                    <td style={{ textAlign: 'right' }}>{r.target && clock.left && r.a.remaining ? bn(r.a.perDay) : '—'}</td>
+                                    <td>
+                                        <span style={{ color: r.target ? r.a.color : 'var(--color-text-tertiary)', fontWeight: 600 }}>{r.target ? r.a.status : 'টার্গেট দেওয়া হয়নি'}</span>
+                                        {r.stageText && <div className="hint" style={{ fontSize: '0.75rem' }}>{r.stageText}</div>}
+                                    </td>
+                                </tr>
+                            ))}
+                            {!memberRows.length && <tr><td colSpan={7} className="hint" style={{ textAlign: 'center', padding: 16 }}>কেউ এখনো কোনো দায়িত্ব পাননি — সেটিংসে গিয়ে দায়িত্ব দিন।</td></tr>}
+                        </tbody>
+                    </table>
+                </div>
+            </motion.div>
+
+            <motion.div variants={item_} className="card">
+                <h3 style={{ fontSize: '1.0625rem', marginBottom: 6 }}>টার্গেট সেট করুন</h3>
+                <p className="hint" style={{ margin: '0 0 8px', fontSize: '0.8125rem' }}>প্রতিটি অ্যাকাউন্টে মাসে কয়টা পোস্ট, তার মধ্যে কয়টা ভিডিও।</p>
+                <div style={{ overflowX: 'auto', marginBottom: 16 }}>
+                    <table className="table">
+                        <thead><tr><th>অ্যাকাউন্ট</th><th>মাসে পোস্ট</th><th>এর মধ্যে ভিডিও</th></tr></thead>
+                        <tbody>
+                            {channels.map(c => {
+                                const Icon = PLATFORM_ICON[c.platform]
+                                const d = targetDraft.channels[c.id] || { posts: '', videos: '' }
+                                return (
+                                    <tr key={c.id}>
+                                        <td style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ color: PLATFORM_COLOR[c.platform] }}><Icon size={14} /></span>{c.name}</td>
+                                        <td><input className="form-input" type="number" min={0} style={{ width: 90 }} value={d.posts} onChange={e => setTargetDraft({ ...targetDraft, channels: { ...targetDraft.channels, [c.id]: { ...d, posts: e.target.value } } })} /></td>
+                                        <td><input className="form-input" type="number" min={0} style={{ width: 90 }} value={d.videos} onChange={e => setTargetDraft({ ...targetDraft, channels: { ...targetDraft.channels, [c.id]: { ...d, videos: e.target.value } } })} /></td>
+                                    </tr>
+                                )
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+                <h4 style={{ fontSize: '0.9375rem', marginBottom: 6 }}>সদস্যদের মাসিক টার্গেট (কতগুলো কাজ শেষ করবেন)</h4>
+                <div style={{ overflowX: 'auto', marginBottom: 16 }}>
+                    <table className="table">
+                        <thead><tr><th>সদস্য</th><th>মাসে কাজ</th></tr></thead>
+                        <tbody>
+                            {team.map(mem => (
+                                <tr key={mem.id}>
+                                    <td><b>{mem.name}</b><div className="hint" style={{ fontSize: '0.75rem' }}>{mem.roles.map(k => CONTENT_ROLES.find(cr => cr.key === k)?.label || k).join(', ')}</div></td>
+                                    <td><input className="form-input" type="number" min={0} placeholder="০" style={{ width: 90 }} value={targetDraft.members[mem.id] || ''} onChange={e => setTargetDraft({ ...targetDraft, members: { ...targetDraft.members, [mem.id]: e.target.value } })} /></td>
+                                </tr>
+                            ))}
+                            {!team.length && <tr><td colSpan={2} className="hint">সেটিংসে গিয়ে প্রথমে টিমের দায়িত্ব দিন।</td></tr>}
+                        </tbody>
+                    </table>
+                </div>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '0.875rem', marginBottom: 12 }}>
+                    <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="radio" checked={targetScope === 'default'} onChange={() => setTargetScope('default')} /> {mname} ও পরের সব মাসের জন্য</label>
+                    <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="radio" checked={targetScope === 'month'} onChange={() => setTargetScope('month')} /> শুধু {mname} মাসের জন্য</label>
+                </div>
+                <button className="btn btn-primary btn-sm" onClick={onSave}>টার্গেট সেভ করুন</button>
+            </motion.div>
+        </>
+    )
+}
+
+// ================= Monthly report =================
+function ReportPanel({ title, children }: { title: string; children: React.ReactNode }) {
+    return <motion.div variants={item_} className="card">
+        <h3 style={{ fontSize: '1.0625rem', marginBottom: 8 }}>{title}</h3>
+        {children}
+    </motion.div>
+}
+
+function ReportView({ items, channels, types, occasions, team, channelTargets, memberTargets, month, setMonth, monthStart, monthEnd }: {
+    items: ContentItem[]; channels: Channel[]; types: PostType[]; occasions: Occasion[]; team: TeamMember[]
+    channelTargets: ChannelTarget[]; memberTargets: MemberTarget[]
+    month: string; setMonth: (m: string) => void; monthStart: string; monthEnd: string
+}) {
+    const toast = useToast()
+    const mname = formatMonthLabel(month)
+
+    const monthSlots: { item: ContentItem; slot: Slot }[] = []
+    items.forEach(i => i.slots.forEach(s => { if (s.date >= monthStart && s.date <= monthEnd) monthSlots.push({ item: i, slot: s }) }))
+    const posted = monthSlots.filter(x => x.slot.posted)
+    const sum = (list: typeof posted, key: 'reach' | 'msgs' | 'orders') => list.reduce((t, x) => t + (Number(x.slot[key]) || 0), 0)
+
+    const byAcc = channels.map(c => {
+        const l = monthSlots.filter(x => x.slot.channel_id === c.id), p = l.filter(x => x.slot.posted)
+        const target = channelTargets.find(t => t.channel_id === c.id)?.posts || 0
+        return { channel: c, target, planned: l.length, posted: p.length, msgs: sum(p, 'msgs'), orders: sum(p, 'orders') }
+    })
+    const tPosts = byAcc.reduce((t, r) => t + r.target, 0)
+
+    const byFmt = types.map(t => {
+        const p = posted.filter(x => x.item.type.id === t.id)
+        return { name: t.name, posted: p.length, msgs: sum(p, 'msgs'), orders: sum(p, 'orders') }
+    }).filter(r => r.posted > 0)
+
+    const byOcc = occasions.map(o => {
+        const p = posted.filter(x => x.item.occasion?.id === o.id)
+        return { name: o.name, posted: p.length, orders: sum(p, 'orders') }
+    }).filter(r => r.posted > 0)
+
+    const logsInMonth = items.flatMap(i => i.logs.map(l => l)).filter(l => l.at.slice(0, 7) === month)
+    const byMem = team.map(m => ({ member: m, done: logsInMonth.filter(l => l.by === m.name).length, target: memberTargets.find(t => t.employee_id === m.id)?.target || 0 }))
+
+    const perItem: Record<string, { title: string; orders: number; msgs: number; reach: number }> = {}
+    posted.forEach(x => {
+        const r = perItem[x.item.id] || (perItem[x.item.id] = { title: x.item.title, orders: 0, msgs: 0, reach: 0 })
+        r.orders += Number(x.slot.orders) || 0; r.msgs += Number(x.slot.msgs) || 0; r.reach += Number(x.slot.reach) || 0
+    })
+    const top = Object.values(perItem).sort((a, b) => b.orders - a.orders || b.msgs - a.msgs).slice(0, 5)
+
+    const prod: Record<string, number> = {}
+    posted.forEach(x => { const code = (x.item.product_code || '').trim(); if (code) prod[code] = (prod[code] || 0) + (Number(x.slot.orders) || 0) })
+    const topProd = Object.entries(prod).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 5)
+
+    const late = monthSlots.filter(x => isSlotLate(x.slot)).length
+    const reach = sum(posted, 'reach'), msgs = sum(posted, 'msgs'), orders = sum(posted, 'orders')
+    const videos = posted.filter(x => KIND_INFO[x.item.type.kind].isVideo).length
+    const conv = msgs ? `${Math.round(orders / msgs * 100)}%` : '—'
+
+    function reportText() {
+        const L = [`📊 কন্টেন্ট রিপোর্ট — ${mname}`, '', `পোস্ট: ${bn(posted.length)}/${bn(tPosts)} (টার্গেট)`, `ভিডিও পোস্ট: ${bn(videos)}`, `রিচ: ${bn(reach)} · মেসেজ: ${bn(msgs)} · অর্ডার: ${bn(orders)}`, `সময় পার, পোস্ট হয়নি: ${bn(late)}`, '', 'পেজ অনুযায়ী:']
+        byAcc.forEach(r => L.push(`• ${r.channel.name}: ${bn(r.posted)}/${bn(r.target)} পোস্ট, ${bn(r.orders)} অর্ডার`))
+        if (byFmt.length) { L.push('', 'ফরম্যাট অনুযায়ী অর্ডার:'); byFmt.forEach(r => L.push(`• ${r.name}: ${bn(r.orders)} (${bn(r.posted)}টা পোস্ট)`)) }
+        if (top.length) { L.push('', 'সেরা কন্টেন্ট:'); top.forEach((r, k) => L.push(`${bn(k + 1)}. ${r.title} — ${bn(r.orders)} অর্ডার`)) }
+        L.push('', 'টিম:'); byMem.forEach(r => L.push(`• ${r.member.name}: ${bn(r.done)}টা কাজ শেষ${r.target ? ` (টার্গেট ${bn(r.target)})` : ''}`))
+        return L.join('\n')
+    }
+    function copyReport() {
+        navigator.clipboard?.writeText(reportText()).then(() => toast.success('রিপোর্ট কপি হয়েছে, এখন যেকোনো জায়গায় পেস্ট করুন')).catch(() => toast.error('কপি করা যায়নি'))
+    }
+
+    return (
+        <>
+            <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{mname}</h2>
+                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setMonth(currentMonthString())}>এই মাস</button>
+                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+            </motion.div>
+
+            <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <h2 style={{ fontSize: '1.0625rem', flex: 1 }}>{mname}-এর রিপোর্ট</h2>
+                <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={copyReport}><IconClipboard size={14} /> রিপোর্ট কপি করুন</button>
+            </motion.div>
+
+            <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 12 }}>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(posted.length)}/{bn(tPosts)}</b><small className="hint">পোস্ট / টার্গেট</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(videos)}</b><small className="hint">ভিডিও পোস্ট</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(reach)}</b><small className="hint">রিচ</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(msgs)}</b><small className="hint">মেসেজ</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(orders)}</b><small className="hint">অর্ডার</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{conv}</b><small className="hint">মেসেজ থেকে অর্ডার</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem', color: late ? '#DC2626' : undefined }}>{bn(late)}</b><small className="hint">সময় পার, পোস্ট হয়নি</small></div>
+                </div>
+                <p className="hint" style={{ margin: '10px 0 0', fontSize: '0.8125rem' }}>রিচ, মেসেজ আর অর্ডারের হিসাব আসে পোস্টের পর প্রতিটি পেজে লেখা ফলাফল থেকে। না লিখলে এখানে শূন্য দেখাবে।</p>
+            </motion.div>
+
+            <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))' }}>
+                <ReportPanel title="পেজ অনুযায়ী">
+                    <div style={{ overflowX: 'auto' }}>
+                        <table className="table">
+                            <thead><tr><th>অ্যাকাউন্ট</th><th style={{ textAlign: 'right' }}>টার্গেট</th><th style={{ textAlign: 'right' }}>পোস্টেড</th><th style={{ textAlign: 'right' }}>মেসেজ</th><th style={{ textAlign: 'right' }}>অর্ডার</th><th style={{ textAlign: 'right' }}>পোস্ট প্রতি অর্ডার</th></tr></thead>
+                            <tbody>
+                                {byAcc.map(r => (
+                                    <tr key={r.channel.id}>
+                                        <td>{r.channel.name}</td><td style={{ textAlign: 'right' }}>{bn(r.target)}</td>
+                                        <td style={{ textAlign: 'right', color: r.posted < r.target ? '#DC2626' : '#16A34A' }}>{bn(r.posted)}</td>
+                                        <td style={{ textAlign: 'right' }}>{bn(r.msgs)}</td><td style={{ textAlign: 'right' }}>{bn(r.orders)}</td>
+                                        <td style={{ textAlign: 'right' }}>{r.posted ? bn((r.orders / r.posted).toFixed(1)) : '—'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </ReportPanel>
+
+                <ReportPanel title="ফরম্যাট অনুযায়ী">
+                    {byFmt.length ? (
+                        <div style={{ overflowX: 'auto' }}>
+                            <table className="table">
+                                <thead><tr><th>ফরম্যাট</th><th style={{ textAlign: 'right' }}>পোস্টেড</th><th style={{ textAlign: 'right' }}>মেসেজ</th><th style={{ textAlign: 'right' }}>অর্ডার</th><th style={{ textAlign: 'right' }}>পোস্ট প্রতি অর্ডার</th></tr></thead>
+                                <tbody>
+                                    {byFmt.map(r => (
+                                        <tr key={r.name}><td>{r.name}</td><td style={{ textAlign: 'right' }}>{bn(r.posted)}</td><td style={{ textAlign: 'right' }}>{bn(r.msgs)}</td><td style={{ textAlign: 'right' }}>{bn(r.orders)}</td><td style={{ textAlign: 'right' }}>{bn((r.orders / r.posted).toFixed(1))}</td></tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : <p className="hint">এ মাসে এখনো পোস্ট হয়নি।</p>}
+                </ReportPanel>
+
+                <ReportPanel title="সেরা ৫ কন্টেন্ট">
+                    {top.length ? (
+                        <div style={{ overflowX: 'auto' }}>
+                            <table className="table">
+                                <thead><tr><th>কন্টেন্ট</th><th style={{ textAlign: 'right' }}>রিচ</th><th style={{ textAlign: 'right' }}>মেসেজ</th><th style={{ textAlign: 'right' }}>অর্ডার</th></tr></thead>
+                                <tbody>
+                                    {top.map((r, k) => <tr key={k}><td>{r.title}</td><td style={{ textAlign: 'right' }}>{bn(r.reach)}</td><td style={{ textAlign: 'right' }}>{bn(r.msgs)}</td><td style={{ textAlign: 'right' }}>{bn(r.orders)}</td></tr>)}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : <p className="hint">ফলাফল লেখা হলে দেখা যাবে।</p>}
+                </ReportPanel>
+
+                <ReportPanel title="সবচেয়ে বেশি অর্ডার আনা প্রোডাক্ট">
+                    {topProd.length ? (
+                        <div style={{ overflowX: 'auto' }}>
+                            <table className="table">
+                                <thead><tr><th>প্রোডাক্ট</th><th style={{ textAlign: 'right' }}>অর্ডার</th></tr></thead>
+                                <tbody>{topProd.map(([code, o]) => <tr key={code}><td>{code}</td><td style={{ textAlign: 'right' }}>{bn(o)}</td></tr>)}</tbody>
+                            </table>
+                        </div>
+                    ) : <p className="hint">কন্টেন্টে প্রোডাক্ট কোড আর অর্ডার লেখা হলে দেখা যাবে।</p>}
+                </ReportPanel>
+
+                <ReportPanel title="উপলক্ষ অনুযায়ী">
+                    {byOcc.length ? (
+                        <div style={{ overflowX: 'auto' }}>
+                            <table className="table">
+                                <thead><tr><th>উপলক্ষ</th><th style={{ textAlign: 'right' }}>পোস্টেড</th><th style={{ textAlign: 'right' }}>অর্ডার</th></tr></thead>
+                                <tbody>{byOcc.map(r => <tr key={r.name}><td>{r.name}</td><td style={{ textAlign: 'right' }}>{bn(r.posted)}</td><td style={{ textAlign: 'right' }}>{bn(r.orders)}</td></tr>)}</tbody>
+                            </table>
+                        </div>
+                    ) : <p className="hint">এ মাসে কোনো উপলক্ষের কন্টেন্ট পোস্ট হয়নি।</p>}
+                </ReportPanel>
+
+                <ReportPanel title="টিম">
+                    <div style={{ overflowX: 'auto' }}>
+                        <table className="table">
+                            <thead><tr><th>সদস্য</th><th style={{ textAlign: 'right' }}>শেষ করা কাজ</th><th style={{ textAlign: 'right' }}>টার্গেট</th></tr></thead>
+                            <tbody>
+                                {byMem.map(r => <tr key={r.member.id}><td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{avatar(r.member.name, r.member.avatar_url, 20)}{r.member.name}</td><td style={{ textAlign: 'right' }}>{bn(r.done)}</td><td style={{ textAlign: 'right' }}>{r.target ? bn(r.target) : '—'}</td></tr>)}
+                                {!byMem.length && <tr><td colSpan={3} className="hint" style={{ textAlign: 'center', padding: 16 }}>কেউ এখনো কোনো দায়িত্ব পাননি।</td></tr>}
+                            </tbody>
+                        </table>
+                    </div>
+                </ReportPanel>
+            </div>
         </>
     )
 }

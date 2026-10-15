@@ -382,6 +382,7 @@ model employees {
   content_calendar_stage_logs                                            content_calendar_stage_logs[]
   content_calendar_comments                                              content_calendar_comments[]
   content_calendar_ideas                                                 content_calendar_ideas[]
+  content_calendar_member_targets                                        content_calendar_member_targets[]
   courier_issues_courier_issues_call_peekToemployees                     courier_issues[]          @relation("courier_issues_call_peekToemployees")
   courier_issues_courier_issues_management_checkToemployees              courier_issues[]          @relation("courier_issues_management_checkToemployees")
   courier_issues_courier_issues_problem_solverToemployees                courier_issues[]          @relation("courier_issues_problem_solverToemployees")
@@ -1139,6 +1140,7 @@ model content_calendar_channels {
   sort_order  Int                        @default(0)
   created_at  DateTime?                  @default(now()) @db.Timestamptz(6)
   slots       content_calendar_slots[]
+  targets     content_calendar_channel_targets[]
 
   @@index([platform])
 }
@@ -1154,6 +1156,7 @@ model content_calendar_types {
   created_at        DateTime?                @default(now()) @db.Timestamptz(6)
   items             content_calendar_items[]
   ideas             content_calendar_ideas[]
+  series            content_calendar_series[]
 }
 
 // Which content-pipeline roles an employee can be auto-assigned (plan/script/shoot/design/
@@ -1178,6 +1181,7 @@ model content_calendar_items {
   start_date    DateTime                       @db.Date
   gap_days      Int                            @default(3)
   occasion_id   String?                        @db.Uuid
+  series_id     String?                        @db.Uuid
   created_by    String?                        @db.Uuid
   created_at    DateTime?                      @default(now()) @db.Timestamptz(6)
   updated_at    DateTime?                      @default(now()) @db.Timestamptz(6)
@@ -1185,6 +1189,7 @@ model content_calendar_items {
   assignee      employees?                     @relation("content_calendar_items_assigneeToemployees", fields: [assignee_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   creator       employees?                     @relation("content_calendar_items_created_byToemployees", fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
   occasion      content_calendar_occasions?    @relation(fields: [occasion_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  series        content_calendar_series?       @relation(fields: [series_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   slots         content_calendar_slots[]
   stage_logs    content_calendar_stage_logs[]
   comments      content_calendar_comments[]
@@ -1193,6 +1198,25 @@ model content_calendar_items {
   @@index([assignee_id])
   @@index([start_date])
   @@index([occasion_id])
+  @@index([series_id])
+}
+
+// A weekly recurring content definition (e.g. "every Friday, a Customer Review post") —
+// "বসান" (generate) turns its upcoming matching dates this month into real content items,
+// each tagged with series_id so this page can show how many have already been made.
+model content_calendar_series {
+  id           String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title        String
+  type_id      String                     @db.Uuid
+  gap_days     Int                        @default(0)
+  days_of_week Int[]                      @default([])
+  channel_ids  String[]                   @default([])
+  notes        String?
+  created_at   DateTime?                  @default(now()) @db.Timestamptz(6)
+  type         content_calendar_types     @relation(fields: [type_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  items        content_calendar_items[]
+
+  @@index([type_id])
 }
 
 // Recurring/yearly dates (Eid, Puja, a sale day, …) with a lead time — how many days of
@@ -1272,4 +1296,29 @@ model content_calendar_comments {
   employees       employees?               @relation(fields: [by_employee_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([item_id])
+}
+
+// Monthly posting targets per channel. month = '' means the standing default (used for every
+// month that has no override); month = 'YYYY-MM' overrides just that one month.
+model content_calendar_channel_targets {
+  id         String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  channel_id String                     @db.Uuid
+  month      String                     @default("")
+  posts      Int                        @default(0)
+  videos     Int                        @default(0)
+  channel    content_calendar_channels  @relation(fields: [channel_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([channel_id, month])
+}
+
+// Monthly "stages finished" target per team member — same default/override-by-month shape as
+// channel targets above.
+model content_calendar_member_targets {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employee_id String     @db.Uuid
+  month       String     @default("")
+  target      Int        @default(0)
+  employees   employees  @relation(fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([employee_id, month])
 }

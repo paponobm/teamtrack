@@ -30,6 +30,7 @@ export async function POST(request: Request) {
     const caption = typeof body.caption === 'string' ? body.caption : null
     const notes = typeof body.notes === 'string' ? body.notes : null
     const occasionId = typeof body.occasion_id === 'string' && body.occasion_id ? body.occasion_id : null
+    const seriesId = typeof body.series_id === 'string' && body.series_id ? body.series_id : null
 
     if (!title) return NextResponse.json({ error: 'Title is required' }, { status: 400 })
     if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return NextResponse.json({ error: 'start_date is required in YYYY-MM-DD format' }, { status: 400 })
@@ -57,9 +58,9 @@ export async function POST(request: Request) {
     const assigneeId = await autoAssignEmployee(db, STAGE_INFO[stage].role)
 
     const { rows: [inserted] } = await db.query(
-        `INSERT INTO content_calendar_items (title, type_id, product_code, caption, notes, stage, assignee_id, stage_since, start_date, gap_days, occasion_id, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $8, $9, $10, $11) RETURNING id`,
-        [title, typeId, productCode, caption, notes, stage, assigneeId, startDate, gapDays, occasionId, auth.employee.id]
+        `INSERT INTO content_calendar_items (title, type_id, product_code, caption, notes, stage, assignee_id, stage_since, start_date, gap_days, occasion_id, series_id, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $8, $9, $10, $11, $12) RETURNING id`,
+        [title, typeId, productCode, caption, notes, stage, assigneeId, startDate, gapDays, occasionId, seriesId, auth.employee.id]
     )
     for (const s of slots) {
         await db.query(`INSERT INTO content_calendar_slots (item_id, channel_id, date) VALUES ($1, $2, $3)`, [inserted.id, s.channelId, s.date])

@@ -19,7 +19,7 @@ export async function autoAssignEmployee(db: Pool | PoolClient, role: string, ex
 }
 
 export const ITEM_SELECT = `
-    SELECT i.id, i.title, i.product_code, i.caption, i.notes, i.stage, i.start_date, i.gap_days, i.stage_since, i.created_at,
+    SELECT i.id, i.title, i.product_code, i.caption, i.notes, i.stage, i.start_date, i.gap_days, i.stage_since, i.created_at, i.series_id,
         json_build_object('id', t.id, 'name', t.name, 'kind', t.kind, 'caption_template', t.caption_template) AS type,
         CASE WHEN a.id IS NULL THEN NULL ELSE json_build_object('id', a.id, 'name', a.name) END AS assignee,
         CASE WHEN c.id IS NULL THEN NULL ELSE json_build_object('id', c.id, 'name', c.name) END AS creator,
