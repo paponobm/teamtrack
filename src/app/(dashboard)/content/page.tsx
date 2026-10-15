@@ -470,7 +470,7 @@ export default function ContentCalendarPage() {
         // { key: 'series', label: 'সিরিজ', icon: <IconClock size={14} /> },
         // { key: 'target', label: 'টার্গেট', icon: <IconTrendingUp size={14} /> },
         // { key: 'report', label: 'রিপোর্ট', icon: <IconBarChart3 size={14} /> },
-        // { key: 'settings', label: 'সেটিংস', icon: <IconWrench size={14} /> },
+       { key: 'settings', label: 'সেটিংস', icon: <IconWrench size={14} /> },
     ]
 
     return (
