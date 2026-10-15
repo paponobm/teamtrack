@@ -381,6 +381,7 @@ model employees {
   content_calendar_items_created_byToemployees                           content_calendar_items[]  @relation("content_calendar_items_created_byToemployees")
   content_calendar_stage_logs                                            content_calendar_stage_logs[]
   content_calendar_comments                                              content_calendar_comments[]
+  content_calendar_ideas                                                 content_calendar_ideas[]
   courier_issues_courier_issues_call_peekToemployees                     courier_issues[]          @relation("courier_issues_call_peekToemployees")
   courier_issues_courier_issues_management_checkToemployees              courier_issues[]          @relation("courier_issues_management_checkToemployees")
   courier_issues_courier_issues_problem_solverToemployees                courier_issues[]          @relation("courier_issues_problem_solverToemployees")
@@ -1152,6 +1153,7 @@ model content_calendar_types {
   sort_order        Int                      @default(0)
   created_at        DateTime?                @default(now()) @db.Timestamptz(6)
   items             content_calendar_items[]
+  ideas             content_calendar_ideas[]
 }
 
 // Which content-pipeline roles an employee can be auto-assigned (plan/script/shoot/design/
@@ -1207,6 +1209,22 @@ model content_calendar_occasions {
   items      content_calendar_items[]
 
   @@index([date])
+}
+
+// Ideas with no date yet — parked here until someone picks a date and turns one into an
+// actual content item (see "তারিখে বসান" / use-idea flow), at which point the idea is deleted.
+model content_calendar_ideas {
+  id             String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title          String
+  type_id        String?                  @db.Uuid
+  product_code   String?
+  by_employee_id String?                  @db.Uuid
+  notes          String?
+  created_at     DateTime?                @default(now()) @db.Timestamptz(6)
+  type           content_calendar_types?  @relation(fields: [type_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  by_employee    employees?               @relation(fields: [by_employee_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([type_id])
 }
 
 // One row per channel a content item posts to — its own date (auto-rotated `gap_days` apart

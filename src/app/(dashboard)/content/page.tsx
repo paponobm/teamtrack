@@ -14,7 +14,7 @@ import {
 import {
     IconPlus, IconX, IconChevronLeft, IconChevronRight,
     IconCalendar, IconLayers, IconUsers, IconWrench, IconClipboard, IconFacebook,
-    IconInstagram, IconTikTok, IconYouTube, IconGlobe, IconTarget,
+    IconInstagram, IconTikTok, IconYouTube, IconGlobe, IconTarget, IconLightbulb,
 } from '@/components/icons/Icons'
 
 // ---------- Types ----------
@@ -25,6 +25,7 @@ interface Slot { id?: string; channel_id: string; date: string; posted: boolean;
 interface LogEntry { id: string; stage: string; by: string | null; at: string }
 interface CommentEntry { id: string; text: string; done: boolean; by: string | null; by_employee_id: string | null; at: string }
 interface Occasion { id: string; name: string; date: string; lead_days: number; target: number | null; notes: string | null; item_count?: string }
+interface Idea { id: string; title: string; product_code: string | null; notes: string | null; created_at: string; type: { id: string; name: string; kind: Kind } | null; by_employee: { id: string; name: string } | null }
 interface ContentItem {
     id: string; title: string; product_code: string | null; caption: string | null; notes: string | null
     stage: string; start_date: string; gap_days: number; stage_since: string | null; created_at: string
@@ -34,6 +35,7 @@ interface ContentItem {
     occasion: { id: string; name: string; date: string } | null
     slots: Slot[]; logs: LogEntry[]; comments: CommentEntry[]
 }
+type EditingItem = Partial<ContentItem> & { _channelIds?: string[]; _fromIdea?: string }
 
 const UPLOAD_LINK: Record<Platform, string> = {
     facebook: 'https://business.facebook.com/latest/composer', instagram: 'https://business.facebook.com/latest/composer',
@@ -84,13 +86,14 @@ export default function ContentCalendarPage() {
     const { data: perms } = usePermissions()
     const isSuperAdmin = !!(perms.is_super || perms.role === 'Owner' || perms.role === 'Super Admin')
 
-    const [view, setView] = useState<'month' | 'board' | 'work' | 'pages' | 'occ' | 'settings'>('month')
+    const [view, setView] = useState<'month' | 'board' | 'work' | 'pages' | 'occ' | 'ideas' | 'settings'>('month')
     const [loading, setLoading] = useState(true)
     const [items, setItems] = useState<ContentItem[]>([])
     const [channels, setChannels] = useState<Channel[]>([])
     const [types, setTypes] = useState<PostType[]>([])
     const [team, setTeam] = useState<TeamMember[]>([])
     const [occasions, setOccasions] = useState<Occasion[]>([])
+    const [ideas, setIdeas] = useState<Idea[]>([])
 
     const [month, setMonth] = useState(currentMonthString())
     const [selectedDate, setSelectedDate] = useState(getLocalDateString())
@@ -98,8 +101,9 @@ export default function ContentCalendarPage() {
     const [workPerson, setWorkPerson] = useState('')
     const [pageChannel, setPageChannel] = useState('')
     const [showPastOcc, setShowPastOcc] = useState(false)
+    const [ideaEdit, setIdeaEdit] = useState<Partial<Idea> & { _byId?: string } | null>(null)
 
-    const [editing, setEditing] = useState<Partial<ContentItem> & { _channelIds?: string[] } | null>(null)
+    const [editing, setEditing] = useState<EditingItem | null>(null)
     const [showChannelModal, setShowChannelModal] = useState(false)
     const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
     const [showTypeModal, setShowTypeModal] = useState(false)
@@ -115,9 +119,10 @@ export default function ContentCalendarPage() {
             fetch('/api/content-calendar/types').then(r => r.json()),
             fetch('/api/content-calendar/team').then(r => r.json()),
             fetch('/api/content-calendar/occasions').then(r => r.json()),
-        ]).then(([i, c, t, m, o]) => {
+            fetch('/api/content-calendar/ideas').then(r => r.json()),
+        ]).then(([i, c, t, m, o, id]) => {
             if (cancelled) return
-            setItems(i.items || []); setChannels(c.channels || []); setTypes(t.types || []); setTeam(m.team || []); setOccasions(o.occasions || [])
+            setItems(i.items || []); setChannels(c.channels || []); setTypes(t.types || []); setTeam(m.team || []); setOccasions(o.occasions || []); setIdeas(id.ideas || [])
         }).catch(() => { if (!cancelled) toast.error('কন্টেন্ট ক্যালেন্ডার লোড করা যায়নি।') })
             .finally(() => { if (!cancelled) setLoading(false) })
         return () => { cancelled = true }
@@ -215,7 +220,12 @@ export default function ContentCalendarPage() {
             })
             if (res.ok) {
                 const created = await res.json()
-                setItems(prev => [created, ...prev]); setEditing(null); toast.success('কন্টেন্ট যোগ হয়েছে')
+                setItems(prev => [created, ...prev]); setEditing(null)
+                if (e._fromIdea) {
+                    await fetch(`/api/content-calendar/ideas?id=${e._fromIdea}`, { method: 'DELETE' })
+                    setIdeas(prev => prev.filter(x => x.id !== e._fromIdea))
+                    toast.success('আইডিয়াটা ক্যালেন্ডারে বসানো হয়েছে')
+                } else toast.success('কন্টেন্ট যোগ হয়েছে')
             } else toast.error((await res.json()).error || 'কন্টেন্ট যোগ করা যায়নি')
             return
         }
@@ -322,13 +332,48 @@ export default function ContentCalendarPage() {
         else toast.error((await res.json()).error || 'মুছে ফেলা যায়নি')
     }
 
+    // ---------- Ideas ----------
+    function openNewIdea() { setIdeaEdit({ title: '', product_code: '', notes: '', type: types[0] ? { id: types[0].id, name: types[0].name, kind: types[0].kind } : null, _byId: '' }) }
+    function openEditIdea(x: Idea) { setIdeaEdit({ ...x, _byId: x.by_employee?.id || '' }) }
+    async function saveIdea() {
+        const f = ideaEdit
+        if (!f || !f.title?.trim()) { toast.error('আইডিয়া লিখুন'); return }
+        const payload = { id: f.id, title: f.title.trim(), type_id: f.type?.id || '', product_code: f.product_code || '', by_employee_id: f._byId || '', notes: f.notes || '' }
+        const res = await fetch('/api/content-calendar/ideas', {
+            method: f.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        })
+        if (res.ok) {
+            const row = await res.json()
+            setIdeas(prev => f.id ? prev.map(x => x.id === row.id ? row : x) : [row, ...prev])
+            setIdeaEdit(null); toast.success('আইডিয়া সেভ হয়েছে')
+        } else toast.error((await res.json()).error || 'আইডিয়া সেভ করা যায়নি')
+    }
+    async function deleteIdea(x: Idea) {
+        const res = await fetch(`/api/content-calendar/ideas?id=${x.id}`, { method: 'DELETE' })
+        if (res.ok) { setIdeas(prev => prev.filter(y => y.id !== x.id)); toast.success('আইডিয়া মুছে ফেলা হয়েছে') }
+        else toast.error((await res.json()).error || 'মুছে ফেলা যায়নি')
+    }
+    function useIdea(x: Idea) {
+        const defaultType = types.find(t => t.id === x.type?.id) || types[0]
+        setEditing({
+            title: x.title, product_code: x.product_code || '', caption: defaultType?.caption_template || '', notes: x.notes || '',
+            stage: defaultType ? KIND_INFO[defaultType.kind].stages[0] : 'idea',
+            start_date: todayStr, gap_days: 3,
+            type: defaultType ? { id: defaultType.id, name: defaultType.name, kind: defaultType.kind, caption_template: defaultType.caption_template } : undefined,
+            assignee: null, slots: [], comments: [], logs: [], occasion: null,
+            _channelIds: activeChannels.filter(c => c.platform === 'facebook').map(c => c.id),
+            _fromIdea: x.id,
+        })
+    }
+
     const TABS: { key: typeof view; label: string; icon: React.ReactNode }[] = [
         { key: 'month', label: 'মাস', icon: <IconCalendar size={14} /> },
         { key: 'board', label: 'প্রোডাকশন', icon: <IconLayers size={14} /> },
         { key: 'work', label: 'কার কী কাজ', icon: <IconUsers size={14} /> },
-        { key: 'pages', label: 'পেজ অনুযায়ী', icon: <IconGlobe size={14} /> },
-        { key: 'occ', label: 'উপলক্ষ', icon: <IconTarget size={14} /> },
-        { key: 'settings', label: 'সেটিংস', icon: <IconWrench size={14} /> },
+        // { key: 'pages', label: 'পেজ অনুযায়ী', icon: <IconGlobe size={14} /> },
+        // { key: 'occ', label: 'উপলক্ষ', icon: <IconTarget size={14} /> },
+        // { key: 'ideas', label: 'আইডিয়া', icon: <IconLightbulb size={14} /> },
+        // { key: 'settings', label: 'সেটিংস', icon: <IconWrench size={14} /> },
     ]
 
     return (
@@ -380,6 +425,12 @@ export default function ContentCalendarPage() {
                                 onAdd: () => { setEditingOcc(null); setShowOccModal(true) },
                                 onEdit: (o: Occasion) => { setEditingOcc(o); setShowOccModal(true) },
                                 onDelete: deleteOccasion, onAddContent: openAddForOccasion,
+                            }} />
+                        )}
+                        {view === 'ideas' && (
+                            <IdeasView {...{
+                                ideas, types, team, ideaEdit, setIdeaEdit,
+                                onNew: openNewIdea, onEdit: openEditIdea, onSave: saveIdea, onDelete: deleteIdea, onUse: useIdea,
                             }} />
                         )}
                         {view === 'settings' && (
@@ -903,6 +954,86 @@ function OccasionModal({ occasion, onClose, onSave }: { occasion: Occasion | nul
     )
 }
 
+// ================= Ideas =================
+function IdeasView({ ideas, types, team, ideaEdit, setIdeaEdit, onNew, onEdit, onSave, onDelete, onUse }: {
+    ideas: Idea[]; types: PostType[]; team: TeamMember[]
+    ideaEdit: (Partial<Idea> & { _byId?: string }) | null; setIdeaEdit: (f: (Partial<Idea> & { _byId?: string }) | null) => void
+    onNew: () => void; onEdit: (x: Idea) => void; onSave: () => void; onDelete: (x: Idea) => void; onUse: (x: Idea) => void
+}) {
+    const [confirmDel, setConfirmDel] = useState('')
+    const f = ideaEdit
+    return (
+        <>
+            <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <h2 style={{ fontSize: '1.25rem', flex: 1 }}>আইডিয়া ব্যাংক</h2>
+                <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={onNew}><IconPlus size={14} /> নতুন আইডিয়া</button>
+            </motion.div>
+            <p className="hint" style={{ margin: '0 0 16px', fontSize: '0.8125rem' }}>মাথায় আসা আইডিয়া তারিখ ছাড়াই এখানে জমা রাখুন। পরে &quot;তারিখে বসান&quot; চাপলে কন্টেন্টের ফর্ম খুলবে, সেভ করলে আইডিয়াটা ক্যালেন্ডারে চলে যাবে।</p>
+
+            {f && (
+                <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
+                    <h3 style={{ fontSize: '1.0625rem', marginBottom: 10 }}>{f.id ? 'আইডিয়া এডিট' : 'নতুন আইডিয়া'}</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div className="form-group"><label className="form-label">আইডিয়া</label>
+                            <input className="form-input" value={f.title || ''} onChange={e => setIdeaEdit({ ...f, title: e.target.value })} placeholder="যেমন: শীতের ৫টা প্রোডাক্ট এক ভিডিওতে" />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                            <div className="form-group"><label className="form-label">ফরম্যাট</label>
+                                <select className="form-input" value={f.type?.id || ''} onChange={e => { const t = types.find(x => x.id === e.target.value); setIdeaEdit({ ...f, type: t ? { id: t.id, name: t.name, kind: t.kind } : null }) }}>
+                                    {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="form-group"><label className="form-label">প্রোডাক্ট কোড</label>
+                                <input className="form-input" value={f.product_code || ''} onChange={e => setIdeaEdit({ ...f, product_code: e.target.value })} />
+                            </div>
+                            <div className="form-group"><label className="form-label">কে দিয়েছেন</label>
+                                <select className="form-input" value={f._byId || ''} onChange={e => setIdeaEdit({ ...f, _byId: e.target.value })}>
+                                    <option value="">—</option>
+                                    {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                        <div className="form-group"><label className="form-label">নোট</label>
+                            <input className="form-input" value={f.notes || ''} onChange={e => setIdeaEdit({ ...f, notes: e.target.value })} placeholder="রেফারেন্স ভিডিওর লিংক, হুকের আইডিয়া…" />
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <button className="btn btn-primary btn-sm" onClick={onSave}>সেভ করুন</button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => setIdeaEdit(null)}>বাতিল</button>
+                        </div>
+                    </div>
+                </motion.div>
+            )}
+
+            <motion.div variants={item_} className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <h3 style={{ fontSize: '1.0625rem' }}>জমা থাকা আইডিয়া</h3><span className="hint">{bn(ideas.length)}টা</span>
+                </div>
+                {!ideas.length && <p className="hint">এখনো কোনো আইডিয়া নেই।</p>}
+                {ideas.map(x => (
+                    <div key={x.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 0', borderTop: '1px solid var(--color-border-light)' }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{x.title}</div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>
+                            {x.type && <span>{x.type.name}</span>}
+                            {x.product_code && <span>· {x.product_code}</span>}
+                            {x.by_employee && <span>· {x.by_employee.name}</span>}
+                            <span>· {formatDate(x.created_at.slice(0, 10))}</span>
+                        </div>
+                        {x.notes && <div className="hint" style={{ fontSize: '0.8125rem' }}>{x.notes}</div>}
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+                            <button className="btn btn-primary btn-sm" onClick={() => onUse(x)}>তারিখে বসান →</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => onEdit(x)}>এডিট</button>
+                            <button className="btn btn-ghost btn-sm" style={{ color: '#DC2626' }}
+                                onClick={() => { if (confirmDel !== x.id) { setConfirmDel(x.id); return } setConfirmDel(''); onDelete(x) }}>
+                                {confirmDel === x.id ? 'নিশ্চিত? মুছুন' : 'মুছুন'}
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </motion.div>
+        </>
+    )
+}
+
 // ================= Settings =================
 function SettingsView({ channels, types, team, isSuperAdmin, onAddChannel, onEditChannel, toggleChannelActive, deleteChannel, onAddType, onEditType, deleteType, toggleTeamRole }: {
     channels: Channel[]; types: PostType[]; team: TeamMember[]; isSuperAdmin: boolean
@@ -977,8 +1108,8 @@ function SettingsView({ channels, types, team, isSuperAdmin, onAddChannel, onEdi
 
 // ================= Item Add/Edit modal =================
 function ItemModal({ editing, setEditing, types, channels, team, occasions, onClose, onSave, onDelete, onDuplicate, onAddComment, onToggleComment, onCopyCaption }: {
-    editing: Partial<ContentItem> & { _channelIds?: string[] }
-    setEditing: (e: (Partial<ContentItem> & { _channelIds?: string[] }) | null) => void
+    editing: EditingItem
+    setEditing: (e: EditingItem | null) => void
     types: PostType[]; channels: Channel[]; team: TeamMember[]; occasions: Occasion[]
     onClose: () => void; onSave: () => void; onDelete: () => void; onDuplicate: () => void
     onAddComment: (text: string, byId: string) => void; onToggleComment: (id: string) => void
