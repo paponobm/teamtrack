@@ -798,7 +798,7 @@ export default function ContentCalendarPage() {
                 ) : (
                     <>
                         {view === 'month' && (
-                            <MonthView {...{ month, setMonth, selectedDate, setSelectedDate, monthStart, monthEnd, todayStr, slotsInRange, channelById, occasions, openAdd, openEdit, togglePosted, copyCaption }} />
+                            <MonthView {...{ month, setMonth, selectedDate, setSelectedDate, monthStart, monthEnd, todayStr, slotsInRange, channelById, channels: activeChannels, channelTargets, occasions, openAdd, openEdit, togglePosted, copyCaption }} />
                         )}
                         {view === 'board' && (
                             <BoardView {...{ items, team: activeTeam, channelById, month, setMonth, openEdit, advanceStage }} />
@@ -876,11 +876,12 @@ export default function ContentCalendarPage() {
 }
 
 // ================= Month view =================
-function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart, monthEnd, todayStr, slotsInRange, channelById, occasions, openAdd, openEdit, togglePosted, copyCaption }: {
+function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart, monthEnd, todayStr, slotsInRange, channelById, channels, channelTargets, occasions, openAdd, openEdit, togglePosted, copyCaption }: {
     month: string; setMonth: (m: string) => void
     selectedDate: string; setSelectedDate: (d: string) => void; monthStart: string; monthEnd: string; todayStr: string
     slotsInRange: (a: string, b: string) => { item: ContentItem; slot: Slot }[]
-    channelById: (id: string) => Channel; occasions: Occasion[]; openAdd: (d?: string) => void; openEdit: (i: ContentItem) => void
+    channelById: (id: string) => Channel; channels: Channel[]; channelTargets: ChannelTarget[]
+    occasions: Occasion[]; openAdd: (d?: string) => void; openEdit: (i: ContentItem) => void
     togglePosted: (i: ContentItem, s: Slot) => void; copyCaption: (i: ContentItem, s: Slot) => void
 }) {
     const [y, m] = month.split('-').map(Number)
@@ -892,6 +893,17 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
     const occasionsOn = (ds: string) => occasions.filter(o => o.date === ds)
     const isLeadDay = (ds: string) => occasions.some(o => ds < o.date && daysBetween(ds, o.date) <= o.lead_days)
     const nextOccasion = occasions.filter(o => o.date >= todayStr).sort((a, b) => a.date.localeCompare(b.date))[0]
+
+    // Aggregate target progress across every active channel, for the amber "so far this month"
+    // banner — same channelTargets/monthSlots data the per-page row and Target page use.
+    const [showTargetBreakdown, setShowTargetBreakdown] = useState(false)
+    const totalTarget = channels.reduce((s, c) => s + (channelTargets.find(t => t.channel_id === c.id)?.posts || 0), 0)
+    const totalVideoTarget = channels.reduce((s, c) => s + (channelTargets.find(t => t.channel_id === c.id)?.videos || 0), 0)
+    const totalPosted = monthSlots.filter(x => x.slot.posted).length
+    const totalVideoPosted = monthSlots.filter(x => x.slot.posted && KIND_INFO[x.item.type.kind]?.isVideo).length
+    const remaining = Math.max(0, totalTarget - totalPosted)
+    const remainingVideo = Math.max(0, totalVideoTarget - totalVideoPosted)
+    const todayCount = slotsInRange(todayStr, todayStr).length
 
     const cells: React.ReactNode[] = []
     const WD = ['সোম', 'মঙ্গল', 'বুধ', 'বৃহ', 'শুক্র', 'শনি', 'রবি']
@@ -933,6 +945,38 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                     <span style={{ fontSize: '0.875rem', opacity: 0.9 }}>· পরের উপলক্ষ: {nextOccasion.name} {daysBetween(todayStr, nextOccasion.date) === 0 ? 'আজ' : `আর ${bn(daysBetween(todayStr, nextOccasion.date))} দিন`}</span>
                 </motion.div>
             )}
+
+            {totalTarget > 0 && (
+                <motion.div variants={item_} style={{ border: '1px solid #A15C00', background: 'rgba(161,92,0,0.12)', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#A15C00', flexShrink: 0 }} />
+                        <span style={{ fontSize: '0.875rem', fontWeight: 600, flex: 1, minWidth: 200 }}>
+                            এ মাসে পোস্ট হয়েছে {bn(totalPosted)}/{bn(totalTarget)} · ভিডিও {bn(totalVideoPosted)}/{bn(totalVideoTarget)} · আরো {bn(remaining)}টা বাকি (ভিডিও {bn(remainingVideo)}টা)
+                        </span>
+                        <button className="btn btn-ghost btn-sm" onClick={() => setShowTargetBreakdown(v => !v)}>{showTargetBreakdown ? '▲ লুকান' : '▼ পেজ অনুযায়ী'}</button>
+                    </div>
+                    {todayCount === 0 && remaining > 0 && (
+                        <div style={{ marginTop: 6, fontSize: '0.8125rem', color: '#A15C00' }}>
+                            ⚠️ আজকের জন্য কোনো পোস্ট প্ল্যান করা নেই — এ মাসে আরো {bn(remaining)}টা পোস্ট বাকি
+                        </div>
+                    )}
+                    {showTargetBreakdown && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                            {channels.map(c => {
+                                const cPosted = monthSlots.filter(x => x.slot.channel_id === c.id && x.slot.posted).length
+                                const cTarget = channelTargets.find(t => t.channel_id === c.id)?.posts || 0
+                                const cVideoTarget = channelTargets.find(t => t.channel_id === c.id)?.videos || 0
+                                return (
+                                    <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 10, border: '1px solid var(--color-border-light)', background: 'var(--color-surface)' }}>
+                                        <ChannelIcon channel={c} size={22} />
+                                        <span style={{ fontSize: '0.8125rem', fontWeight: 600, whiteSpace: 'nowrap' }}>{c.name} {bn(cPosted)}/{bn(cTarget)}{cVideoTarget > 0 ? ` · ভিডিও ${bn(cVideoTarget)}` : ''}</span>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
+                </motion.div>
+            )}
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
                 <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
@@ -946,8 +990,42 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                 <div className="stat-card"><span className="stat-label">সময় পার, পোস্ট হয়নি</span><span className="stat-value" style={{ fontSize: '1.5rem', color: late ? '#DC2626' : undefined }}>{late}</span></div>
             </motion.div>
 
+            {channels.length > 0 && (
+                <motion.div variants={item_} style={{ marginBottom: 20 }}>
+                    <p className="hint" style={{ margin: '0 0 8px', fontSize: '0.8125rem' }}>এই মাসে প্রতিটি অ্যাকাউন্টে প্ল্যান করা পোস্ট / মাসিক টার্গেট — বিস্তারিত &quot;টার্গেট&quot; পাতায়</p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        {channels.map(c => {
+                            const planned = monthSlots.filter(x => x.slot.channel_id === c.id).length
+                            const target = channelTargets.find(t => t.channel_id === c.id)?.posts || 0
+                            const pct = target > 0 ? Math.min(100, Math.round(planned / target * 100)) : 0
+                            return (
+                                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 10, border: '1px solid var(--color-border-light)', background: 'var(--color-surface)' }}>
+                                    <ChannelIcon channel={c} size={22} />
+                                    <span style={{ fontSize: '0.8125rem', fontWeight: 600, whiteSpace: 'nowrap' }}>{c.name} {bn(planned)}/{bn(target)}</span>
+                                    <span style={{ width: 50, height: 4, borderRadius: 2, background: 'var(--color-border-light)', overflow: 'hidden', flexShrink: 0 }}>
+                                        <span style={{ display: 'block', width: `${pct}%`, height: '100%', background: '#B0175A' }} />
+                                    </span>
+                                </div>
+                            )
+                        })}
+                    </div>
+                </motion.div>
+            )}
+
             <motion.div variants={item_} className="card" style={{ padding: 10 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0,1fr))', gap: 4 }}>{cells}</div>
+            </motion.div>
+
+            <motion.div variants={item_} style={{ display: 'flex', flexWrap: 'wrap', gap: 14, margin: '10px 0 4px', fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: '#B0175A' }} /> আজ</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 12, height: 12, borderRadius: 3, border: '1px solid var(--color-border-light)', opacity: 0.6 }} /> চলে যাওয়া দিন</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 12, height: 12, borderRadius: 3, border: '1px solid var(--color-border)', background: 'var(--color-border-light, #E2E8F0)' }} /> সামনের দিন</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 12, height: 3, borderRadius: 2, background: '#6A3FC8' }} /> উপলক্ষের প্রস্তুতি</span>
+            </motion.div>
+            <motion.div variants={item_} style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 16, fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#DC2626' }} /> সময় পার, পোস্ট হয়নি</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#A15C00' }} /> বাকি আছে</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#16A34A' }} /> সব পোস্ট হয়েছে</span>
             </motion.div>
 
             <motion.div variants={item_} className="card" style={{ marginTop: 16 }}>
