@@ -20,6 +20,7 @@ import {
 // ---------- Types ----------
 interface Channel { id: string; name: string; platform: Platform; photo_url: string | null; upload_link: string | null; active: boolean; sort_order: number; slot_count?: string }
 type ChannelDraft = { name: string; platform: Platform; upload_link: string; photo_url: string }
+type TypeDraft = { name: string; kind: Kind; caption_template: string }
 interface PostType { id: string; name: string; kind: Kind; caption_template: string | null; sort_order: number; item_count?: string }
 interface TeamMember { id: string; name: string; avatar_url: string | null; roles: string[]; active: boolean }
 interface Slot { id?: string; channel_id: string; date: string; posted: boolean; hook: string | null; reach: number | null; msgs: number | null; orders: number | null }
@@ -129,6 +130,40 @@ function avatar(name: string, url: string | null, size = 24) {
         ? <img src={url} alt="" style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
         : <span style={{ width: size, height: size, borderRadius: '50%', background: getAvatarColor(name || 'U'), color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.42, fontWeight: 700, flexShrink: 0 }}>{(name || 'U')[0]?.toUpperCase()}</span>
 }
+// A channel's icon wherever it's shown read-only (day lists, board cards, pickers, tables):
+// the uploaded photo if there is one, with the platform icon as a small badge in the bottom-right
+// corner; falls back to the plain platform-colored icon circle when no photo is set. Clicking a
+// photo opens a full-size zoom overlay, same as the editable avatar in Settings.
+function ChannelIcon({ channel, size }: { channel: Channel; size: number }) {
+    const Icon = PLATFORM_ICON[channel.platform]
+    const [zoomed, setZoomed] = useState(false)
+    if (!channel.photo_url) {
+        return (
+            <span style={{ width: size, height: size, borderRadius: '50%', background: PLATFORM_COLOR[channel.platform], color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Icon size={Math.round(size * 0.6)} />
+            </span>
+        )
+    }
+    const badge = Math.max(10, Math.round(size * 0.55))
+    return (
+        <>
+            <span style={{ position: 'relative', width: size, height: size, display: 'inline-flex', flexShrink: 0 }}>
+                <img src={channel.photo_url} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', cursor: 'zoom-in' }} onClick={e => { e.stopPropagation(); setZoomed(true) }} />
+                <span style={{ position: 'absolute', bottom: -2, right: -2, width: badge, height: badge, borderRadius: '50%', background: PLATFORM_COLOR[channel.platform], color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid var(--color-surface)' }}>
+                    <Icon size={Math.round(badge * 0.55)} />
+                </span>
+            </span>
+            <AnimatePresence>
+                {zoomed && (
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ cursor: 'zoom-out' }} onClick={() => setZoomed(false)}>
+                        <motion.img src={channel.photo_url} alt="" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                            style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 12, objectFit: 'contain' }} onClick={e => e.stopPropagation()} />
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </>
+    )
+}
 // A channel's platform-icon avatar with a small camera badge that opens a file picker and
 // hands the chosen file to onUpload — used in Settings for both saved channels and the draft row.
 // Clicking the photo itself (when there is one) opens a full-size zoom overlay instead of
@@ -156,6 +191,24 @@ function ChannelAvatar({ photoUrl, platform, onUpload, size = 60 }: { photoUrl: 
                 )}
             </AnimatePresence>
         </>
+    )
+}
+// A post type's collapsible caption-template field — starts open if a template is already set,
+// saves on blur, and shows how many posts have used this type so far.
+function TypeCaptionRow({ t, onSave }: { t: PostType; onSave: (v: string) => void }) {
+    const [open, setOpen] = useState(!!t.caption_template)
+    return (
+        <div style={{ marginTop: 6 }}>
+            <button type="button" onClick={() => setOpen(o => !o)} className="hint"
+                style={{ fontSize: '0.8125rem', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+                ক্যাপশনের ছাঁচ (ঐচ্ছিক){Number(t.item_count) > 0 ? ` · ${bn(Number(t.item_count))}টা পোস্টে ব্যবহার হয়েছে` : ''}
+            </button>
+            {open && (
+                <textarea className="form-input" style={{ marginTop: 6, width: '100%' }} rows={2} defaultValue={t.caption_template || ''} key={t.id + (t.caption_template || '')}
+                    onBlur={e => { const v = e.target.value; if (v !== (t.caption_template || '')) onSave(v) }} />
+            )}
+        </div>
     )
 }
 function stagePillStyle(phase: string): { bg: string; color: string } {
@@ -203,8 +256,7 @@ export default function ContentCalendarPage() {
 
     const [editing, setEditing] = useState<EditingItem | null>(null)
     const [newChannelDraft, setNewChannelDraft] = useState<ChannelDraft | null>(null)
-    const [showTypeModal, setShowTypeModal] = useState(false)
-    const [editingType, setEditingType] = useState<PostType | null>(null)
+    const [newTypeDraft, setNewTypeDraft] = useState<TypeDraft | null>(null)
     const [occEdit, setOccEdit] = useState<{ id?: string; name: string; date: string; lead_days: string; target: string; notes: string } | null>(null)
 
     useEffect(() => {
@@ -467,15 +519,42 @@ export default function ContentCalendarPage() {
         if (c) saveChannelField(c, 'photo_url', url)
         else setNewChannelDraft(prev => prev ? { ...prev, photo_url: url } : prev)
     }
-    async function saveType(data: { id?: string; name: string; kind: Kind; caption_template: string }) {
+    async function saveNewType() {
+        if (!newTypeDraft || !newTypeDraft.name.trim()) { toast.error('ধরনের নাম দিন'); return }
         const res = await fetch('/api/content-calendar/types', {
-            method: data.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newTypeDraft.name.trim(), kind: newTypeDraft.kind, caption_template: newTypeDraft.caption_template }),
         })
         if (res.ok) {
             const row = await res.json()
-            setTypes(prev => data.id ? prev.map(t => t.id === row.id ? { ...t, ...row } : t) : [...prev, row])
-            setShowTypeModal(false); setEditingType(null); toast.success('ধরন সেভ হয়েছে')
-        } else toast.error((await res.json()).error || 'ধরন সেভ করা যায়নি')
+            setTypes(prev => [...prev, row])
+            setNewTypeDraft(null)
+            toast.success('ধরন যোগ হয়েছে')
+        } else toast.error((await res.json()).error || 'ধরন যোগ করা যায়নি')
+    }
+    // Inline-editable name/kind/caption-template fields in Settings — saves on blur/change,
+    // reverting the local value if the server rejects it.
+    async function saveTypeField(t: PostType, field: 'name' | 'kind' | 'caption_template', value: string) {
+        const res = await fetch('/api/content-calendar/types', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: t.id, [field]: value }) })
+        if (res.ok) {
+            const row = await res.json()
+            setTypes(prev => prev.map(x => x.id === t.id ? { ...x, ...row } : x))
+        } else {
+            toast.error((await res.json()).error || 'সেভ করা যায়নি')
+            setTypes(prev => prev.map(x => x.id === t.id ? { ...x, [field]: t[field] } : x))
+        }
+    }
+    async function reorderType(t: PostType, direction: -1 | 1) {
+        const sorted = [...types].sort((a, b) => a.sort_order - b.sort_order)
+        const idx = sorted.findIndex(x => x.id === t.id)
+        const other = sorted[idx + direction]
+        if (!other) return
+        const [aOrder, bOrder] = [t.sort_order, other.sort_order]
+        setTypes(prev => prev.map(x => x.id === t.id ? { ...x, sort_order: bOrder } : x.id === other.id ? { ...x, sort_order: aOrder } : x))
+        await Promise.all([
+            fetch('/api/content-calendar/types', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: t.id, sort_order: bOrder }) }),
+            fetch('/api/content-calendar/types', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: other.id, sort_order: aOrder }) }),
+        ])
     }
     async function deleteType(t: PostType) {
         if (!confirm(`"${t.name}" মুছে ফেলবেন?`)) return
@@ -774,9 +853,8 @@ export default function ContentCalendarPage() {
                                 channels, types, team, isSuperAdmin,
                                 newChannelDraft, setNewChannelDraft, onSaveNewChannel: saveNewChannel,
                                 toggleChannelActive, deleteChannel, saveChannelField, reorderChannel, uploadChannelPhoto,
-                                onAddType: () => { setEditingType(null); setShowTypeModal(true) },
-                                onEditType: (t: PostType) => { setEditingType(t); setShowTypeModal(true) },
-                                deleteType, toggleTeamRole, toggleTeamActive,
+                                newTypeDraft, setNewTypeDraft, onSaveNewType: saveNewType,
+                                saveTypeField, reorderType, deleteType, toggleTeamRole, toggleTeamActive,
                             }} />
                         )}
                     </>
@@ -790,12 +868,6 @@ export default function ContentCalendarPage() {
                             onDuplicate={() => editing.id && openDuplicate(editing as ContentItem)}
                             onAddComment={addComment} onToggleComment={toggleComment} onCopyCaption={copyCaption}
                         />
-                    )}
-                </AnimatePresence>
-
-                <AnimatePresence>
-                    {showTypeModal && (
-                        <TypeModal type={editingType} onClose={() => { setShowTypeModal(false); setEditingType(null) }} onSave={saveType} />
                     )}
                 </AnimatePresence>
             </motion.div>
@@ -889,13 +961,12 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                         {dayList.map(({ item, slot }) => {
                             const ch = channelById(slot.channel_id)
-                            const Icon = PLATFORM_ICON[ch.platform]
                             const phase = phaseOf(item)
                             return (
                                 <div key={(slot.id || slot.channel_id) + item.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 0', borderTop: '1px solid var(--color-border-light)' }}>
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: PLATFORM_COLOR[ch.platform] }}>
-                                        <span style={{ width: 24, height: 24, borderRadius: '50%', background: PLATFORM_COLOR[ch.platform], color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Icon size={13} /></span>
-                                        <b style={{ fontSize: '0.8125rem', color: 'var(--color-text-primary)' }}>{ch.name}</b>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: PLATFORM_COLOR[ch.platform] }}>
+                                        <ChannelIcon channel={ch} size={36} />
+                                        <b style={{ fontSize: '1rem', color: 'var(--color-text-primary)' }}>{ch.name}</b>
                                     </span>
                                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
                                         <div style={{ flex: 1, minWidth: 160, cursor: 'pointer' }} onClick={() => openEdit(item)}>
@@ -945,8 +1016,11 @@ function BoardCard({ it, channelById, onOpen, onAdvance }: { it: ContentItem; ch
                 <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                     {it.slots.map(s => {
                         const ch = channelById(s.channel_id)
-                        const Icon = PLATFORM_ICON[ch.platform]
-                        return <span key={(s.id || s.channel_id)} title={ch.name} style={{ width: 20, height: 20, borderRadius: '50%', background: PLATFORM_COLOR[ch.platform], color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: s.posted ? '0 0 0 2px #16A34A' : undefined }}><Icon size={11} /></span>
+                        return (
+                            <span key={(s.id || s.channel_id)} title={ch.name} style={{ display: 'inline-flex', borderRadius: '50%', boxShadow: s.posted ? '0 0 0 2px #16A34A' : undefined }}>
+                                <ChannelIcon channel={ch} size={20} />
+                            </span>
+                        )
                     })}
                 </div>
             )}
@@ -1126,7 +1200,6 @@ function PagesView({ channels, month, setMonth, monthStart, monthEnd, todayStr, 
     }
     const current = channels.find(c => c.id === pageChannel) ? pageChannel : channels[0].id
     const ch = channelById(current)
-    const Icon = PLATFORM_ICON[ch.platform]
     const monthSlots = slotsInRange(monthStart, monthEnd)
     const countFor = (id: string) => monthSlots.filter(x => x.slot.channel_id === id).length
     const channelSlots = monthSlots.filter(x => x.slot.channel_id === current)
@@ -1180,20 +1253,17 @@ function PagesView({ channels, month, setMonth, monthStart, monthEnd, todayStr, 
                 <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
             </motion.div>
 
-            <motion.div variants={item_} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
-                {channels.map(c => {
-                    const CIcon = PLATFORM_ICON[c.platform]
-                    return (
-                        <button key={c.id} onClick={() => setPageChannel(c.id)}
-                            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 8, fontSize: '0.8125rem', fontWeight: 600, border: c.id === current ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-surface)' }}>
-                            <span style={{ color: PLATFORM_COLOR[c.platform] }}><CIcon size={16} /></span>{c.name}<span className="hint">{bn(countFor(c.id))}</span>
-                        </button>
-                    )
-                })}
+            <motion.div variants={item_} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+                {channels.map(c => (
+                    <button key={c.id} onClick={() => setPageChannel(c.id)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderRadius: 10, fontSize: '0.9375rem', fontWeight: 600, border: c.id === current ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-surface)' }}>
+                        <ChannelIcon channel={c} size={26} />{c.name}<span className="hint">{bn(countFor(c.id))}</span>
+                    </button>
+                ))}
             </motion.div>
 
             <motion.div variants={item_} className="card">
-                <h3 style={{ fontSize: '1.0625rem', display: 'flex', alignItems: 'center', gap: 6 }}><Icon size={18} />{ch.name} — {formatMonthLabel(month)}</h3>
+                <h3 style={{ fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: 8 }}><ChannelIcon channel={ch} size={28} />{ch.name} — {formatMonthLabel(month)}</h3>
                 <p className="hint" style={{ margin: '0 0 4px', fontSize: '0.8125rem' }}>আজ থেকে মাসের শেষ পর্যন্ত প্রতিটি দিন, আর আগের যেসব দিনে পোস্ট ছিল। একই কন্টেন্ট অন্য কোন পেজে কবে যাচ্ছে তাও দেখা যাবে।</p>
                 {rows.length ? rows : <p className="hint">এই মাসে এই অ্যাকাউন্টে কিছু নেই।</p>}
             </motion.div>
@@ -1568,10 +1638,9 @@ function TargetTable({ title, hint, data, clockLeft }: { title: string; hint?: s
                     <thead><tr><th>অ্যাকাউন্ট</th><th style={{ textAlign: 'right' }}>টার্গেট</th><th style={{ textAlign: 'right' }}>প্ল্যান</th><th style={{ textAlign: 'right' }}>পোস্টেড</th><th>অগ্রগতি</th><th style={{ textAlign: 'right' }}>বাকি</th><th style={{ textAlign: 'right' }}>দিনে লাগবে</th><th>অবস্থা</th></tr></thead>
                     <tbody>
                         {data.rows.map(r => {
-                            const Icon = PLATFORM_ICON[r.channel.platform]
                             return (
                                 <tr key={r.channel.id}>
-                                    <td style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ color: PLATFORM_COLOR[r.channel.platform] }}><Icon size={14} /></span>{r.channel.name}</td>
+                                    <td style={{ display: 'flex', alignItems: 'center', gap: 6 }}><ChannelIcon channel={r.channel} size={16} />{r.channel.name}</td>
                                     <td style={{ textAlign: 'right' }}>{bn(r.target)}</td>
                                     <td style={{ textAlign: 'right' }}>{bn(r.planned)}</td>
                                     <td style={{ textAlign: 'right' }}>{bn(r.posted)}</td>
@@ -1715,11 +1784,10 @@ function TargetView({ items, channels, team, month, setMonth, monthStart, monthE
                         <thead><tr><th>অ্যাকাউন্ট</th><th>মাসে পোস্ট</th><th>এর মধ্যে ভিডিও</th></tr></thead>
                         <tbody>
                             {channels.map(c => {
-                                const Icon = PLATFORM_ICON[c.platform]
                                 const d = targetDraft.channels[c.id] || { posts: '', videos: '' }
                                 return (
                                     <tr key={c.id}>
-                                        <td style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ color: PLATFORM_COLOR[c.platform] }}><Icon size={14} /></span>{c.name}</td>
+                                        <td style={{ display: 'flex', alignItems: 'center', gap: 6 }}><ChannelIcon channel={c} size={16} />{c.name}</td>
                                         <td><input className="form-input" type="number" min={0} style={{ width: 90 }} value={d.posts} onChange={e => setTargetDraft({ ...targetDraft, channels: { ...targetDraft.channels, [c.id]: { ...d, posts: e.target.value } } })} /></td>
                                         <td><input className="form-input" type="number" min={0} style={{ width: 90 }} value={d.videos} onChange={e => setTargetDraft({ ...targetDraft, channels: { ...targetDraft.channels, [c.id]: { ...d, videos: e.target.value } } })} /></td>
                                     </tr>
@@ -2043,14 +2111,16 @@ function ProductsView({ items, products, monthStart, monthEnd, todayStr, showEdi
 }
 
 // ================= Settings =================
-function SettingsView({ channels, types, team, isSuperAdmin, newChannelDraft, setNewChannelDraft, onSaveNewChannel, toggleChannelActive, deleteChannel, saveChannelField, reorderChannel, uploadChannelPhoto, onAddType, onEditType, deleteType, toggleTeamRole, toggleTeamActive }: {
+function SettingsView({ channels, types, team, isSuperAdmin, newChannelDraft, setNewChannelDraft, onSaveNewChannel, toggleChannelActive, deleteChannel, saveChannelField, reorderChannel, uploadChannelPhoto, newTypeDraft, setNewTypeDraft, onSaveNewType, saveTypeField, reorderType, deleteType, toggleTeamRole, toggleTeamActive }: {
     channels: Channel[]; types: PostType[]; team: TeamMember[]; isSuperAdmin: boolean
     newChannelDraft: ChannelDraft | null
     setNewChannelDraft: (d: ChannelDraft | null) => void; onSaveNewChannel: () => void
     toggleChannelActive: (c: Channel) => void; deleteChannel: (c: Channel) => void
     saveChannelField: (c: Channel, field: 'name' | 'upload_link' | 'photo_url', value: string) => void; reorderChannel: (c: Channel, direction: -1 | 1) => void
     uploadChannelPhoto: (c: Channel | null, file: File) => void
-    onAddType: () => void; onEditType: (t: PostType) => void; deleteType: (t: PostType) => void
+    newTypeDraft: TypeDraft | null; setNewTypeDraft: (d: TypeDraft | null) => void; onSaveNewType: () => void
+    saveTypeField: (t: PostType, field: 'name' | 'kind' | 'caption_template', value: string) => void; reorderType: (t: PostType, direction: -1 | 1) => void
+    deleteType: (t: PostType) => void
     toggleTeamRole: (m: TeamMember, role: string) => void; toggleTeamActive: (m: TeamMember) => void
 }) {
     const activeChannelCount = channels.filter(c => c.active).length
@@ -2126,21 +2196,57 @@ function SettingsView({ channels, types, team, isSuperAdmin, newChannelDraft, se
             </motion.div>
 
             <motion.div variants={item_} className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                     <h3 style={{ fontSize: '1.0625rem' }}>পোস্টের ধরন</h3>
-                    <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={onAddType}><IconPlus size={14} /> ধরন যোগ করুন</button>
+                    <span className="hint" style={{ fontSize: '0.8125rem' }}>{bn(types.length)}টা</span>
                 </div>
-                <p className="hint" style={{ margin: '0 0 10px', fontSize: '0.8125rem' }}>প্রতিটি ধরনের “কীভাবে তৈরি হয়” ঠিক করে এটা কোন ধাপে যাবে আর ভিডিও হিসেবে গোনা হবে কিনা।</p>
-                {types.map(t => (
-                    <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--color-border-light)' }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <b style={{ fontSize: '0.875rem' }}>{t.name}</b>
-                            <div className="hint" style={{ fontSize: '0.75rem' }}>{KIND_INFO[t.kind].label}{Number(t.item_count) > 0 ? ` · ${t.item_count} পোস্ট` : ''}</div>
+                <p className="hint" style={{ margin: '0 0 10px', fontSize: '0.8125rem' }}>প্রতিটি ধরনের নাম আর সেটা কীভাবে তৈরি হয় বাছুন — তা থেকে কাজের ধাপ আর দায়িত্ব নিজে থেকে ঠিক হয়; 🎬 ভিডিও আর 🔴 লাইভ ভিডিওর টার্গেটে গোনা হয়। ↑ ↓ দিয়ে ক্রম সাজান।</p>
+                {(() => {
+                    const sorted = [...types].sort((a, b) => a.sort_order - b.sort_order)
+                    return sorted.map((t, i) => (
+                        <div key={t.id} style={{ borderTop: '1px solid var(--color-border-light)', padding: '10px 0' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span className="hint" style={{ width: 18, textAlign: 'center', fontSize: '0.8125rem', flexShrink: 0 }}>{bn(i + 1)}</span>
+                                <input className="form-input" style={{ flex: 1 }} defaultValue={t.name} key={t.id + t.name}
+                                    onBlur={e => { const v = e.target.value.trim(); if (v && v !== t.name) saveTypeField(t, 'name', v); else e.target.value = t.name }} />
+                                <select className="form-input" style={{ width: 170, flexShrink: 0 }} value={t.kind}
+                                    onChange={e => saveTypeField(t, 'kind', e.target.value)}>
+                                    {(Object.keys(KIND_INFO) as Kind[]).map(k => <option key={k} value={k}>{KIND_INFO[k].label}</option>)}
+                                </select>
+                                <button className="btn btn-ghost btn-icon" disabled={i === 0} onClick={() => reorderType(t, -1)} title="উপরে সরান">↑</button>
+                                <button className="btn btn-ghost btn-icon" disabled={i === sorted.length - 1} onClick={() => reorderType(t, 1)} title="নিচে সরান">↓</button>
+                                <button className="btn btn-ghost btn-icon" style={{ color: '#DC2626' }} onClick={() => deleteType(t)} title="মুছুন">✕</button>
+                            </div>
+                            <TypeCaptionRow t={t} onSave={v => saveTypeField(t, 'caption_template', v)} />
                         </div>
-                        <button className="btn btn-ghost btn-sm" onClick={() => onEditType(t)}>এডিট</button>
-                        {!Number(t.item_count) && <button className="btn btn-ghost btn-sm" style={{ color: '#DC2626' }} onClick={() => deleteType(t)}>মুছুন</button>}
+                    ))
+                })()}
+                {newTypeDraft && (
+                    <div style={{ border: '2px solid #B0175A', borderRadius: 10, padding: 10, marginTop: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <input className="form-input" style={{ flex: 1 }} autoFocus value={newTypeDraft.name} placeholder="ধরনের নাম"
+                                onChange={e => setNewTypeDraft({ ...newTypeDraft, name: e.target.value })} />
+                            <select className="form-input" style={{ width: 170, flexShrink: 0 }} value={newTypeDraft.kind}
+                                onChange={e => setNewTypeDraft({ ...newTypeDraft, kind: e.target.value as Kind })}>
+                                {(Object.keys(KIND_INFO) as Kind[]).map(k => <option key={k} value={k}>{KIND_INFO[k].label}</option>)}
+                            </select>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setNewTypeDraft(null)}>✕ বাতিল</button>
+                        </div>
+                        <textarea className="form-input" style={{ marginTop: 8, width: '100%' }} rows={2} placeholder="ডিফল্ট ক্যাপশন (ঐচ্ছিক)" value={newTypeDraft.caption_template}
+                            onChange={e => setNewTypeDraft({ ...newTypeDraft, caption_template: e.target.value })} />
                     </div>
-                ))}
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+                    {!newTypeDraft && (
+                        <button className="btn btn-secondary btn-sm" onClick={() => setNewTypeDraft({ name: '', kind: 'video', caption_template: '' })}><IconPlus size={14} /> নতুন ধরন</button>
+                    )}
+                    {newTypeDraft && (
+                        <>
+                            <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} disabled={!newTypeDraft.name.trim()} onClick={onSaveNewType}>ধরন সেভ করুন</button>
+                            <span className="hint" style={{ fontSize: '0.8125rem' }}>সেভ করা হয়নি এমন পরিবর্তন আছে</span>
+                        </>
+                    )}
+                </div>
             </motion.div>
 
             <motion.div variants={item_} className="card">
@@ -2343,32 +2449,6 @@ function ItemModal({ editing, setEditing, types, channels, team, occasions, onCl
                     {isEdit && <button className="btn btn-secondary btn-sm" onClick={onDuplicate}>কপি করুন</button>}
                     {isEdit && <button className="btn btn-secondary btn-sm" style={{ color: '#DC2626' }} onClick={onDelete}>মুছুন</button>}
                     <button className="btn btn-primary btn-sm" onClick={onSave}>{isEdit ? 'সেভ করুন' : 'কন্টেন্ট যোগ করুন'}</button>
-                </div>
-            </motion.div>
-        </motion.div>
-    )
-}
-
-// ================= Type modal =================
-function TypeModal({ type, onClose, onSave }: { type: PostType | null; onClose: () => void; onSave: (d: { id?: string; name: string; kind: Kind; caption_template: string }) => void }) {
-    const [name, setName] = useState(type?.name || '')
-    const [kind, setKind] = useState<Kind>(type?.kind || 'video')
-    const [tpl, setTpl] = useState(type?.caption_template || '')
-    return (
-        <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-            <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} onClick={e => e.stopPropagation()} style={{ maxWidth: 420, width: '100%' }}>
-                <div className="modal-header"><h2 className="modal-title">{type ? 'ধরন এডিট' : 'ধরন যোগ করুন'}</h2><button className="btn btn-ghost btn-sm" onClick={onClose}><IconX size={18} /></button></div>
-                <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div className="form-group"><label className="form-label">নাম *</label><input className="form-input" value={name} onChange={e => setName(e.target.value)} placeholder="যেমন: অফার পোস্ট" /></div>
-                    <div className="form-group">
-                        <label className="form-label">কীভাবে তৈরি হয় *</label>
-                        <select className="form-input" value={kind} onChange={e => setKind(e.target.value as Kind)}>{(Object.keys(KIND_INFO) as Kind[]).map(k => <option key={k} value={k}>{KIND_INFO[k].label}</option>)}</select>
-                    </div>
-                    <div className="form-group"><label className="form-label">ডিফল্ট ক্যাপশন (ঐচ্ছিক)</label><textarea className="form-input" rows={3} value={tpl} onChange={e => setTpl(e.target.value)} /></div>
-                </div>
-                <div className="modal-footer">
-                    <button className="btn btn-secondary btn-sm" onClick={onClose}>বাতিল</button>
-                    <button className="btn btn-primary btn-sm" disabled={!name.trim()} onClick={() => onSave({ id: type?.id, name: name.trim(), kind, caption_template: tpl })}>সেভ করুন</button>
                 </div>
             </motion.div>
         </motion.div>

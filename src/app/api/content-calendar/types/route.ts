@@ -73,7 +73,7 @@ export async function DELETE(request: Request) {
 
     const { rows: [{ count }] } = await auth.db.query(`SELECT count(*) FROM content_calendar_items WHERE type_id = $1`, [id])
     if (Number(count) > 0) {
-        return NextResponse.json({ error: `This type has ${count} post(s), so it can't be deleted. You can rename it instead.` }, { status: 409 })
+        return NextResponse.json({ error: `এই ধরনে ${count}টা পোস্ট আছে, তাই মুছা যাবে না। নাম বদলে নিতে পারেন।` }, { status: 409 })
     }
     await auth.db.query(`DELETE FROM content_calendar_types WHERE id = $1`, [id])
     return NextResponse.json({ message: 'Type deleted' })
