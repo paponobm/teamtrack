@@ -89,7 +89,7 @@ export async function DELETE(request: Request) {
 
     const { rows: [{ count }] } = await auth.db.query(`SELECT count(*) FROM content_calendar_slots WHERE channel_id = $1`, [id])
     if (Number(count) > 0) {
-        return NextResponse.json({ error: `This channel has ${count} post(s). Deactivate it instead of deleting.` }, { status: 409 })
+        return NextResponse.json({ error: `এই চ্যানেলে ${count}টা পোস্ট আছে। মুছার বদলে বন্ধ করুন।` }, { status: 409 })
     }
     await auth.db.query(`DELETE FROM content_calendar_channels WHERE id = $1`, [id])
     return NextResponse.json({ message: 'Channel deleted' })

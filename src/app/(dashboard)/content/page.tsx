@@ -14,19 +14,27 @@ import {
 import {
     IconPlus, IconX, IconChevronLeft, IconChevronRight,
     IconCalendar, IconLayers, IconUsers, IconWrench, IconClipboard, IconFacebook,
-    IconInstagram, IconTikTok, IconYouTube, IconGlobe, IconTarget, IconLightbulb, IconClock, IconTrendingUp, IconBarChart3,
+    IconInstagram, IconTikTok, IconYouTube, IconGlobe, IconTarget, IconLightbulb, IconClock, IconTrendingUp, IconBarChart3, IconPackage, IconSearch,
 } from '@/components/icons/Icons'
 
 // ---------- Types ----------
 interface Channel { id: string; name: string; platform: Platform; photo_url: string | null; upload_link: string | null; active: boolean; sort_order: number; slot_count?: string }
 interface PostType { id: string; name: string; kind: Kind; caption_template: string | null; sort_order: number; item_count?: string }
-interface TeamMember { id: string; name: string; avatar_url: string | null; roles: string[] }
+interface TeamMember { id: string; name: string; avatar_url: string | null; roles: string[]; active: boolean }
 interface Slot { id?: string; channel_id: string; date: string; posted: boolean; hook: string | null; reach: number | null; msgs: number | null; orders: number | null }
 interface LogEntry { id: string; stage: string; by: string | null; at: string }
 interface CommentEntry { id: string; text: string; done: boolean; by: string | null; by_employee_id: string | null; at: string }
 interface Occasion { id: string; name: string; date: string; lead_days: number; target: number | null; notes: string | null; item_count?: string }
-interface Idea { id: string; title: string; product_code: string | null; notes: string | null; created_at: string; type: { id: string; name: string; kind: Kind } | null; by_employee: { id: string; name: string } | null }
+type SubmissionStatus = 'pending' | 'idea' | 'returned' | 'scheduled'
+interface Submission {
+    id: string; title: string; type_text: string | null; caption: string | null
+    status: SubmissionStatus; return_note: string | null; scheduled_item_id: string | null
+    created_at: string; updated_at: string
+    by_employee: { id: string; name: string } | null
+    scheduled_item: { id: string; title: string } | null
+}
 interface Series { id: string; title: string; gap_days: number; days_of_week: number[]; channel_ids: string[]; notes: string | null; type: { id: string; name: string; kind: Kind; caption_template: string | null } }
+interface Product { code: string; name: string | null; cat: string | null }
 interface ChannelTarget { channel_id: string; posts: number; videos: number; is_month_custom: boolean }
 interface MemberTarget { employee_id: string; target: number; is_month_custom: boolean }
 interface ContentItem {
@@ -39,7 +47,7 @@ interface ContentItem {
     series_id: string | null
     slots: Slot[]; logs: LogEntry[]; comments: CommentEntry[]
 }
-type EditingItem = Partial<ContentItem> & { _channelIds?: string[]; _fromIdea?: string }
+type EditingItem = Partial<ContentItem> & { _channelIds?: string[]; _fromSubmission?: string }
 
 const UPLOAD_LINK: Record<Platform, string> = {
     facebook: 'https://business.facebook.com/latest/composer', instagram: 'https://business.facebook.com/latest/composer',
@@ -66,6 +74,51 @@ function bn(n: number | string) { return String(n).replace(/\d/g, d => BN_DIGITS
 function shortDateBn(ds: string) { const dt = new Date(ds); return `${bn(dt.getDate())} ${BN_MONTHS[dt.getMonth()]}` }
 function addDaysStr(ds: string, days: number) { const [y, m, d] = ds.split('-').map(Number); const dt = new Date(y, m - 1, d + days); return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}` }
 function daysBetween(a: string, b: string) { const [ay, am, ad] = a.split('-').map(Number), [by, bm, bd] = b.split('-').map(Number); return Math.round((new Date(by, bm - 1, bd).getTime() - new Date(ay, am - 1, ad).getTime()) / 86400000) }
+
+// 4th Friday of November, for a given year — the one annual occasion below with a date that
+// moves (by weekday, not by moon) rather than falling on a fixed day of the month.
+function fourthFridayOfNovember(year: number): string {
+    const dow = new Date(year, 10, 1).getDay() // 0=Sun..6=Sat
+    const firstFriday = 1 + ((5 - dow + 7) % 7)
+    return `${year}-11-${String(firstFriday + 21).padStart(2, '0')}`
+}
+
+// Fixed-date annual occasions (Gregorian calendar, Bangladesh-focused) — Eid, Puja and other
+// lunar-calendar festivals move every year by moon sighting, so they're deliberately left out;
+// add those by hand once the date is confirmed.
+const ANNUAL_OCCASION_TEMPLATE: { name: string; month: number; day: number; leadDays: number; notes?: string }[] = [
+    { name: 'নববর্ষ', month: 1, day: 1, leadDays: 7 },
+    { name: 'ভালোবাসা দিবস', month: 2, day: 14, leadDays: 10 },
+    { name: 'আন্তর্জাতিক মাতৃভাষা দিবস', month: 2, day: 21, leadDays: 5 },
+    { name: 'স্বাধীনতা দিবস', month: 3, day: 26, leadDays: 10 },
+    { name: 'পহেলা বৈশাখ', month: 4, day: 14, leadDays: 14 },
+    { name: 'মে দিবস', month: 5, day: 1, leadDays: 5 },
+    { name: '১১.১১ সেল', month: 11, day: 11, leadDays: 7, notes: 'অনলাইন শপিং সেল দিন' },
+    { name: 'ব্ল্যাক ফ্রাইডে', month: 11, day: 29, leadDays: 10, notes: 'নভেম্বরের ৪র্থ শুক্রবার — তারিখ বছরভেদে বদলায়' },
+    { name: '১২.১২ সেল', month: 12, day: 12, leadDays: 10, notes: 'বছর শেষের সেল' },
+    { name: 'বিজয় দিবস', month: 12, day: 16, leadDays: 9 },
+    { name: 'বড়দিন', month: 12, day: 25, leadDays: 12 },
+    { name: 'থার্টি ফার্স্ট', month: 12, day: 31, leadDays: 5 },
+]
+function annualOccasionsFor(year: number) {
+    return ANNUAL_OCCASION_TEMPLATE.map(o => ({
+        name: o.name,
+        date: o.name === 'ব্ল্যাক ফ্রাইডে' ? fourthFridayOfNovember(year) : `${year}-${String(o.month).padStart(2, '0')}-${String(o.day).padStart(2, '0')}`,
+        lead_days: o.leadDays,
+        notes: o.notes || '',
+    }))
+}
+// Which year "বার্ষিক ক্যালেন্ডার থেকে যোগ করুন" would add next — this year, unless every fixed
+// occasion is already saved for it, in which case next year. Shared by the button's label and
+// the click handler so they can never disagree about which year is about to be added.
+function nextAnnualSeedYear(occasions: Occasion[], todayStr: string): number {
+    let year = Number(todayStr.slice(0, 4))
+    while (ANNUAL_OCCASION_TEMPLATE.every(o => occasions.some(x => x.name === o.name && x.date.slice(0, 4) === String(year)))) {
+        year++
+    }
+    return year
+}
+function yearRangeLabel(year: number): string { return `${BN_MONTHS[0]} ${bn(year)} - ${BN_MONTHS[11]} ${bn(year)}` }
 function formatDate(d: string) { const dt = new Date(d); return `${dt.getDate()} ${BN_MONTHS[dt.getMonth()]}, ${dt.getFullYear()}` }
 function formatMonthLabel(month: string) { const [y, m] = month.split('-').map(Number); return `${BN_MONTHS[m - 1]} ${y}` }
 function currentMonthString() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
@@ -90,15 +143,16 @@ export default function ContentCalendarPage() {
     const { data: perms } = usePermissions()
     const isSuperAdmin = !!(perms.is_super || perms.role === 'Owner' || perms.role === 'Super Admin')
 
-    const [view, setView] = useState<'month' | 'board' | 'work' | 'pages' | 'occ' | 'ideas' | 'series' | 'target' | 'report' | 'settings'>('month')
+    const [view, setView] = useState<'month' | 'board' | 'work' | 'pages' | 'occ' | 'postbank' | 'products' | 'series' | 'target' | 'report' | 'settings'>('month')
     const [loading, setLoading] = useState(true)
     const [items, setItems] = useState<ContentItem[]>([])
     const [channels, setChannels] = useState<Channel[]>([])
     const [types, setTypes] = useState<PostType[]>([])
     const [team, setTeam] = useState<TeamMember[]>([])
     const [occasions, setOccasions] = useState<Occasion[]>([])
-    const [ideas, setIdeas] = useState<Idea[]>([])
+    const [submissions, setSubmissions] = useState<Submission[]>([])
     const [series, setSeries] = useState<Series[]>([])
+    const [products, setProducts] = useState<Product[]>([])
 
     const [month, setMonth] = useState(currentMonthString())
     const [selectedDate, setSelectedDate] = useState(getLocalDateString())
@@ -106,7 +160,10 @@ export default function ContentCalendarPage() {
     const [workPerson, setWorkPerson] = useState('')
     const [pageChannel, setPageChannel] = useState('')
     const [showPastOcc, setShowPastOcc] = useState(false)
-    const [ideaEdit, setIdeaEdit] = useState<Partial<Idea> & { _byId?: string } | null>(null)
+    const [showProductEdit, setShowProductEdit] = useState(false)
+    const [productQuery, setProductQuery] = useState('')
+    const [productFilter, setProductFilter] = useState<'stale' | 'never' | 'all' | 'top'>('stale')
+    const [submissionEdit, setSubmissionEdit] = useState<Partial<Submission> & { _byId?: string } | null>(null)
     const [seriesEdit, setSeriesEdit] = useState<Partial<Series> | null>(null)
     const [channelTargets, setChannelTargets] = useState<ChannelTarget[]>([])
     const [memberTargets, setMemberTargets] = useState<MemberTarget[]>([])
@@ -119,8 +176,7 @@ export default function ContentCalendarPage() {
     const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
     const [showTypeModal, setShowTypeModal] = useState(false)
     const [editingType, setEditingType] = useState<PostType | null>(null)
-    const [showOccModal, setShowOccModal] = useState(false)
-    const [editingOcc, setEditingOcc] = useState<Occasion | null>(null)
+    const [occEdit, setOccEdit] = useState<{ id?: string; name: string; date: string; lead_days: string; target: string; notes: string } | null>(null)
 
     useEffect(() => {
         let cancelled = false
@@ -130,11 +186,12 @@ export default function ContentCalendarPage() {
             fetch('/api/content-calendar/types').then(r => r.json()),
             fetch('/api/content-calendar/team').then(r => r.json()),
             fetch('/api/content-calendar/occasions').then(r => r.json()),
-            fetch('/api/content-calendar/ideas').then(r => r.json()),
+            fetch('/api/content-calendar/post-bank').then(r => r.json()),
             fetch('/api/content-calendar/series').then(r => r.json()),
-        ]).then(([i, c, t, m, o, id, sr]) => {
+            fetch('/api/content-calendar/products').then(r => r.json()),
+        ]).then(([i, c, t, m, o, id, sr, p]) => {
             if (cancelled) return
-            setItems(i.items || []); setChannels(c.channels || []); setTypes(t.types || []); setTeam(m.team || []); setOccasions(o.occasions || []); setIdeas(id.ideas || []); setSeries(sr.series || [])
+            setItems(i.items || []); setChannels(c.channels || []); setTypes(t.types || []); setTeam(m.team || []); setOccasions(o.occasions || []); setSubmissions(id.submissions || []); setSeries(sr.series || []); setProducts(p.products || [])
         }).catch(() => { if (!cancelled) toast.error('কন্টেন্ট ক্যালেন্ডার লোড করা যায়নি।') })
             .finally(() => { if (!cancelled) setLoading(false) })
         return () => { cancelled = true }
@@ -176,6 +233,7 @@ export default function ContentCalendarPage() {
 
     const channelById = (id: string) => channels.find(c => c.id === id) || { id, name: '(মুছে ফেলা চ্যানেল)', platform: 'facebook' as Platform, photo_url: null, upload_link: null, active: false, sort_order: 0 }
     const activeChannels = channels.filter(c => c.active)
+    const activeTeam = team.filter(m => m.active)
     const [monthStart, monthEnd] = (() => { const r = getMonthRangeFromString(month); return [r.start, r.end] })()
     const todayStr = getLocalDateString()
 
@@ -266,10 +324,13 @@ export default function ContentCalendarPage() {
             if (res.ok) {
                 const created = await res.json()
                 setItems(prev => [created, ...prev]); setEditing(null)
-                if (e._fromIdea) {
-                    await fetch(`/api/content-calendar/ideas?id=${e._fromIdea}`, { method: 'DELETE' })
-                    setIdeas(prev => prev.filter(x => x.id !== e._fromIdea))
-                    toast.success('আইডিয়াটা ক্যালেন্ডারে বসানো হয়েছে')
+                if (e._fromSubmission) {
+                    const res2 = await fetch('/api/content-calendar/post-bank', {
+                        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: e._fromSubmission, status: 'scheduled', scheduled_item_id: created.id }),
+                    })
+                    if (res2.ok) { const row = await res2.json(); setSubmissions(prev => prev.map(x => x.id === row.id ? row : x)) }
+                    toast.success('শিডিউল হয়েছে')
                 } else toast.success('কন্টেন্ট যোগ হয়েছে')
             } else toast.error((await res.json()).error || 'কন্টেন্ট যোগ করা যায়নি')
             return
@@ -358,16 +419,26 @@ export default function ContentCalendarPage() {
         const res = await fetch('/api/content-calendar/team', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ employee_id: m.id, roles }) })
         if (res.ok) setTeam(prev => prev.map(x => x.id === m.id ? { ...x, roles } : x))
     }
+    async function toggleTeamActive(m: TeamMember) {
+        const active = !m.active
+        const res = await fetch('/api/content-calendar/team', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ employee_id: m.id, active }) })
+        if (res.ok) setTeam(prev => prev.map(x => x.id === m.id ? { ...x, active } : x))
+    }
 
     // ---------- Occasions ----------
-    async function saveOccasion(data: { id?: string; name: string; date: string; lead_days: number; target: string; notes: string }) {
+    function openNewOccasion() { setOccEdit({ name: '', date: '', lead_days: '14', target: '', notes: '' }) }
+    function openEditOccasion(o: Occasion) { setOccEdit({ id: o.id, name: o.name, date: o.date, lead_days: String(o.lead_days), target: o.target != null ? String(o.target) : '', notes: o.notes || '' }) }
+    async function saveOccasion() {
+        const f = occEdit
+        if (!f || !f.name.trim() || !f.date) { toast.error('নাম আর তারিখ দিন'); return }
+        const data = { id: f.id, name: f.name.trim(), date: f.date, lead_days: Math.max(0, parseInt(f.lead_days) || 0), target: f.target, notes: f.notes.trim() }
         const res = await fetch('/api/content-calendar/occasions', {
             method: data.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
         })
         if (res.ok) {
             const row = await res.json()
             setOccasions(prev => data.id ? prev.map(o => o.id === row.id ? { ...o, ...row } : o) : [...prev, row])
-            setShowOccModal(false); setEditingOcc(null); toast.success('উপলক্ষ সেভ হয়েছে')
+            setOccEdit(null); toast.success('উপলক্ষ সেভ হয়েছে')
         } else toast.error((await res.json()).error || 'উপলক্ষ সেভ করা যায়নি')
     }
     async function deleteOccasion(o: Occasion) {
@@ -376,38 +447,72 @@ export default function ContentCalendarPage() {
         if (res.ok) { setOccasions(prev => prev.filter(x => x.id !== o.id)); toast.success('উপলক্ষ মুছে ফেলা হয়েছে') }
         else toast.error((await res.json()).error || 'মুছে ফেলা যায়নি')
     }
+    // Adds this year's (or next year's, if this year's list is already there) fixed-date
+    // occasions — skips any name already saved for that year, so clicking again is harmless.
+    // Shows the exact range (e.g. জানুয়ারি ২০২৬ - ডিসেম্বর ২০২৬) before adding, since silently
+    // picking this/next year left the user unsure which year was about to be touched.
+    async function seedAnnualOccasions() {
+        const year = nextAnnualSeedYear(occasions, todayStr)
+        const range = yearRangeLabel(year)
+        const toAdd = annualOccasionsFor(year).filter(o => !occasions.some(x => x.name === o.name && x.date.slice(0, 4) === String(year)))
+        if (!toAdd.length) { toast.success(`${range} - এর সব ফিক্সড উপলক্ষ আগে থেকেই আছে`); return }
+        if (!window.confirm(`${range} এর ${toAdd.length}টা ফিক্সড উপলক্ষ যোগ হবে। এগিয়ে যাবেন?`)) return
+        const added: Occasion[] = []
+        for (const o of toAdd) {
+            const res = await fetch('/api/content-calendar/occasions', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o),
+            })
+            if (res.ok) added.push(await res.json())
+        }
+        if (added.length) { setOccasions(prev => [...prev, ...added]); toast.success(`${range} - এর ${bn(added.length)}টা উপলক্ষ যোগ হয়েছে`) }
+        else toast.error('উপলক্ষ যোগ করা যায়নি')
+    }
 
-    // ---------- Ideas ----------
-    function openNewIdea() { setIdeaEdit({ title: '', product_code: '', notes: '', type: types[0] ? { id: types[0].id, name: types[0].name, kind: types[0].kind } : null, _byId: '' }) }
-    function openEditIdea(x: Idea) { setIdeaEdit({ ...x, _byId: x.by_employee?.id || '' }) }
-    async function saveIdea() {
-        const f = ideaEdit
-        if (!f || !f.title?.trim()) { toast.error('আইডিয়া লিখুন'); return }
-        const payload = { id: f.id, title: f.title.trim(), type_id: f.type?.id || '', product_code: f.product_code || '', by_employee_id: f._byId || '', notes: f.notes || '' }
-        const res = await fetch('/api/content-calendar/ideas', {
+    // ---------- Post Bank ----------
+    // Anyone submits a written post ('pending', ready for review) or a loose idea ('idea').
+    // A scheduler either turns it into real content ("schedule") or sends it back with a note
+    // ("return"); editing a returned one resubmits it.
+    function openNewSubmission() { setSubmissionEdit({ title: '', type_text: '', caption: '', status: 'pending', _byId: '' }) }
+    function openEditSubmission(x: Submission) { setSubmissionEdit({ ...x, _byId: x.by_employee?.id || '' }) }
+    async function saveSubmission() {
+        const f = submissionEdit
+        if (!f || !f.title?.trim()) { toast.error('শিরোনাম লিখুন'); return }
+        const status = f.id ? (f.status === 'returned' ? 'pending' : f.status) : f.status
+        const payload = { id: f.id, title: f.title.trim(), type_text: f.type_text || '', caption: f.caption || '', by_employee_id: f._byId || '', status }
+        const res = await fetch('/api/content-calendar/post-bank', {
             method: f.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         })
         if (res.ok) {
             const row = await res.json()
-            setIdeas(prev => f.id ? prev.map(x => x.id === row.id ? row : x) : [row, ...prev])
-            setIdeaEdit(null); toast.success('আইডিয়া সেভ হয়েছে')
-        } else toast.error((await res.json()).error || 'আইডিয়া সেভ করা যায়নি')
+            setSubmissions(prev => f.id ? prev.map(x => x.id === row.id ? row : x) : [row, ...prev])
+            setSubmissionEdit(null); toast.success(f.id && status === 'pending' ? 'আবার জমা দেওয়া হয়েছে' : 'জমা হয়েছে')
+        } else toast.error((await res.json()).error || 'জমা দেওয়া যায়নি')
     }
-    async function deleteIdea(x: Idea) {
-        const res = await fetch(`/api/content-calendar/ideas?id=${x.id}`, { method: 'DELETE' })
-        if (res.ok) { setIdeas(prev => prev.filter(y => y.id !== x.id)); toast.success('আইডিয়া মুছে ফেলা হয়েছে') }
-        else toast.error((await res.json()).error || 'মুছে ফেলা যায়নি')
+    async function deleteSubmission(x: Submission) {
+        if (!confirm(`"${x.title}" বাদ দেবেন?`)) return
+        const res = await fetch(`/api/content-calendar/post-bank?id=${x.id}`, { method: 'DELETE' })
+        if (res.ok) { setSubmissions(prev => prev.filter(y => y.id !== x.id)); toast.success('বাদ দেওয়া হয়েছে') }
+        else toast.error((await res.json()).error || 'বাদ দেওয়া যায়নি')
     }
-    function useIdea(x: Idea) {
-        const defaultType = types.find(t => t.id === x.type?.id) || types[0]
+    async function returnSubmission(x: Submission) {
+        const note = prompt(`"${x.title}" কেন ফেরত দিচ্ছেন?`)
+        if (note == null) return
+        const res = await fetch('/api/content-calendar/post-bank', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: x.id, status: 'returned', return_note: note }),
+        })
+        if (res.ok) { const row = await res.json(); setSubmissions(prev => prev.map(y => y.id === row.id ? row : y)); toast.success('ফেরত দেওয়া হয়েছে') }
+        else toast.error((await res.json()).error || 'ফেরত দেওয়া যায়নি')
+    }
+    function scheduleSubmission(x: Submission) {
+        const defaultType = types[0]
         setEditing({
-            title: x.title, product_code: x.product_code || '', caption: defaultType?.caption_template || '', notes: x.notes || '',
+            title: x.title, product_code: '', caption: x.caption || defaultType?.caption_template || '', notes: '',
             stage: defaultType ? KIND_INFO[defaultType.kind].stages[0] : 'idea',
             start_date: todayStr, gap_days: 3,
             type: defaultType ? { id: defaultType.id, name: defaultType.name, kind: defaultType.kind, caption_template: defaultType.caption_template } : undefined,
             assignee: null, slots: [], comments: [], logs: [], occasion: null,
             _channelIds: activeChannels.filter(c => c.platform === 'facebook').map(c => c.id),
-            _fromIdea: x.id,
+            _fromSubmission: x.id,
         })
     }
 
@@ -460,17 +565,52 @@ export default function ContentCalendarPage() {
         toast.success(`${bn(dates.length)}টা কন্টেন্ট ক্যালেন্ডারে বসানো হয়েছে`)
     }
 
+    // ---------- Product rotation ----------
+    function openAddForProduct(code: string, name: string) {
+        const defaultType = types[0]
+        setEditing({
+            title: name || '', product_code: code, caption: defaultType?.caption_template || '', notes: '',
+            stage: defaultType ? KIND_INFO[defaultType.kind].stages[0] : 'idea',
+            start_date: view === 'month' ? selectedDate : todayStr, gap_days: 3,
+            type: defaultType ? { id: defaultType.id, name: defaultType.name, kind: defaultType.kind, caption_template: defaultType.caption_template } : undefined,
+            assignee: null, slots: [], comments: [], logs: [], occasion: null,
+            _channelIds: activeChannels.filter(c => c.platform === 'facebook').map(c => c.id),
+        })
+    }
+    // The textarea always submits the whole catalog — one line per product: code | name | cat.
+    async function saveProducts(text: string) {
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+        const seen = new Set<string>()
+        const list: Product[] = []
+        for (const line of lines) {
+            const parts = (line.includes('|') ? line.split('|') : line.split('\t')).map(x => x.trim())
+            const code = parts[0]
+            if (!code || seen.has(code)) continue
+            seen.add(code)
+            list.push({ code, name: parts[1] || null, cat: parts[2] || null })
+        }
+        if (list.length > 3000) { toast.error('একসাথে সর্বোচ্চ ৩০০০টা প্রোডাক্ট রাখা যাবে'); return }
+        const res = await fetch('/api/content-calendar/products', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ products: list }),
+        })
+        if (res.ok) {
+            const data = await res.json()
+            setProducts(data.products || []); setShowProductEdit(false); toast.success(`${bn((data.products || []).length)}টা প্রোডাক্ট সেভ হয়েছে`)
+        } else toast.error('প্রোডাক্ট সেভ করা যায়নি')
+    }
+
     const TABS: { key: typeof view; label: string; icon: React.ReactNode }[] = [
         { key: 'month', label: 'মাস', icon: <IconCalendar size={14} /> },
-        { key: 'board', label: 'প্রোডাকশন', icon: <IconLayers size={14} /> },
-        { key: 'work', label: 'কার কী কাজ', icon: <IconUsers size={14} /> },
+         { key: 'work', label: 'কার কী কাজ', icon: <IconUsers size={14} /> },
+        // { key: 'board', label: 'প্রোডাকশন', icon: <IconLayers size={14} /> },
         { key: 'pages', label: 'পেজ অনুযায়ী', icon: <IconGlobe size={14} /> },
         { key: 'occ', label: 'উপলক্ষ', icon: <IconTarget size={14} /> },
-        // { key: 'ideas', label: 'আইডিয়া', icon: <IconLightbulb size={14} /> },
-        // { key: 'series', label: 'সিরিজ', icon: <IconClock size={14} /> },
-        // { key: 'target', label: 'টার্গেট', icon: <IconTrendingUp size={14} /> },
+        // { key: 'postbank', label: 'পোস্ট ব্যাংক', icon: <IconLightbulb size={14} /> },
+        // { key: 'products', label: 'প্রোডাক্ট', icon: <IconPackage size={14} /> },
+        { key: 'series', label: 'সিরিজ', icon: <IconClock size={14} /> },
+        { key: 'target', label: 'টার্গেট', icon: <IconTrendingUp size={14} /> },
         // { key: 'report', label: 'রিপোর্ট', icon: <IconBarChart3 size={14} /> },
-       { key: 'settings', label: 'সেটিংস', icon: <IconWrench size={14} /> },
+        { key: 'settings', label: 'সেটিংস', icon: <IconWrench size={14} /> },
     ]
 
     return (
@@ -482,7 +622,7 @@ export default function ContentCalendarPage() {
                         <p className="page-subtitle">আইডিয়া থেকে পোস্ট হওয়া পর্যন্ত প্রতিটি সোশ্যাল পোস্ট প্ল্যান, দায়িত্ব ও ট্র্যাক করুন।</p>
                     </div>
                     {view !== 'settings' && (
-                        <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={() => openAdd()}>
+                        <button className="btn" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={() => openAdd()}>
                             <IconPlus size={16} /> নতুন কন্টেন্ট
                         </button>
                     )}
@@ -495,7 +635,12 @@ export default function ContentCalendarPage() {
                             {view === t.key && (
                                 <motion.div layoutId="contentCalendarTab" style={{ position: 'absolute', inset: 0, borderRadius: '12px', background: 'linear-gradient(135deg, #B0175A, #8B1047)', zIndex: 0 }} transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
                             )}
-                            <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: '6px' }}>{t.icon}{t.label}</span>
+                            <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                {t.icon}{t.label}
+                                {t.key === 'postbank' && submissions.filter(s => s.status === 'pending').length > 0 && (
+                                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: view === t.key ? '#fff' : '#DC2626', display: 'inline-block' }} />
+                                )}
+                            </span>
                         </button>
                     ))}
                 </motion.div>
@@ -508,26 +653,34 @@ export default function ContentCalendarPage() {
                             <MonthView {...{ month, setMonth, selectedDate, setSelectedDate, monthStart, monthEnd, todayStr, slotsInRange, channelById, occasions, openAdd, openEdit, togglePosted, copyCaption }} />
                         )}
                         {view === 'board' && (
-                            <BoardView {...{ items, team, channelById, month, setMonth, openEdit, advanceStage }} />
+                            <BoardView {...{ items, team: activeTeam, channelById, month, setMonth, openEdit, advanceStage }} />
                         )}
                         {view === 'work' && (
-                            <WorkView {...{ items, team, month, setMonth, workStage, setWorkStage, workPerson, setWorkPerson, openEdit, advanceStage }} />
+                            <WorkView {...{ items, team: activeTeam, month, setMonth, workStage, setWorkStage, workPerson, setWorkPerson, openEdit, advanceStage }} />
                         )}
                         {view === 'pages' && (
                             <PagesView {...{ channels: activeChannels, month, setMonth, monthStart, monthEnd, todayStr, pageChannel, setPageChannel, slotsInRange, channelById, openEdit, copyCaption }} />
                         )}
                         {view === 'occ' && (
                             <OccasionsView {...{
-                                occasions, items, todayStr, showPastOcc, setShowPastOcc,
-                                onAdd: () => { setEditingOcc(null); setShowOccModal(true) },
-                                onEdit: (o: Occasion) => { setEditingOcc(o); setShowOccModal(true) },
-                                onDelete: deleteOccasion, onAddContent: openAddForOccasion,
+                                occasions, items, todayStr, showPastOcc, setShowPastOcc, occEdit, setOccEdit,
+                                onAdd: openNewOccasion, onEdit: openEditOccasion, onSave: saveOccasion,
+                                onDelete: deleteOccasion, onAddContent: openAddForOccasion, onSeedAnnual: seedAnnualOccasions,
                             }} />
                         )}
-                        {view === 'ideas' && (
-                            <IdeasView {...{
-                                ideas, types, team, ideaEdit, setIdeaEdit,
-                                onNew: openNewIdea, onEdit: openEditIdea, onSave: saveIdea, onDelete: deleteIdea, onUse: useIdea,
+                        {view === 'postbank' && (
+                            <PostBankView {...{
+                                submissions, team: activeTeam, submissionEdit, setSubmissionEdit,
+                                onNew: openNewSubmission, onEdit: openEditSubmission, onSave: saveSubmission,
+                                onDelete: deleteSubmission, onReturn: returnSubmission, onSchedule: scheduleSubmission,
+                            }} />
+                        )}
+                        {view === 'products' && (
+                            <ProductsView {...{
+                                items, products, monthStart, monthEnd, todayStr,
+                                showEdit: showProductEdit, setShowEdit: setShowProductEdit,
+                                query: productQuery, setQuery: setProductQuery, filter: productFilter, setFilter: setProductFilter,
+                                onSave: saveProducts, onAddContent: openAddForProduct,
                             }} />
                         )}
                         {view === 'series' && (
@@ -539,13 +692,13 @@ export default function ContentCalendarPage() {
                         )}
                         {view === 'target' && (
                             <TargetView {...{
-                                items, channels: activeChannels, team, month, setMonth, monthStart, monthEnd, todayStr,
+                                items, channels: activeChannels, team: activeTeam, month, setMonth, monthStart, monthEnd, todayStr,
                                 channelTargets, memberTargets, targetsCustom, targetScope, setTargetScope, targetDraft, setTargetDraft,
                                 onSave: saveTargets,
                             }} />
                         )}
                         {view === 'report' && (
-                            <ReportView {...{ items, channels: activeChannels, types, occasions, team, channelTargets, memberTargets, month, setMonth, monthStart, monthEnd }} />
+                            <ReportView {...{ items, channels: activeChannels, types, occasions, team: activeTeam, channelTargets, memberTargets, month, setMonth, monthStart, monthEnd }} />
                         )}
                         {view === 'settings' && (
                             <SettingsView {...{
@@ -555,7 +708,7 @@ export default function ContentCalendarPage() {
                                 toggleChannelActive, deleteChannel,
                                 onAddType: () => { setEditingType(null); setShowTypeModal(true) },
                                 onEditType: (t: PostType) => { setEditingType(t); setShowTypeModal(true) },
-                                deleteType, toggleTeamRole,
+                                deleteType, toggleTeamRole, toggleTeamActive,
                             }} />
                         )}
                     </>
@@ -580,11 +733,6 @@ export default function ContentCalendarPage() {
                 <AnimatePresence>
                     {showTypeModal && (
                         <TypeModal type={editingType} onClose={() => { setShowTypeModal(false); setEditingType(null) }} onSave={saveType} />
-                    )}
-                </AnimatePresence>
-                <AnimatePresence>
-                    {showOccModal && (
-                        <OccasionModal occasion={editingOcc} onClose={() => { setShowOccModal(false); setEditingOcc(null) }} onSave={saveOccasion} />
                     )}
                 </AnimatePresence>
             </motion.div>
@@ -619,15 +767,16 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
         const list = slotsInRange(ds, ds)
         const dayLate = list.some(x => isSlotLate(x.slot)), dayDone = list.length > 0 && list.every(x => x.slot.posted)
         const dotColor = !list.length ? undefined : dayLate ? '#DC2626' : dayDone ? '#16A34A' : '#A15C00'
-        const isToday = ds === todayStr, isSel = ds === selectedDate
+        const isToday = ds === todayStr, isSel = ds === selectedDate, isPast = ds < todayStr
         const occs = occasionsOn(ds), lead = !occs.length && isLeadDay(ds)
         cells.push(
             <button key={ds} onClick={() => setSelectedDate(ds)}
                 style={{
                     minHeight: 58, padding: '4px 5px', borderRadius: 8, textAlign: 'left', cursor: 'pointer',
-                    background: isToday ? '#B0175A' : 'var(--color-surface-secondary, #F8FAFC)',
-                    border: isSel ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)',
+                    background: isToday ? '#B0175A' : isPast ? 'var(--color-surface-secondary, #F8FAFC)' : 'var(--color-border-light, #E2E8F0)',
+                    border: isSel ? '2px solid var(--color-text-primary)' : isPast ? '1px solid var(--color-border-light)' : '1px solid var(--color-border)',
                     boxShadow: lead ? 'inset 0 3px 0 #6A3FC8' : undefined,
+                    opacity: isPast && !isToday ? 0.5 : 1,
                     color: isToday ? '#fff' : undefined, display: 'flex', flexDirection: 'column', gap: 2,
                 }}>
                 <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 700, fontSize: '0.875rem' }}>
@@ -680,24 +829,29 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                             const Icon = PLATFORM_ICON[ch.platform]
                             const phase = phaseOf(item)
                             return (
-                                <div key={(slot.id || slot.channel_id) + item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--color-border-light)', flexWrap: 'wrap' }}>
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: PLATFORM_COLOR[ch.platform] }}><Icon size={16} /><b style={{ fontSize: '0.8125rem', color: 'var(--color-text-primary)' }}>{ch.name}</b></span>
-                                    <div style={{ flex: 1, minWidth: 160, cursor: 'pointer' }} onClick={() => openEdit(item)}>
-                                        <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{item.title}</div>
-                                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
-                                            {isActivePhase(item) && <Pill label={`এখনো ${STAGE_INFO[item.stage as Stage]?.label}`} {...stagePillStyle(phase)} />}
-                                            {item.occasion && <Pill label={`🎯 ${item.occasion.name}`} bg="rgba(106,63,200,0.1)" color="#6A3FC8" />}
-                                            {item.assignee && <span>{item.assignee.name}</span>}
+                                <div key={(slot.id || slot.channel_id) + item.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 0', borderTop: '1px solid var(--color-border-light)' }}>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: PLATFORM_COLOR[ch.platform] }}>
+                                        <span style={{ width: 24, height: 24, borderRadius: '50%', background: PLATFORM_COLOR[ch.platform], color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Icon size={13} /></span>
+                                        <b style={{ fontSize: '0.8125rem', color: 'var(--color-text-primary)' }}>{ch.name}</b>
+                                    </span>
+                                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+                                        <div style={{ flex: 1, minWidth: 160, cursor: 'pointer' }} onClick={() => openEdit(item)}>
+                                            <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{item.title}</div>
+                                            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
+                                                {isActivePhase(item) && <Pill label={`এখনো ${STAGE_INFO[item.stage as Stage]?.label}`} {...stagePillStyle(phase)} />}
+                                                {item.occasion && <Pill label={`🎯 ${item.occasion.name}`} bg="rgba(106,63,200,0.1)" color="#6A3FC8" />}
+                                                {item.assignee && <span>{item.assignee.name}</span>}
+                                            </div>
                                         </div>
+                                        <button className="btn btn-sm" style={{ background: slot.posted ? 'rgba(22,163,74,0.12)' : 'var(--color-surface-secondary, #F1F5F9)', color: slot.posted ? '#16A34A' : undefined, border: 'none', whiteSpace: 'nowrap' }} onClick={() => togglePosted(item, slot)}>
+                                            {slot.posted ? '✓ পোস্টেড' : 'পোস্ট হয়েছে'}
+                                        </button>
                                     </div>
-                                    <button className="btn btn-sm" style={{ background: slot.posted ? 'rgba(22,163,74,0.12)' : 'var(--color-surface-secondary, #F1F5F9)', color: slot.posted ? '#16A34A' : undefined, border: 'none' }} onClick={() => togglePosted(item, slot)}>
-                                        {slot.posted ? '✓ পোস্টেড' : 'পোস্ট হয়েছে'}
-                                    </button>
                                     {!slot.posted && (
-                                        <>
-                                            <button className="btn btn-ghost btn-icon" title="ক্যাপশন কপি করুন" onClick={() => copyCaption(item, slot)}><IconClipboard size={15} /></button>
-                                            <a className="btn btn-ghost btn-icon" title={`${UPLOAD_NAME[ch.platform]} খুলুন`} href={ch.upload_link || UPLOAD_LINK[ch.platform]} target="_blank" rel="noopener noreferrer">↗</a>
-                                        </>
+                                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                            <button className="btn btn-secondary btn-sm" onClick={() => copyCaption(item, slot)}><IconClipboard size={14} /> ক্যাপশন কপি</button>
+                                            <a className="btn btn-secondary btn-sm" href={ch.upload_link || UPLOAD_LINK[ch.platform]} target="_blank" rel="noopener noreferrer">↗ {UPLOAD_NAME[ch.platform]} খুলুন</a>
+                                        </div>
                                     )}
                                 </div>
                             )
@@ -985,12 +1139,17 @@ function PagesView({ channels, month, setMonth, monthStart, monthEnd, todayStr, 
 }
 
 // ================= Occasions =================
-function OccasionsView({ occasions, items, todayStr, showPastOcc, setShowPastOcc, onAdd, onEdit, onDelete, onAddContent }: {
+type OccDraft = { id?: string; name: string; date: string; lead_days: string; target: string; notes: string }
+function OccasionsView({ occasions, items, todayStr, showPastOcc, setShowPastOcc, occEdit, setOccEdit, onAdd, onEdit, onSave, onDelete, onAddContent, onSeedAnnual }: {
     occasions: Occasion[]; items: ContentItem[]; todayStr: string; showPastOcc: boolean; setShowPastOcc: (v: boolean) => void
-    onAdd: () => void; onEdit: (o: Occasion) => void; onDelete: (o: Occasion) => void; onAddContent: (o: Occasion) => void
+    occEdit: OccDraft | null; setOccEdit: (f: OccDraft | null) => void
+    onAdd: () => void; onEdit: (o: Occasion) => void; onSave: () => void; onDelete: (o: Occasion) => void; onAddContent: (o: Occasion) => void
+    onSeedAnnual: () => void
 }) {
     const upcoming = occasions.filter(o => o.date >= todayStr).sort((a, b) => a.date.localeCompare(b.date))
     const gone = occasions.filter(o => o.date < todayStr).sort((a, b) => b.date.localeCompare(a.date))
+    const seedRange = yearRangeLabel(nextAnnualSeedYear(occasions, todayStr))
+    const f = occEdit
 
     function statsFor(o: Occasion) {
         const linked = items.filter(i => i.occasion?.id === o.id)
@@ -1009,7 +1168,7 @@ function OccasionsView({ occasions, items, todayStr, showPastOcc, setShowPastOcc
             ? <Pill label={`প্রস্তুতি চলছে (শুরু ${formatDate(prepStart)})`} bg="rgba(106,63,200,0.1)" color="#6A3FC8" />
             : <Pill label={`প্রস্তুতি শুরু ${formatDate(prepStart)}`} bg="var(--color-surface-secondary, #F1F5F9)" color="var(--color-text-tertiary)" />
         return (
-            <div style={{ display: 'grid', gridTemplateColumns: '64px 1fr', gap: 12, padding: '12px 0', borderTop: '1px solid var(--color-border-light)', opacity: n < 0 ? 0.6 : 1 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 12, padding: '12px 0', borderTop: '1px solid var(--color-border-light)', opacity: n < 0 ? 0.6 : 1 }}>
                 <div style={{ textAlign: 'center', background: 'rgba(106,63,200,0.1)', color: '#6A3FC8', borderRadius: 8, padding: '4px 0' }}>
                     <small style={{ display: 'block', fontSize: '0.6875rem' }}>{BN_DSHORT[d.getDay()]}</small>
                     <b style={{ display: 'block', fontSize: '1.25rem' }}>{bn(d.getDate())}</b>
@@ -1025,11 +1184,11 @@ function OccasionsView({ occasions, items, todayStr, showPastOcc, setShowPastOcc
                         </span>
                     </div>
                     {o.notes && <div className="hint" style={{ fontSize: '0.8125rem' }}>{o.notes}</div>}
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
-                        {n >= 0 && <button className="btn btn-ghost btn-sm" onClick={() => onAddContent(o)}>+ এই উপলক্ষে কন্টেন্ট</button>}
-                        <button className="btn btn-ghost btn-sm" onClick={() => onEdit(o)}>এডিট</button>
-                        <button className="btn btn-ghost btn-sm" style={{ color: '#DC2626' }} onClick={() => onDelete(o)}>মুছুন</button>
-                    </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'row', gap: 6, flexWrap: 'nowrap', alignItems: 'center', justifyContent: 'center' }}>
+                    {n >= 0 && <button className="btn btn-secondary btn-sm" onClick={() => onAddContent(o)}>+ এই উপলক্ষে কন্টেন্ট</button>}
+                    <button className="btn btn-secondary btn-sm" onClick={() => onEdit(o)}>এডিট</button>
+                    <button className="btn btn-secondary btn-sm" style={{ color: '#DC2626' }} onClick={() => onDelete(o)}>মুছুন</button>
                 </div>
             </div>
         )
@@ -1037,11 +1196,41 @@ function OccasionsView({ occasions, items, todayStr, showPastOcc, setShowPastOcc
 
     return (
         <>
-            <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>উপলক্ষ ও সিজন</h2>
-                <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={onAdd}><IconPlus size={14} /> নতুন উপলক্ষ</button>
+                <button className="btn btn-secondary" onClick={onSeedAnnual}><IconClock size={14} /> বার্ষিক ক্যালেন্ডার থেকে যোগ করুন ({seedRange})</button>
+                <button className="btn" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={onAdd}><IconPlus size={14} /> নতুন উপলক্ষ</button>
             </motion.div>
-            <p className="hint" style={{ margin: '0 0 16px', fontSize: '0.8125rem' }}>প্রতিটি উপলক্ষের তারিখ আর কত দিন আগে থেকে কাজ শুরু হবে তা দিন। ক্যালেন্ডারে উপলক্ষের দিনে নাম দেখাবে, আর প্রস্তুতির দিনগুলোর উপরে বেগুনি দাগ থাকবে। কন্টেন্ট যোগ করার সময় উপলক্ষ বেছে নিলে এখানে হিসাব দেখা যাবে।</p>
+            <p className="hint" style={{ margin: '0 0 16px', fontSize: '0.8125rem' }}>প্রতিটি উপলক্ষের তারিখ আর কত দিন আগে থেকে কাজ শুরু হবে তা দিন। ক্যালেন্ডারে উপলক্ষের দিনে নাম দেখাবে, আর প্রস্তুতির দিনগুলোর উপরে বেগুনি দাগ থাকবে। কন্টেন্ট যোগ করার সময় উপলক্ষ বেছে নিলে এখানে হিসাব দেখা যাবে। &quot;বার্ষিক ক্যালেন্ডার থেকে যোগ করুন&quot; প্রতি বছরের নির্দিষ্ট দিনের উপলক্ষগুলো (নববর্ষ, স্বাধীনতা দিবস, ১১.১১ সেল ইত্যাদি) এক চাপে বসিয়ে দেয় — ঈদ, পূজার মতো চাঁদ দেখার উপর নির্ভরশীল উপলক্ষ তারিখ নিশ্চিত হলে নিজে যোগ করবেন।</p>
+
+            {f && (
+                <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
+                    <h3 style={{ fontSize: '1.0625rem', marginBottom: 10 }}>{f.id ? 'উপলক্ষ এডিট' : 'নতুন উপলক্ষ'}</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div className="form-group"><label className="form-label">নাম *</label>
+                            <input className="form-input" value={f.name} onChange={e => setOccEdit({ ...f, name: e.target.value })} placeholder="যেমন: ঈদুল ফিতর, ১১.১১ সেল" />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                            <div className="form-group"><label className="form-label">তারিখ *</label>
+                                <input className="form-input" type="date" value={f.date} onChange={e => setOccEdit({ ...f, date: e.target.value })} />
+                            </div>
+                            <div className="form-group"><label className="form-label">কত দিন আগে প্রস্তুতি</label>
+                                <input className="form-input" type="number" min={0} max={120} value={f.lead_days} onChange={e => setOccEdit({ ...f, lead_days: e.target.value })} />
+                            </div>
+                            <div className="form-group"><label className="form-label">পোস্টের টার্গেট (ঐচ্ছিক)</label>
+                                <input className="form-input" type="number" min={0} value={f.target} onChange={e => setOccEdit({ ...f, target: e.target.value })} />
+                            </div>
+                        </div>
+                        <div className="form-group"><label className="form-label">নোট</label>
+                            <input className="form-input" value={f.notes} onChange={e => setOccEdit({ ...f, notes: e.target.value })} placeholder="যেমন: চাঁদ দেখার উপর নির্ভর করে" />
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <button className="btn btn-primary btn-sm" disabled={!f.name.trim() || !f.date} onClick={onSave}>সেভ করুন</button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => setOccEdit(null)}>বাতিল</button>
+                        </div>
+                    </div>
+                </motion.div>
+            )}
 
             <motion.div variants={item_} className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -1063,107 +1252,100 @@ function OccasionsView({ occasions, items, todayStr, showPastOcc, setShowPastOcc
     )
 }
 
-function OccasionModal({ occasion, onClose, onSave }: { occasion: Occasion | null; onClose: () => void; onSave: (d: { id?: string; name: string; date: string; lead_days: number; target: string; notes: string }) => void }) {
-    const [name, setName] = useState(occasion?.name || '')
-    const [date, setDate] = useState(occasion?.date || '')
-    const [leadDays, setLeadDays] = useState(occasion?.lead_days ?? 14)
-    const [target, setTarget] = useState(occasion?.target != null ? String(occasion.target) : '')
-    const [notes, setNotes] = useState(occasion?.notes || '')
-    return (
-        <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-            <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} onClick={e => e.stopPropagation()} style={{ maxWidth: 440, width: '100%' }}>
-                <div className="modal-header"><h2 className="modal-title">{occasion ? 'উপলক্ষ এডিট' : 'নতুন উপলক্ষ'}</h2><button className="btn btn-ghost btn-sm" onClick={onClose}><IconX size={18} /></button></div>
-                <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div className="form-group"><label className="form-label">নাম *</label><input className="form-input" value={name} onChange={e => setName(e.target.value)} placeholder="যেমন: ঈদুল ফিতর, ১১.১১ সেল" /></div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                        <div className="form-group"><label className="form-label">তারিখ *</label><input className="form-input" type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
-                        <div className="form-group"><label className="form-label">কত দিন আগে প্রস্তুতি</label><input className="form-input" type="number" min={0} max={120} value={leadDays} onChange={e => setLeadDays(Math.max(0, parseInt(e.target.value) || 0))} /></div>
-                    </div>
-                    <div className="form-group"><label className="form-label">পোস্টের টার্গেট (ঐচ্ছিক)</label><input className="form-input" type="number" min={0} value={target} onChange={e => setTarget(e.target.value)} /></div>
-                    <div className="form-group"><label className="form-label">নোট</label><input className="form-input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="যেমন: চাঁদ দেখার উপর নির্ভর করে" /></div>
-                </div>
-                <div className="modal-footer">
-                    <button className="btn btn-secondary btn-sm" onClick={onClose}>বাতিল</button>
-                    <button className="btn btn-primary btn-sm" disabled={!name.trim() || !date} onClick={() => onSave({ id: occasion?.id, name: name.trim(), date, lead_days: leadDays, target, notes: notes.trim() })}>সেভ করুন</button>
-                </div>
-            </motion.div>
-        </motion.div>
-    )
-}
-
 // ================= Ideas =================
-function IdeasView({ ideas, types, team, ideaEdit, setIdeaEdit, onNew, onEdit, onSave, onDelete, onUse }: {
-    ideas: Idea[]; types: PostType[]; team: TeamMember[]
-    ideaEdit: (Partial<Idea> & { _byId?: string }) | null; setIdeaEdit: (f: (Partial<Idea> & { _byId?: string }) | null) => void
-    onNew: () => void; onEdit: (x: Idea) => void; onSave: () => void; onDelete: (x: Idea) => void; onUse: (x: Idea) => void
+const SUBMISSION_STATUS_LABEL: Record<SubmissionStatus, string> = { pending: 'অনুমোদনের অপেক্ষায়', returned: 'ফেরত দেওয়া', idea: 'শুধু আইডিয়া', scheduled: 'শিডিউল হয়েছে' }
+
+function PostBankView({ submissions, team, submissionEdit, setSubmissionEdit, onNew, onEdit, onSave, onDelete, onReturn, onSchedule }: {
+    submissions: Submission[]; team: TeamMember[]
+    submissionEdit: (Partial<Submission> & { _byId?: string }) | null; setSubmissionEdit: (f: (Partial<Submission> & { _byId?: string }) | null) => void
+    onNew: () => void; onEdit: (x: Submission) => void; onSave: () => void; onDelete: (x: Submission) => void
+    onReturn: (x: Submission) => void; onSchedule: (x: Submission) => void
 }) {
-    const [confirmDel, setConfirmDel] = useState('')
-    const f = ideaEdit
+    const [tab, setTab] = useState<SubmissionStatus>('pending')
+    const f = submissionEdit
+    const counts: Record<SubmissionStatus, number> = { pending: 0, returned: 0, idea: 0, scheduled: 0 }
+    submissions.forEach(s => { counts[s.status]++ })
+    const list = submissions.filter(s => s.status === tab)
+
     return (
         <>
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                <h2 style={{ fontSize: '1.25rem', flex: 1 }}>আইডিয়া ব্যাংক</h2>
-                <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={onNew}><IconPlus size={14} /> নতুন আইডিয়া</button>
+                <h2 style={{ fontSize: '1.25rem', flex: 1 }}>পোস্ট ব্যাংক</h2>
+                <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={onNew}><IconPlus size={14} /> নতুন পোস্ট জমা দিন</button>
             </motion.div>
-            <p className="hint" style={{ margin: '0 0 16px', fontSize: '0.8125rem' }}>মাথায় আসা আইডিয়া তারিখ ছাড়াই এখানে জমা রাখুন। পরে &quot;তারিখে বসান&quot; চাপলে কন্টেন্টের ফর্ম খুলবে, সেভ করলে আইডিয়াটা ক্যালেন্ডারে চলে যাবে।</p>
+            <p className="hint" style={{ margin: '0 0 16px', fontSize: '0.8125rem' }}>টিমের যে কেউ লেখা পোস্ট বা আইডিয়া এখানে জমা দেবেন। যিনি শিডিউল করেন, তিনি দেখে &quot;✓ শিডিউল করুন&quot; চাপে শুধু তারিখ, সময় আর পেজ বাছবেন — পোস্টটা ক্যালেন্ডারে চলে যাবে। ঠিক না লাগলে মন্তব্যসহ ফেরত দেওয়া যায়।</p>
 
             {f && (
                 <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
-                    <h3 style={{ fontSize: '1.0625rem', marginBottom: 10 }}>{f.id ? 'আইডিয়া এডিট' : 'নতুন আইডিয়া'}</h3>
+                    <h3 style={{ fontSize: '1.0625rem', marginBottom: 10 }}>{f.id ? 'পোস্ট এডিট' : 'নতুন পোস্ট জমা দিন'}</h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <div className="form-group"><label className="form-label">আইডিয়া</label>
-                            <input className="form-input" value={f.title || ''} onChange={e => setIdeaEdit({ ...f, title: e.target.value })} placeholder="যেমন: শীতের ৫টা প্রোডাক্ট এক ভিডিওতে" />
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                            <div className="form-group"><label className="form-label">ফরম্যাট</label>
-                                <select className="form-input" value={f.type?.id || ''} onChange={e => { const t = types.find(x => x.id === e.target.value); setIdeaEdit({ ...f, type: t ? { id: t.id, name: t.name, kind: t.kind } : null }) }}>
-                                    {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                                </select>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            <div className="form-group"><label className="form-label">ধরন</label>
+                                <input className="form-input" value={f.type_text || ''} onChange={e => setSubmissionEdit({ ...f, type_text: e.target.value })} placeholder="যেমন: স্টোরিটেলিং" />
                             </div>
-                            <div className="form-group"><label className="form-label">প্রোডাক্ট কোড</label>
-                                <input className="form-input" value={f.product_code || ''} onChange={e => setIdeaEdit({ ...f, product_code: e.target.value })} />
-                            </div>
-                            <div className="form-group"><label className="form-label">কে দিয়েছেন</label>
-                                <select className="form-input" value={f._byId || ''} onChange={e => setIdeaEdit({ ...f, _byId: e.target.value })}>
-                                    <option value="">—</option>
+                            <div className="form-group"><label className="form-label">কে জমা দিচ্ছেন</label>
+                                <select className="form-input" value={f._byId || ''} onChange={e => setSubmissionEdit({ ...f, _byId: e.target.value })}>
+                                    <option value="">— নাম বাছুন —</option>
                                     {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                                 </select>
                             </div>
                         </div>
-                        <div className="form-group"><label className="form-label">নোট</label>
-                            <input className="form-input" value={f.notes || ''} onChange={e => setIdeaEdit({ ...f, notes: e.target.value })} placeholder="রেফারেন্স ভিডিওর লিংক, হুকের আইডিয়া…" />
+                        <div className="form-group"><label className="form-label">শিরোনাম</label>
+                            <input className="form-input" value={f.title || ''} onChange={e => setSubmissionEdit({ ...f, title: e.target.value })} placeholder="যেমন: মায়ের হাতের আচারের গল্প" />
+                        </div>
+                        <div className="form-group"><label className="form-label">পুরো লেখা / ক্যাপশন</label>
+                            <textarea className="form-input" rows={5} value={f.caption || ''} onChange={e => setSubmissionEdit({ ...f, caption: e.target.value })} placeholder="পোস্টে যে লেখা যাবে, পুরোটা এখানে লিখুন" />
+                        </div>
+                        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '0.875rem' }}>
+                            <label style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}><input type="radio" style={{ marginTop: 3 }} checked={f.status !== 'idea'} onChange={() => setSubmissionEdit({ ...f, status: 'pending' })} /> লেখা তৈরি — অনুমোদনের জন্য পাঠান</label>
+                            <label style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}><input type="radio" style={{ marginTop: 3 }} checked={f.status === 'idea'} onChange={() => setSubmissionEdit({ ...f, status: 'idea' })} /> শুধু আইডিয়া — পরে বানানো হবে</label>
                         </div>
                         <div style={{ display: 'flex', gap: 8 }}>
-                            <button className="btn btn-primary btn-sm" onClick={onSave}>সেভ করুন</button>
-                            <button className="btn btn-secondary btn-sm" onClick={() => setIdeaEdit(null)}>বাতিল</button>
+                            <button className="btn btn-primary btn-sm" onClick={onSave}>জমা দিন</button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => setSubmissionEdit(null)}>বাতিল</button>
                         </div>
                     </div>
                 </motion.div>
             )}
 
+            <motion.div variants={item_} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+                {(['pending', 'returned', 'idea', 'scheduled'] as SubmissionStatus[]).map(s => (
+                    <button key={s} onClick={() => setTab(s)}
+                        style={{ padding: '6px 14px', borderRadius: 999, fontSize: '0.8125rem', fontWeight: 600, border: tab === s ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-surface)' }}>
+                        {SUBMISSION_STATUS_LABEL[s]} {bn(counts[s])}
+                    </button>
+                ))}
+            </motion.div>
+
             <motion.div variants={item_} className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <h3 style={{ fontSize: '1.0625rem' }}>জমা থাকা আইডিয়া</h3><span className="hint">{bn(ideas.length)}টা</span>
-                </div>
-                {!ideas.length && <p className="hint">এখনো কোনো আইডিয়া নেই।</p>}
-                {ideas.map(x => (
-                    <div key={x.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 0', borderTop: '1px solid var(--color-border-light)' }}>
-                        <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{x.title}</div>
+                {!list.length && <p className="hint">এই তালিকায় এখনো কিছু নেই।</p>}
+                {list.map(x => (
+                    <div key={x.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 0', borderTop: '1px solid var(--color-border-light)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+                            <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{x.title}</div>
+                            {(x.status === 'pending' || x.status === 'idea') && (
+                                <button className="btn btn-sm" style={{ background: 'rgba(22,163,74,0.1)', color: '#16A34A', border: 'none', whiteSpace: 'nowrap' }} onClick={() => onSchedule(x)}>✓ শিডিউল করুন</button>
+                            )}
+                        </div>
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>
-                            {x.type && <span>{x.type.name}</span>}
-                            {x.product_code && <span>· {x.product_code}</span>}
-                            {x.by_employee && <span>· {x.by_employee.name}</span>}
-                            <span>· {formatDate(x.created_at.slice(0, 10))}</span>
+                            {x.type_text && <Pill label={x.type_text} bg="var(--color-surface-secondary, #F1F5F9)" color="var(--color-text-secondary)" />}
+                            {x.by_employee && <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>{avatar(x.by_employee.name, null, 16)}{x.by_employee.name}</span>}
+                            <span>· জমা {formatDate(x.created_at.slice(0, 10))}</span>
                         </div>
-                        {x.notes && <div className="hint" style={{ fontSize: '0.8125rem' }}>{x.notes}</div>}
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
-                            <button className="btn btn-primary btn-sm" onClick={() => onUse(x)}>তারিখে বসান →</button>
-                            <button className="btn btn-ghost btn-sm" onClick={() => onEdit(x)}>এডিট</button>
-                            <button className="btn btn-ghost btn-sm" style={{ color: '#DC2626' }}
-                                onClick={() => { if (confirmDel !== x.id) { setConfirmDel(x.id); return } setConfirmDel(''); onDelete(x) }}>
-                                {confirmDel === x.id ? 'নিশ্চিত? মুছুন' : 'মুছুন'}
-                            </button>
-                        </div>
+                        {x.status === 'returned' && x.return_note && (
+                            <div style={{ fontSize: '0.8125rem', color: '#A15C00', background: 'rgba(161,92,0,0.1)', borderRadius: 8, padding: '6px 10px' }}>মন্তব্য: {x.return_note}</div>
+                        )}
+                        {x.status === 'scheduled' && x.scheduled_item && (
+                            <div style={{ fontSize: '0.8125rem' }}><Pill label={`শিডিউল হয়েছে: ${x.scheduled_item.title}`} bg="rgba(22,163,74,0.1)" color="#16A34A" /></div>
+                        )}
+                        {x.caption && <div className="hint" style={{ fontSize: '0.8125rem', background: 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 8, padding: '8px 10px', whiteSpace: 'pre-wrap' }}>{x.caption}</div>}
+                        {x.status !== 'scheduled' && (
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+                                <button className="btn btn-ghost btn-sm" onClick={() => onEdit(x)}>এডিট</button>
+                                {x.status !== 'returned' && <button className="btn btn-ghost btn-sm" onClick={() => onReturn(x)}>↩ ফেরত দিন</button>}
+                                <button className="btn btn-ghost btn-sm" style={{ color: '#DC2626' }} onClick={() => onDelete(x)}>✕ বাদ দিন</button>
+                            </div>
+                        )}
                     </div>
                 ))}
             </motion.div>
@@ -1689,12 +1871,120 @@ function ReportView({ items, channels, types, occasions, team, channelTargets, m
     )
 }
 
+// ================= Product rotation =================
+interface ProductStat { code: string; name: string; cat: string; inCat: boolean; last: string; next: string; month: number; total: number; orders: number; since: number | null }
+
+function productStats(items: ContentItem[], products: Product[], todayStr: string, monthStart: string, monthEnd: string): ProductStat[] {
+    const map: Record<string, ProductStat> = {}
+    const get = (code: string) => map[code] || (map[code] = { code, name: '', cat: '', inCat: false, last: '', next: '', month: 0, total: 0, orders: 0, since: null })
+    products.forEach(p => { const r = get(p.code); r.name = p.name || ''; r.cat = p.cat || ''; r.inCat = true })
+    items.forEach(i => {
+        const code = (i.product_code || '').trim()
+        if (!code) return
+        const r = get(code)
+        r.total++
+        i.slots.forEach(s => {
+            if (s.posted && s.date > r.last) r.last = s.date
+            if (!s.posted && s.date >= todayStr && (!r.next || s.date < r.next)) r.next = s.date
+            if (s.date >= monthStart && s.date <= monthEnd) r.month++
+            r.orders += Number(s.orders) || 0
+        })
+    })
+    return Object.values(map).map(r => ({ ...r, since: r.last ? daysBetween(r.last, todayStr) : null }))
+}
+
+function ProductsView({ items, products, monthStart, monthEnd, todayStr, showEdit, setShowEdit, query, setQuery, filter, setFilter, onSave, onAddContent }: {
+    items: ContentItem[]; products: Product[]; monthStart: string; monthEnd: string; todayStr: string
+    showEdit: boolean; setShowEdit: (v: boolean) => void
+    query: string; setQuery: (v: string) => void; filter: 'stale' | 'never' | 'all' | 'top'; setFilter: (v: 'stale' | 'never' | 'all' | 'top') => void
+    onSave: (text: string) => void; onAddContent: (code: string, name: string) => void
+}) {
+    const [draft, setDraft] = useState(() => products.map(p => [p.code, p.name, p.cat].filter((x, k) => k === 0 || x).join(' | ')).join('\n'))
+    const stats = productStats(items, products, todayStr, monthStart, monthEnd)
+    const stale = stats.filter(r => !r.next && (r.since === null || r.since >= 30)).length
+    const never = stats.filter(r => !r.last && !r.next).length
+
+    const q = query.trim().toLowerCase()
+    let list = stats
+    if (q) list = list.filter(r => (r.code + ' ' + r.name + ' ' + r.cat).toLowerCase().includes(q))
+    if (filter === 'stale') list = list.filter(r => !r.next && (r.since === null || r.since >= 30))
+    else if (filter === 'never') list = list.filter(r => !r.last && !r.next)
+    else if (filter === 'top') list = list.filter(r => r.orders > 0).sort((a, b) => b.orders - a.orders)
+    if (filter !== 'top') list = [...list].sort((a, b) => (a.since === null ? -1 : 0) - (b.since === null ? -1 : 0) || (b.since ?? 0) - (a.since ?? 0) || a.code.localeCompare(b.code))
+    const shown = list.slice(0, 150)
+
+    return (
+        <>
+            <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                <h2 style={{ fontSize: '1.25rem', flex: 1 }}>প্রোডাক্ট রোটেশন</h2>
+                <button className="btn btn-secondary btn-sm" onClick={() => { if (!showEdit) setDraft(products.map(p => [p.code, p.name, p.cat].filter((x, k) => k === 0 || x).join(' | ')).join('\n')); setShowEdit(!showEdit) }}>
+                    {showEdit ? 'তালিকা লুকান' : 'প্রোডাক্ট তালিকা বসান'}
+                </button>
+            </motion.div>
+
+            <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(products.length)}</b><small className="hint">তালিকায় প্রোডাক্ট</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem', color: stale ? '#DC2626' : undefined }}>{bn(stale)}</b><small className="hint">৩০ দিনে আসেনি, প্ল্যানেও নেই</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(never)}</b><small className="hint">কখনো আসেনি</small></div>
+                </div>
+                <p className="hint" style={{ margin: '10px 0 0', fontSize: '0.8125rem' }}>কন্টেন্টে প্রোডাক্ট কোড লিখলে সেটা এখানে গোনা হয়। যে প্রোডাক্ট অনেক দিন আসেনি সেগুলো উপরে থাকে।</p>
+            </motion.div>
+
+            {showEdit && (
+                <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
+                    <h3 style={{ fontSize: '1.0625rem', marginBottom: 6 }}>প্রোডাক্ট তালিকা</h3>
+                    <p className="hint" style={{ margin: '0 0 8px', fontSize: '0.8125rem' }}>প্রতি লাইনে একটা: <b>কোড | নাম | ক্যাটাগরি</b>। এক্সেল থেকে তিনটা কলাম কপি করে পেস্ট করলেও হবে।</p>
+                    <textarea className="form-input" style={{ minHeight: 220, fontFamily: 'monospace', fontSize: '0.8125rem' }} value={draft} onChange={e => setDraft(e.target.value)} />
+                    <div style={{ marginTop: 10 }}><button className="btn btn-primary btn-sm" onClick={() => onSave(draft)}>তালিকা সেভ করুন</button></div>
+                </motion.div>
+            )}
+
+            <motion.div variants={item_} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+                <div style={{ position: 'relative', flex: '1 1 220px' }}>
+                    <span style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', display: 'flex' }}><IconSearch size={15} color="var(--color-text-tertiary)" /></span>
+                    <input className="form-input" value={query} onChange={e => setQuery(e.target.value)} placeholder="কোড বা নাম দিয়ে খুঁজুন" style={{ paddingLeft: 34, height: 34, fontSize: '0.8125rem', width: '100%' }} />
+                </div>
+                <select className="form-input" value={filter} onChange={e => setFilter(e.target.value as typeof filter)} style={{ width: 'auto', height: 34, fontSize: '0.8125rem' }}>
+                    <option value="stale">৩০ দিনে আসেনি</option>
+                    <option value="never">কখনো আসেনি</option>
+                    <option value="all">সব প্রোডাক্ট</option>
+                    <option value="top">বেশি অর্ডার</option>
+                </select>
+            </motion.div>
+
+            <motion.div variants={item_} className="card">
+                <p className="hint" style={{ margin: '0 0 8px', fontSize: '0.8125rem' }}>{bn(list.length)}টা প্রোডাক্ট{list.length > 150 ? ', প্রথম ১৫০টা দেখাচ্ছে' : ''}</p>
+                {!shown.length && <p className="hint">কিছু পাওয়া যায়নি।</p>}
+                {shown.map(r => (
+                    <div key={r.code} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', padding: '10px 0', borderTop: '1px solid var(--color-border-light)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: '0.875rem' }}><span style={{ fontFamily: 'monospace' }}>{r.code}</span>{r.name ? ` — ${r.name}` : ''}</div>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>
+                                {r.cat && <span>{r.cat}</span>}
+                                <span>{r.last ? `শেষ পোস্ট ${formatDate(r.last)} (${bn(r.since ?? 0)} দিন আগে)` : 'কখনো পোস্ট হয়নি'}</span>
+                                {r.next
+                                    ? <Pill label={`পরের পোস্ট ${formatDate(r.next)}`} bg="rgba(22,163,74,0.1)" color="#16A34A" />
+                                    : (r.since === null || r.since >= 30) && <Pill label="প্ল্যানে নেই" bg="rgba(220,38,38,0.1)" color="#DC2626" />}
+                                <span>· এ মাসে {bn(r.month)}টা</span>
+                                {r.orders > 0 && <span>· মোট অর্ডার {bn(r.orders)}</span>}
+                                {!r.inCat && <Pill label="তালিকায় নেই" bg="var(--color-surface-secondary, #F1F5F9)" color="var(--color-text-secondary)" />}
+                            </div>
+                        </div>
+                        <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none', whiteSpace: 'nowrap' }} onClick={() => onAddContent(r.code, r.name)}>+ কন্টেন্ট</button>
+                    </div>
+                ))}
+            </motion.div>
+        </>
+    )
+}
+
 // ================= Settings =================
-function SettingsView({ channels, types, team, isSuperAdmin, onAddChannel, onEditChannel, toggleChannelActive, deleteChannel, onAddType, onEditType, deleteType, toggleTeamRole }: {
+function SettingsView({ channels, types, team, isSuperAdmin, onAddChannel, onEditChannel, toggleChannelActive, deleteChannel, onAddType, onEditType, deleteType, toggleTeamRole, toggleTeamActive }: {
     channels: Channel[]; types: PostType[]; team: TeamMember[]; isSuperAdmin: boolean
     onAddChannel: () => void; onEditChannel: (c: Channel) => void; toggleChannelActive: (c: Channel) => void; deleteChannel: (c: Channel) => void
     onAddType: () => void; onEditType: (t: PostType) => void; deleteType: (t: PostType) => void
-    toggleTeamRole: (m: TeamMember, role: string) => void
+    toggleTeamRole: (m: TeamMember, role: string) => void; toggleTeamActive: (m: TeamMember) => void
 }) {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -1715,7 +2005,7 @@ function SettingsView({ channels, types, team, isSuperAdmin, onAddChannel, onEdi
                             </div>
                             <button className="btn btn-ghost btn-sm" onClick={() => onEditChannel(c)}>এডিট</button>
                             <button className="btn btn-ghost btn-sm" onClick={() => toggleChannelActive(c)}>{c.active ? 'বন্ধ করুন' : 'চালু করুন'}</button>
-                            {!Number(c.slot_count) && <button className="btn btn-ghost btn-sm" style={{ color: '#DC2626' }} onClick={() => deleteChannel(c)}>মুছুন</button>}
+                            <button className="btn btn-ghost btn-sm" style={{ color: '#DC2626' }} onClick={() => deleteChannel(c)}>মুছুন</button>
                         </div>
                     )
                 })}
@@ -1743,16 +2033,17 @@ function SettingsView({ channels, types, team, isSuperAdmin, onAddChannel, onEdi
                 <h3 style={{ fontSize: '1.0625rem', marginBottom: 6 }}>টিমের দায়িত্ব</h3>
                 <p className="hint" style={{ margin: '0 0 10px', fontSize: '0.8125rem' }}>প্রত্যেকে কী কাজ করেন বেছে নিন। যার হাতে কাজ সবচেয়ে কম, অটো তাঁর কাছে যাবে।</p>
                 {team.map(m => (
-                    <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--color-border-light)', flexWrap: 'wrap' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 160 }}>{avatar(m.name, m.avatar_url, 24)}<b style={{ fontSize: '0.875rem' }}>{m.name}</b></span>
-                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--color-border-light)', flexWrap: 'wrap', opacity: m.active ? 1 : 0.55 }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 160 }}>{avatar(m.name, m.avatar_url, 24)}<b style={{ fontSize: '0.875rem' }}>{m.name}</b>{!m.active && <span className="hint" style={{ fontSize: '0.75rem' }}>বন্ধ আছে</span>}</span>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', flex: 1 }}>
                             {CONTENT_ROLES.map(r => (
                                 <button key={r.key} onClick={() => toggleTeamRole(m, r.key)}
-                                    style={{ padding: '3px 9px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: m.roles.includes(r.key) ? 'var(--color-text-primary)' : 'var(--color-surface)', color: m.roles.includes(r.key) ? 'var(--color-bg-primary)' : undefined }}>
+                                    style={{ flex: 1, minWidth: 90, padding: '3px 9px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600, textAlign: 'center', border: '1px solid var(--color-border-light)', background: m.roles.includes(r.key) ? 'var(--color-text-primary)' : 'var(--color-surface)', color: m.roles.includes(r.key) ? 'var(--color-bg-primary)' : undefined }}>
                                     {r.label}
                                 </button>
                             ))}
                         </div>
+                        <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => toggleTeamActive(m)}>{m.active ? 'বন্ধ করুন' : 'চালু করুন'}</button>
                     </div>
                 ))}
                 {!isSuperAdmin && <p className="hint" style={{ marginTop: 8 }}>যেকোনো কর্মী এটা পরিবর্তন করতে পারেন — এটা শুধু ঠিক করে কাকে অটো দায়িত্ব দেওয়া হবে।</p>}
@@ -1770,8 +2061,14 @@ function ItemModal({ editing, setEditing, types, channels, team, occasions, onCl
     onAddComment: (text: string, byId: string) => void; onToggleComment: (id: string) => void
     onCopyCaption: (i: ContentItem, s: Slot) => void
 }) {
+    const activeTeam = team.filter(m => m.active)
+    // Keeps an already-assigned member visible/selectable even after they're deactivated,
+    // instead of silently dropping them off the editing item.
+    const assigneeOptions = editing.assignee && !activeTeam.some(m => m.id === editing.assignee!.id)
+        ? [...activeTeam, ...team.filter(m => m.id === editing.assignee!.id)]
+        : activeTeam
     const [commentText, setCommentText] = useState('')
-    const [commentBy, setCommentBy] = useState(team[0]?.id || '')
+    const [commentBy, setCommentBy] = useState(activeTeam[0]?.id || '')
     const isEdit = !!editing.id
     const selectedType = editing.type
     const byPlatform: Record<Platform, Channel[]> = { facebook: [], instagram: [], tiktok: [], youtube: [] }
@@ -1886,7 +2183,7 @@ function ItemModal({ editing, setEditing, types, channels, team, occasions, onCl
                             </div>
                             <select className="form-input" value={editing.assignee?.id || ''} onChange={e => { const m = team.find(x => x.id === e.target.value); setEditing({ ...editing, assignee: m ? { id: m.id, name: m.name } : null }) }}>
                                 <option value="">— বেছে নিন —</option>
-                                {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                {assigneeOptions.map(m => <option key={m.id} value={m.id}>{m.name}{!m.active ? ' (বন্ধ)' : ''}</option>)}
                             </select>
                         </div>
                     )}
@@ -1919,7 +2216,7 @@ function ItemModal({ editing, setEditing, types, channels, team, occasions, onCl
                             ))}
                             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                                 <select className="form-input" style={{ width: 140 }} value={commentBy} onChange={e => setCommentBy(e.target.value)}>
-                                    {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                                    {activeTeam.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                                 </select>
                                 <input className="form-input" placeholder="মন্তব্য লিখুন" value={commentText} onChange={e => setCommentText(e.target.value)} />
                                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => { onAddComment(commentText, commentBy); setCommentText('') }}>যোগ করুন</button>

@@ -381,7 +381,7 @@ model employees {
   content_calendar_items_created_byToemployees                           content_calendar_items[]  @relation("content_calendar_items_created_byToemployees")
   content_calendar_stage_logs                                            content_calendar_stage_logs[]
   content_calendar_comments                                              content_calendar_comments[]
-  content_calendar_ideas                                                 content_calendar_ideas[]
+  content_calendar_post_submissions                                      content_calendar_post_submissions[]
   content_calendar_member_targets                                        content_calendar_member_targets[]
   courier_issues_courier_issues_call_peekToemployees                     courier_issues[]          @relation("courier_issues_call_peekToemployees")
   courier_issues_courier_issues_management_checkToemployees              courier_issues[]          @relation("courier_issues_management_checkToemployees")
@@ -1155,7 +1155,6 @@ model content_calendar_types {
   sort_order        Int                      @default(0)
   created_at        DateTime?                @default(now()) @db.Timestamptz(6)
   items             content_calendar_items[]
-  ideas             content_calendar_ideas[]
   series            content_calendar_series[]
 }
 
@@ -1164,6 +1163,7 @@ model content_calendar_types {
 model content_calendar_team_roles {
   employee_id String    @id @db.Uuid
   roles       String[]  @default([])
+  active      Boolean   @default(true)
   created_at  DateTime? @default(now()) @db.Timestamptz(6)
   employees   employees @relation(fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 }
@@ -1193,6 +1193,7 @@ model content_calendar_items {
   slots         content_calendar_slots[]
   stage_logs    content_calendar_stage_logs[]
   comments      content_calendar_comments[]
+  post_submissions content_calendar_post_submissions[]
 
   @@index([type_id])
   @@index([assignee_id])
@@ -1235,20 +1236,26 @@ model content_calendar_occasions {
   @@index([date])
 }
 
-// Ideas with no date yet — parked here until someone picks a date and turns one into an
-// actual content item (see "তারিখে বসান" / use-idea flow), at which point the idea is deleted.
-model content_calendar_ideas {
-  id             String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  title          String
-  type_id        String?                  @db.Uuid
-  product_code   String?
-  by_employee_id String?                  @db.Uuid
-  notes          String?
-  created_at     DateTime?                @default(now()) @db.Timestamptz(6)
-  type           content_calendar_types?  @relation(fields: [type_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  by_employee    employees?               @relation(fields: [by_employee_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+// Anyone on the team can submit a written post or a loose idea here (status 'pending' or
+// 'idea'). A scheduler reviews it and either turns it into a real content item (status
+// 'scheduled', scheduled_item_id set) or sends it back with a note (status 'returned') — see
+// the "পোস্ট ব্যাংক" tab. `type_text` is free text, not a real post type: the scheduler still
+// picks an actual type from content_calendar_types when scheduling it.
+model content_calendar_post_submissions {
+  id                 String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title              String
+  type_text          String?
+  caption            String?
+  by_employee_id     String?                  @db.Uuid
+  status             String                   @default("idea") // pending | idea | returned | scheduled
+  return_note        String?
+  scheduled_item_id  String?                  @db.Uuid
+  created_at         DateTime?                @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?                @default(now()) @db.Timestamptz(6)
+  by_employee        employees?               @relation(fields: [by_employee_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  scheduled_item      content_calendar_items? @relation(fields: [scheduled_item_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
-  @@index([type_id])
+  @@index([status])
 }
 
 // One row per channel a content item posts to — its own date (auto-rotated `gap_days` apart
@@ -1321,4 +1328,14 @@ model content_calendar_member_targets {
   employees   employees  @relation(fields: [employee_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([employee_id, month])
+}
+
+// A simple pasted-in product catalog (code | name | category) — purely for matching against
+// content_calendar_items.product_code to show which products haven't been featured in a while.
+// No FK to items; the join is by matching the free-text code, same as the rest of this page.
+model content_calendar_products {
+  code       String    @id
+  name       String?
+  cat        String?
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
 }

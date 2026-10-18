@@ -7,7 +7,7 @@ export async function autoAssignEmployee(db: Pool | PoolClient, role: string, ex
     const { rows } = await db.query(
         `SELECT e.id FROM content_calendar_team_roles r
          JOIN employees e ON e.id = r.employee_id
-         WHERE $1 = ANY(r.roles)
+         WHERE $1 = ANY(r.roles) AND r.active IS NOT FALSE
          ORDER BY (
              SELECT count(*) FROM content_calendar_items i
              WHERE i.assignee_id = e.id AND i.stage <> 'ready' AND i.id IS DISTINCT FROM $2::uuid
