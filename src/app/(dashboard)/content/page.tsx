@@ -12,13 +12,14 @@ import {
     type Stage, type Kind, type Platform,
 } from '@/lib/contentCalendar'
 import {
-    IconPlus, IconX, IconChevronLeft, IconChevronRight,
+    IconPlus, IconX, IconChevronLeft, IconChevronRight, IconCamera,
     IconCalendar, IconLayers, IconUsers, IconWrench, IconClipboard, IconFacebook,
     IconInstagram, IconTikTok, IconYouTube, IconGlobe, IconTarget, IconLightbulb, IconClock, IconTrendingUp, IconBarChart3, IconPackage, IconSearch,
 } from '@/components/icons/Icons'
 
 // ---------- Types ----------
 interface Channel { id: string; name: string; platform: Platform; photo_url: string | null; upload_link: string | null; active: boolean; sort_order: number; slot_count?: string }
+type ChannelDraft = { name: string; platform: Platform; upload_link: string; photo_url: string }
 interface PostType { id: string; name: string; kind: Kind; caption_template: string | null; sort_order: number; item_count?: string }
 interface TeamMember { id: string; name: string; avatar_url: string | null; roles: string[]; active: boolean }
 interface Slot { id?: string; channel_id: string; date: string; posted: boolean; hook: string | null; reach: number | null; msgs: number | null; orders: number | null }
@@ -128,6 +129,35 @@ function avatar(name: string, url: string | null, size = 24) {
         ? <img src={url} alt="" style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
         : <span style={{ width: size, height: size, borderRadius: '50%', background: getAvatarColor(name || 'U'), color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.42, fontWeight: 700, flexShrink: 0 }}>{(name || 'U')[0]?.toUpperCase()}</span>
 }
+// A channel's platform-icon avatar with a small camera badge that opens a file picker and
+// hands the chosen file to onUpload — used in Settings for both saved channels and the draft row.
+// Clicking the photo itself (when there is one) opens a full-size zoom overlay instead of
+// re-triggering the upload picker, so the camera badge is the only way to change it.
+function ChannelAvatar({ photoUrl, platform, onUpload, size = 60 }: { photoUrl: string | null | undefined; platform: Platform; onUpload: (file: File) => void; size?: number }) {
+    const Icon = PLATFORM_ICON[platform]
+    const [zoomed, setZoomed] = useState(false)
+    return (
+        <>
+            <div style={{ position: 'relative', width: size, height: size, borderRadius: '50%', background: PLATFORM_COLOR[platform], color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
+                {photoUrl
+                    ? <img src={photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in' }} onClick={() => setZoomed(true)} />
+                    : <Icon size={size * 0.45} />}
+                <label style={{ position: 'absolute', bottom: -2, right: -2, width: 20, height: 20, borderRadius: '50%', background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', cursor: 'pointer' }} title="ছবি আপলোড করুন">
+                    <IconCamera size={12} />
+                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = '' }} />
+                </label>
+            </div>
+            <AnimatePresence>
+                {zoomed && photoUrl && (
+                    <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ cursor: 'zoom-out' }} onClick={() => setZoomed(false)}>
+                        <motion.img src={photoUrl} alt="" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                            style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 12, objectFit: 'contain' }} onClick={e => e.stopPropagation()} />
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </>
+    )
+}
 function stagePillStyle(phase: string): { bg: string; color: string } {
     if (phase === 'done') return { bg: 'rgba(22,163,74,0.1)', color: '#16A34A' }
     if (phase === 'ready') return { bg: 'rgba(37,99,235,0.1)', color: '#2563EB' }
@@ -172,8 +202,7 @@ export default function ContentCalendarPage() {
     const [targetDraft, setTargetDraft] = useState<{ channels: Record<string, { posts: string; videos: string }>; members: Record<string, string> }>({ channels: {}, members: {} })
 
     const [editing, setEditing] = useState<EditingItem | null>(null)
-    const [showChannelModal, setShowChannelModal] = useState(false)
-    const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
+    const [newChannelDraft, setNewChannelDraft] = useState<ChannelDraft | null>(null)
     const [showTypeModal, setShowTypeModal] = useState(false)
     const [editingType, setEditingType] = useState<PostType | null>(null)
     const [occEdit, setOccEdit] = useState<{ id?: string; name: string; date: string; lead_days: string; target: string; notes: string } | null>(null)
@@ -377,16 +406,18 @@ export default function ContentCalendarPage() {
     }
 
     // ---------- Settings: channels/types/team mutations ----------
-    async function saveChannel(data: { id?: string; name: string; platform: Platform; upload_link: string }) {
+    async function saveNewChannel() {
+        if (!newChannelDraft || !newChannelDraft.name.trim()) { toast.error('চ্যানেলের নাম দিন'); return }
         const res = await fetch('/api/content-calendar/channels', {
-            method: data.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newChannelDraft.name.trim(), platform: newChannelDraft.platform, upload_link: newChannelDraft.upload_link.trim(), photo_url: newChannelDraft.photo_url }),
         })
         if (res.ok) {
             const row = await res.json()
-            setChannels(prev => data.id ? prev.map(c => c.id === row.id ? { ...c, ...row } : c) : [...prev, row])
-            setShowChannelModal(false); setEditingChannel(null); toast.success('চ্যানেল সেভ হয়েছে')
-        } else toast.error((await res.json()).error || 'চ্যানেল সেভ করা যায়নি')
+            setChannels(prev => [...prev, row])
+            setNewChannelDraft(null)
+            toast.success('চ্যানেল যোগ হয়েছে')
+        } else toast.error((await res.json()).error || 'চ্যানেল যোগ করা যায়নি')
     }
     async function toggleChannelActive(c: Channel) {
         const res = await fetch('/api/content-calendar/channels', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id, active: !c.active }) })
@@ -397,6 +428,44 @@ export default function ContentCalendarPage() {
         const res = await fetch(`/api/content-calendar/channels?id=${c.id}`, { method: 'DELETE' })
         if (res.ok) { setChannels(prev => prev.filter(x => x.id !== c.id)); toast.success('চ্যানেল মুছে ফেলা হয়েছে') }
         else toast.error((await res.json()).error || 'মুছে ফেলা যায়নি')
+    }
+    // Inline-editable name/upload-link/photo fields in Settings — saves on blur (or right after
+    // upload, for the photo), reverting the local value if the server rejects it (empty name, or
+    // a link that isn't https://).
+    async function saveChannelField(c: Channel, field: 'name' | 'upload_link' | 'photo_url', value: string) {
+        const res = await fetch('/api/content-calendar/channels', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id, [field]: value }) })
+        if (res.ok) {
+            const row = await res.json()
+            setChannels(prev => prev.map(x => x.id === c.id ? { ...x, ...row } : x))
+        } else {
+            toast.error((await res.json()).error || 'সেভ করা যায়নি')
+            setChannels(prev => prev.map(x => x.id === c.id ? { ...x, [field]: c[field] } : x))
+        }
+    }
+    async function reorderChannel(c: Channel, direction: -1 | 1) {
+        const group = channels.filter(x => x.platform === c.platform).sort((a, b) => a.sort_order - b.sort_order)
+        const idx = group.findIndex(x => x.id === c.id)
+        const other = group[idx + direction]
+        if (!other) return
+        const [aOrder, bOrder] = [c.sort_order, other.sort_order]
+        setChannels(prev => prev.map(x => x.id === c.id ? { ...x, sort_order: bOrder } : x.id === other.id ? { ...x, sort_order: aOrder } : x))
+        await Promise.all([
+            fetch('/api/content-calendar/channels', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id, sort_order: bOrder }) }),
+            fetch('/api/content-calendar/channels', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: other.id, sort_order: aOrder }) }),
+        ])
+    }
+    // Uploads a channel's profile picture. For an existing channel it saves photo_url right
+    // after upload; for the not-yet-created draft row it just updates the local draft, and
+    // the URL goes out with the rest of the fields when the draft is saved.
+    async function uploadChannelPhoto(c: Channel | null, file: File) {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('bucket', 'channels')
+        const res = await fetch('/api/upload', { method: 'POST', body: formData })
+        if (!res.ok) { toast.error((await res.json()).error || 'ছবি আপলোড করা যায়নি'); return }
+        const { url } = await res.json()
+        if (c) saveChannelField(c, 'photo_url', url)
+        else setNewChannelDraft(prev => prev ? { ...prev, photo_url: url } : prev)
     }
     async function saveType(data: { id?: string; name: string; kind: Kind; caption_template: string }) {
         const res = await fetch('/api/content-calendar/types', {
@@ -703,9 +772,8 @@ export default function ContentCalendarPage() {
                         {view === 'settings' && (
                             <SettingsView {...{
                                 channels, types, team, isSuperAdmin,
-                                onAddChannel: () => { setEditingChannel(null); setShowChannelModal(true) },
-                                onEditChannel: (c: Channel) => { setEditingChannel(c); setShowChannelModal(true) },
-                                toggleChannelActive, deleteChannel,
+                                newChannelDraft, setNewChannelDraft, onSaveNewChannel: saveNewChannel,
+                                toggleChannelActive, deleteChannel, saveChannelField, reorderChannel, uploadChannelPhoto,
                                 onAddType: () => { setEditingType(null); setShowTypeModal(true) },
                                 onEditType: (t: PostType) => { setEditingType(t); setShowTypeModal(true) },
                                 deleteType, toggleTeamRole, toggleTeamActive,
@@ -725,11 +793,6 @@ export default function ContentCalendarPage() {
                     )}
                 </AnimatePresence>
 
-                <AnimatePresence>
-                    {showChannelModal && (
-                        <ChannelModal channel={editingChannel} onClose={() => { setShowChannelModal(false); setEditingChannel(null) }} onSave={saveChannel} />
-                    )}
-                </AnimatePresence>
                 <AnimatePresence>
                     {showTypeModal && (
                         <TypeModal type={editingType} onClose={() => { setShowTypeModal(false); setEditingType(null) }} onSave={saveType} />
@@ -1980,35 +2043,86 @@ function ProductsView({ items, products, monthStart, monthEnd, todayStr, showEdi
 }
 
 // ================= Settings =================
-function SettingsView({ channels, types, team, isSuperAdmin, onAddChannel, onEditChannel, toggleChannelActive, deleteChannel, onAddType, onEditType, deleteType, toggleTeamRole, toggleTeamActive }: {
+function SettingsView({ channels, types, team, isSuperAdmin, newChannelDraft, setNewChannelDraft, onSaveNewChannel, toggleChannelActive, deleteChannel, saveChannelField, reorderChannel, uploadChannelPhoto, onAddType, onEditType, deleteType, toggleTeamRole, toggleTeamActive }: {
     channels: Channel[]; types: PostType[]; team: TeamMember[]; isSuperAdmin: boolean
-    onAddChannel: () => void; onEditChannel: (c: Channel) => void; toggleChannelActive: (c: Channel) => void; deleteChannel: (c: Channel) => void
+    newChannelDraft: ChannelDraft | null
+    setNewChannelDraft: (d: ChannelDraft | null) => void; onSaveNewChannel: () => void
+    toggleChannelActive: (c: Channel) => void; deleteChannel: (c: Channel) => void
+    saveChannelField: (c: Channel, field: 'name' | 'upload_link' | 'photo_url', value: string) => void; reorderChannel: (c: Channel, direction: -1 | 1) => void
+    uploadChannelPhoto: (c: Channel | null, file: File) => void
     onAddType: () => void; onEditType: (t: PostType) => void; deleteType: (t: PostType) => void
     toggleTeamRole: (m: TeamMember, role: string) => void; toggleTeamActive: (m: TeamMember) => void
 }) {
+    const activeChannelCount = channels.filter(c => c.active).length
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <motion.div variants={item_} className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                     <h3 style={{ fontSize: '1.0625rem' }}>চ্যানেল</h3>
-                    <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={onAddChannel}><IconPlus size={14} /> চ্যানেল যোগ করুন</button>
+                    <span className="hint" style={{ fontSize: '0.8125rem' }}>{bn(activeChannelCount)}টা চালু</span>
                 </div>
-                <p className="hint" style={{ margin: '0 0 10px', fontSize: '0.8125rem' }}>চ্যানেল শুধু সংগঠনের জন্য নাম — নাম, প্ল্যাটফর্ম আর ঐচ্ছিক একটা লিংক (যেমন Meta Business Suite)। পোস্ট করা অটো হয় না।</p>
+                <p className="hint" style={{ margin: '0 0 10px', fontSize: '0.8125rem' }}>আপনার প্রতিটি পেজ ও অ্যাকাউন্টের আসল নাম, প্ল্যাটফর্ম আর প্রোফাইল ছবি দিন। লিংকে চাপ দিয়ে বদলান। একই প্ল্যাটফর্মের চ্যানেলগুলোতে পোস্ট পালা করে যায়, তাই ↑ ↓ দিয়ে ক্রম ঠিক করুন। যে চ্যানেলে পোস্ট আছে সেটা মোছা যায় না, &quot;বন্ধ&quot; করে রাখা যায়।</p>
                 {channels.map(c => {
-                    const Icon = PLATFORM_ICON[c.platform]
+                    const group = channels.filter(x => x.platform === c.platform)
+                    const posInGroup = group.findIndex(x => x.id === c.id)
                     return (
-                        <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--color-border-light)', opacity: c.active ? 1 : 0.55 }}>
-                            <span style={{ color: PLATFORM_COLOR[c.platform] }}><Icon size={18} /></span>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <b style={{ fontSize: '0.875rem' }}>{c.name}</b>
-                                <div className="hint" style={{ fontSize: '0.75rem' }}>{PLATFORM_LABEL[c.platform]}{Number(c.slot_count) > 0 ? ` · ${c.slot_count} পোস্ট` : ''}{!c.active ? ' · বন্ধ আছে' : ''}</div>
+                        <div key={c.id} style={{ border: '1px solid var(--color-border-light)', borderRadius: 10, padding: 10, marginBottom: 10, opacity: c.active ? 1 : 0.55 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', gridTemplateRows: 'auto auto', gap: 8, alignItems: 'center' }}>
+                                <div style={{ gridRow: '1 / 3' }}>
+                                    <ChannelAvatar photoUrl={c.photo_url} platform={c.platform} onUpload={file => uploadChannelPhoto(c, file)} />
+                                </div>
+                                <input className="form-input" style={{ gridColumn: 2, gridRow: 1 }} defaultValue={c.name} key={c.id + c.name}
+                                    onBlur={e => { const v = e.target.value.trim(); if (v && v !== c.name) saveChannelField(c, 'name', v); else e.target.value = c.name }} />
+                                <select className="form-input" style={{ gridColumn: 3, gridRow: 1, width: 140 }} value={c.platform} disabled>
+                                    <option value={c.platform}>{PLATFORM_LABEL[c.platform]}</option>
+                                </select>
+                                <button className="btn btn-ghost btn-icon" style={{ gridColumn: 4, gridRow: 1 }} disabled={posInGroup === 0} onClick={() => reorderChannel(c, -1)} title="উপরে সরান">↑</button>
+                                <input className="form-input" style={{ gridColumn: '2 / 4', gridRow: 2 }} defaultValue={c.upload_link || ''} key={c.id + (c.upload_link || '')} placeholder="আপলোড লিংক (ঐচ্ছিক) — যেমন এই পেজের Business Suite লিংক"
+                                    onBlur={e => { const v = e.target.value.trim(); if (v !== (c.upload_link || '')) saveChannelField(c, 'upload_link', v) }} />
+                                <button className="btn btn-ghost btn-icon" style={{ gridColumn: 4, gridRow: 2 }} disabled={posInGroup === group.length - 1} onClick={() => reorderChannel(c, 1)} title="নিচে সরান">↓</button>
                             </div>
-                            <button className="btn btn-ghost btn-sm" onClick={() => onEditChannel(c)}>এডিট</button>
-                            <button className="btn btn-ghost btn-sm" onClick={() => toggleChannelActive(c)}>{c.active ? 'বন্ধ করুন' : 'চালু করুন'}</button>
-                            <button className="btn btn-ghost btn-sm" style={{ color: '#DC2626' }} onClick={() => deleteChannel(c)}>মুছুন</button>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                                <span className="hint" style={{ fontSize: '0.8125rem' }}>{Number(c.slot_count) > 0 ? `${bn(Number(c.slot_count))}টা পোস্ট` : 'কোনো পোস্ট নেই'}{!c.active ? ' · বন্ধ আছে' : ''}</span>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                    <button className="btn btn-ghost btn-sm" onClick={() => toggleChannelActive(c)}>{c.active ? 'বন্ধ করুন' : 'চালু করুন'}</button>
+                                    <button className="btn btn-ghost btn-sm" style={{ color: '#DC2626' }} onClick={() => deleteChannel(c)}>মুছুন</button>
+                                </div>
+                            </div>
                         </div>
                     )
                 })}
+                {newChannelDraft && (
+                    <div style={{ border: '2px solid #B0175A', borderRadius: 10, padding: 10, marginBottom: 10 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gridTemplateRows: 'auto auto', gap: 8, alignItems: 'center' }}>
+                            <div style={{ gridRow: '1 / 3' }}>
+                                <ChannelAvatar photoUrl={newChannelDraft.photo_url} platform={newChannelDraft.platform} onUpload={file => uploadChannelPhoto(null, file)} />
+                            </div>
+                            <input className="form-input" style={{ gridColumn: 2, gridRow: 1 }} autoFocus value={newChannelDraft.name} placeholder="চ্যানেলের নাম"
+                                onChange={e => setNewChannelDraft({ ...newChannelDraft, name: e.target.value })} />
+                            <select className="form-input" style={{ gridColumn: 3, gridRow: 1, width: 140 }} value={newChannelDraft.platform}
+                                onChange={e => setNewChannelDraft({ ...newChannelDraft, platform: e.target.value as Platform })}>
+                                {PLATFORMS.map(p => <option key={p} value={p}>{PLATFORM_LABEL[p]}</option>)}
+                            </select>
+                            <input className="form-input" style={{ gridColumn: '2 / 4', gridRow: 2 }} value={newChannelDraft.upload_link} placeholder="আপলোড লিংক (ঐচ্ছিক) — যেমন এই পেজের Business Suite লিংক"
+                                onChange={e => setNewChannelDraft({ ...newChannelDraft, upload_link: e.target.value })} />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                            <span className="hint" style={{ fontSize: '0.8125rem' }}>এখনো কোনো পোস্ট নেই</span>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setNewChannelDraft(null)}>✕ বাতিল</button>
+                        </div>
+                    </div>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    {!newChannelDraft && (
+                        <button className="btn btn-secondary btn-sm" onClick={() => setNewChannelDraft({ name: '', platform: 'facebook', upload_link: '', photo_url: '' })}><IconPlus size={14} /> নতুন চ্যানেল</button>
+                    )}
+                    {newChannelDraft && (
+                        <>
+                            <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} disabled={!newChannelDraft.name.trim()} onClick={onSaveNewChannel}>চ্যানেল সেভ করুন</button>
+                            <span className="hint" style={{ fontSize: '0.8125rem' }}>সেভ করা হয়নি এমন পরিবর্তন আছে</span>
+                        </>
+                    )}
+                </div>
             </motion.div>
 
             <motion.div variants={item_} className="card">
@@ -2235,32 +2349,7 @@ function ItemModal({ editing, setEditing, types, channels, team, occasions, onCl
     )
 }
 
-// ================= Channel / Type modals =================
-function ChannelModal({ channel, onClose, onSave }: { channel: Channel | null; onClose: () => void; onSave: (d: { id?: string; name: string; platform: Platform; upload_link: string }) => void }) {
-    const [name, setName] = useState(channel?.name || '')
-    const [platform, setPlatform] = useState<Platform>(channel?.platform || 'facebook')
-    const [uploadLink, setUploadLink] = useState(channel?.upload_link || '')
-    return (
-        <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
-            <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} onClick={e => e.stopPropagation()} style={{ maxWidth: 420, width: '100%' }}>
-                <div className="modal-header"><h2 className="modal-title">{channel ? 'চ্যানেল এডিট' : 'চ্যানেল যোগ করুন'}</h2><button className="btn btn-ghost btn-sm" onClick={onClose}><IconX size={18} /></button></div>
-                <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div className="form-group"><label className="form-label">নাম *</label><input className="form-input" value={name} onChange={e => setName(e.target.value)} placeholder="যেমন: Facebook পেজ ২" /></div>
-                    <div className="form-group">
-                        <label className="form-label">প্ল্যাটফর্ম *</label>
-                        <select className="form-input" value={platform} onChange={e => setPlatform(e.target.value as Platform)}>{PLATFORMS.map(p => <option key={p} value={p}>{PLATFORM_LABEL[p]}</option>)}</select>
-                    </div>
-                    <div className="form-group"><label className="form-label">আপলোড লিংক (ঐচ্ছিক)</label><input className="form-input" value={uploadLink} onChange={e => setUploadLink(e.target.value)} placeholder="https://…" /></div>
-                </div>
-                <div className="modal-footer">
-                    <button className="btn btn-secondary btn-sm" onClick={onClose}>বাতিল</button>
-                    <button className="btn btn-primary btn-sm" disabled={!name.trim()} onClick={() => onSave({ id: channel?.id, name: name.trim(), platform, upload_link: uploadLink.trim() })}>সেভ করুন</button>
-                </div>
-            </motion.div>
-        </motion.div>
-    )
-}
-
+// ================= Type modal =================
 function TypeModal({ type, onClose, onSave }: { type: PostType | null; onClose: () => void; onSave: (d: { id?: string; name: string; kind: Kind; caption_template: string }) => void }) {
     const [name, setName] = useState(type?.name || '')
     const [kind, setKind] = useState<Kind>(type?.kind || 'video')
