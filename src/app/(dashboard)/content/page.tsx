@@ -920,11 +920,10 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
             <button key={ds} onClick={() => setSelectedDate(ds)}
                 style={{
                     minHeight: 58, padding: '4px 5px', borderRadius: 8, textAlign: 'left', cursor: 'pointer',
-                    background: isToday ? '#B0175A' : isPast ? 'var(--color-surface-secondary, #F8FAFC)' : 'var(--color-border-light, #E2E8F0)',
-                    border: isSel ? '2px solid var(--color-text-primary)' : isPast ? '1px solid var(--color-border-light)' : '1px solid var(--color-border)',
+                    background: isToday ? '#B0175A' : isPast ? 'var(--color-bg-tertiary, #E2E8F0)' : 'var(--color-surface)',
+                    border: isSel ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)',
                     boxShadow: lead ? 'inset 0 3px 0 #6A3FC8' : undefined,
-                    opacity: isPast && !isToday ? 0.5 : 1,
-                    color: isToday ? '#fff' : undefined, display: 'flex', flexDirection: 'column', gap: 2,
+                    color: isToday ? '#fff' : 'var(--color-text-primary)', display: 'flex', flexDirection: 'column', gap: 2,
                 }}>
                 <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 700, fontSize: '0.875rem' }}>
                     {d}{dotColor && <span style={{ width: 7, height: 7, borderRadius: '50%', background: isToday ? '#fff' : dotColor, display: 'inline-block' }} />}
@@ -936,6 +935,7 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
     }
 
     const dayList = slotsInRange(selectedDate, selectedDate)
+    const leadOccasion = occasions.find(o => selectedDate < o.date && daysBetween(selectedDate, o.date) <= o.lead_days)
 
     return (
         <>
@@ -1018,8 +1018,8 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
 
             <motion.div variants={item_} style={{ display: 'flex', flexWrap: 'wrap', gap: 14, margin: '10px 0 4px', fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 12, height: 12, borderRadius: 3, background: '#B0175A' }} /> আজ</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 12, height: 12, borderRadius: 3, border: '1px solid var(--color-border-light)', opacity: 0.6 }} /> চলে যাওয়া দিন</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 12, height: 12, borderRadius: 3, border: '1px solid var(--color-border)', background: 'var(--color-border-light, #E2E8F0)' }} /> সামনের দিন</span>
+               <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 12, height: 12, borderRadius: 3, border: '1px solid var(--color-border)', background: 'var(--color-border-light, #E2E8F0)' }} /> চলে যাওয়া দিন</span>
+                 <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 12, height: 12, borderRadius: 3, border: '1px solid var(--color-border-light)', opacity: 0.6 }} />সামনের দিন</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 12, height: 3, borderRadius: 2, background: '#6A3FC8' }} /> উপলক্ষের প্রস্তুতি</span>
             </motion.div>
             <motion.div variants={item_} style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 16, fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>
@@ -1033,6 +1033,19 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                     <h3 style={{ fontSize: '1.0625rem', flex: 1, minWidth: 0 }}>{formatDate(selectedDate)}{selectedDate === todayStr ? ' — আজ' : ''}</h3>
                     <button className="btn btn-secondary btn-sm" onClick={() => openAdd(selectedDate)}><IconPlus size={14} /> এই তারিখে নতুন</button>
                 </div>
+                {occasionsOn(selectedDate).map(o => (
+                    <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, background: 'rgba(106,63,200,0.15)', color: '#A78BFA', marginBottom: 10, fontWeight: 600, fontSize: '0.875rem' }}>
+                        <span style={{ width: 20, height: 20, borderRadius: '50%', background: '#DC2626', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <IconTarget size={12} />
+                        </span>
+                        আজ {o.name}
+                    </div>
+                ))}
+                {leadOccasion && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, background: 'rgba(106,63,200,0.1)', color: '#6A3FC8', marginBottom: 10, fontWeight: 600, fontSize: '0.875rem' }}>
+                        🎯 {leadOccasion.name} আসছে — আর {bn(daysBetween(selectedDate, leadOccasion.date))} দিন ({shortDateBn(leadOccasion.date)})
+                    </div>
+                )}
                 {dayList.length === 0 ? (
                     <p className="hint" style={{ color: 'var(--color-text-tertiary)', fontSize: '0.875rem' }}>এই তারিখে কিছু প্ল্যান করা নেই।</p>
                 ) : (
