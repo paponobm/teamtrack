@@ -808,11 +808,11 @@ export default function ContentCalendarPage() {
                         <h1 className="page-title">কন্টেন্ট ক্যালেন্ডার</h1>
                         <p className="page-subtitle">আইডিয়া থেকে পোস্ট হওয়া পর্যন্ত প্রতিটি সোশ্যাল পোস্ট প্ল্যান, দায়িত্ব ও ট্র্যাক করুন।</p>
                     </div>
-                    {view !== 'settings' && (
+                    {/* {view !== 'settings' && (
                         <button className="btn" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={() => openAdd()}>
                             <IconPlus size={16} /> নতুন কন্টেন্ট
                         </button>
-                    )}
+                    )} */}
                 </motion.div>
 
                 <motion.div variants={item_} style={{ display: 'flex', gap: '6px', padding: '6px', width: 'fit-content', borderRadius: '16px', background: 'rgba(118,118,128,0.08)', marginBottom: '20px' }}>
@@ -825,7 +825,9 @@ export default function ContentCalendarPage() {
                             <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 {t.icon}{t.label}
                                 {t.key === 'postbank' && submissions.filter(s => s.status === 'pending').length > 0 && (
-                                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: view === t.key ? '#fff' : '#DC2626', display: 'inline-block' }} />
+                                    <span style={{ minWidth: 18, height: 18, padding: '0 5px', borderRadius: '50%', background: view === t.key ? '#fff' : '#DC2626', color: view === t.key ? '#B0175A' : '#fff', fontSize: '0.6875rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        {bn(submissions.filter(s => s.status === 'pending').length)}
+                                    </span>
                                 )}
                             </span>
                         </button>
@@ -1217,7 +1219,7 @@ function BoardView({ items, team, channelById, month, setMonth, openEdit, advanc
                 </select>
             </motion.div>
             <p className="hint" style={{ margin: '0 0 12px', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>প্রতিটি ধাপের জন্য আলাদা কলাম। প্রতিটি পোস্ট ফরম্যাটের নিজস্ব ধাপ আছে, আর প্রতি ধাপে সঠিক ব্যক্তি অটো দায়িত্ব পান।</p>
-            <motion.div variants={item_} style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
+            <motion.div variants={item_} className="board-scroll" style={{ display: 'flex', gap: 12, overflowX: 'scroll', paddingBottom: 12 }}>
                 {cols.map(c => (
                     <div key={c.key} style={{ flex: '0 0 260px', background: 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 12, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <h3 style={{ fontSize: '0.875rem', display: 'flex', justifyContent: 'space-between' }}>{c.label}<span className="hint" style={monoNum}>{bn(c.items.length)}</span></h3>
@@ -1243,6 +1245,7 @@ function WorkView({ items, team, month, setMonth, workStage, setWorkStage, workP
     openEdit: (i: ContentItem) => void; advanceStage: (i: ContentItem) => void
 }) {
     const active = items.filter(isActivePhase)
+    const todayStr = getLocalDateString()
     const [y, m] = month.split('-').map(Number)
     const logsInMonth = items.flatMap(i => i.logs.map(l => ({ item: i, log: l }))).filter(x => { const d = x.log.at.slice(0, 7); return d === `${y}-${String(m).padStart(2, '0')}` })
 
@@ -1310,29 +1313,44 @@ function WorkView({ items, team, month, setMonth, workStage, setWorkStage, workP
             <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
                 <h3 style={{ fontSize: '1.0625rem', marginBottom: 8 }}>বাকি কাজ — {workPerson ? team.find(m => m.id === workPerson)?.name : 'সবাই'}</h3>
                 {!queue.length && <p className="hint">কোনো কাজ বাকি নেই।</p>}
-                {queue.map(it => (
-                    <div key={it.id} style={{ display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 10, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--color-border-light)' }}>
-                        <div style={{ textAlign: 'center', background: isItemLate(it) ? 'rgba(220,38,38,0.08)' : 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 8, padding: '3px 0' }}>
-                            <b style={{ display: 'block', fontSize: '1rem', ...monoNum }}>{bn(firstDateOf(it).slice(8, 10))}</b><small className="hint" style={monoNum}>{bn(firstDateOf(it).slice(5, 7))}/{bn(firstDateOf(it).slice(0, 4))}</small>
+                {queue.map(it => {
+                    const d = new Date(firstDateOf(it))
+                    const stageStart = (it.stage_since || it.created_at).slice(0, 10)
+                    const daysInStage = Math.max(0, daysBetween(stageStart, todayStr))
+                    return (
+                        <div key={it.id} style={{ display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 10, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--color-border-light)' }}>
+                            <div style={{ textAlign: 'center', background: isItemLate(it) ? 'rgba(220,38,38,0.08)' : 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 8, padding: '3px 0' }}>
+                                <small className="hint" style={{ display: 'block', fontSize: '0.6875rem' }}>{BN_DSHORT[d.getDay()]}</small>
+                                <b style={{ display: 'block', fontSize: '1rem', ...monoNum }}>{bn(d.getDate())}</b>
+                                <small className="hint" style={{ display: 'block', fontSize: '0.6875rem' }}>{BN_MSHORT[d.getMonth()]}</small>
+                            </div>
+                            <div style={{ cursor: 'pointer', minWidth: 0 }} onClick={() => openEdit(it)}>
+                                <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{it.title}</div>
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginTop: 2 }}>
+                                    <Pill label={STAGE_INFO[it.stage as Stage]?.label} {...stagePillStyle(phaseOf(it))} />
+                                    <span>{it.type.name}</span>
+                                    {!workPerson && it.assignee && <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>{avatar(it.assignee.name, null, 16)}{it.assignee.name}</span>}
+                                    <span>· এই ধাপে {bn(daysInStage)} দিন</span>
+                                </div>
+                            </div>
+                            {nextStageOf(it.type.kind, it.stage) && (
+                                <button className="btn btn-sm" style={{ background: 'rgba(176,23,90,0.1)', color: '#B0175A', border: 'none' }} onClick={() => advanceStage(it)}>{STAGE_INFO[it.stage as Stage].label} শেষ →</button>
+                            )}
                         </div>
-                        <div style={{ cursor: 'pointer', minWidth: 0 }} onClick={() => openEdit(it)}>
-                            <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{it.title}</div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)' }}>{STAGE_INFO[it.stage as Stage]?.label} · {it.type.name}{!workPerson && it.assignee ? ` · ${it.assignee.name}` : ''}</div>
-                        </div>
-                        {nextStageOf(it.type.kind, it.stage) && (
-                            <button className="btn btn-sm" style={{ background: 'rgba(176,23,90,0.1)', color: '#B0175A', border: 'none' }} onClick={() => advanceStage(it)}>{STAGE_INFO[it.stage as Stage].label} শেষ →</button>
-                        )}
-                    </div>
-                ))}
+                    )
+                })}
             </motion.div>
 
             <motion.div variants={item_} className="card">
-                <h3 style={{ fontSize: '1.0625rem', marginBottom: 8 }}>এ মাসে শেষ করা কাজ — {workPerson ? team.find(m => m.id === workPerson)?.name : 'সবাই'}</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <h3 style={{ fontSize: '1.0625rem' }}>এ মাসে শেষ করা কাজ — {workPerson ? team.find(m => m.id === workPerson)?.name : 'সবাই'}</h3>
+                    <span className="hint">{bn(finished.length)}টা ধাপ শেষ</span>
+                </div>
                 {!finished.length && <p className="hint">এখনো কিছু রেকর্ড হয়নি।</p>}
                 {finished.map((x, k) => (
-                    <div key={k} style={{ display: 'grid', gridTemplateColumns: '70px 1fr auto', gap: 10, padding: '6px 0', borderTop: '1px solid var(--color-border-light)', alignItems: 'center', fontSize: '0.875rem' }}>
-                        <span className="hint">{formatDate(x.log.at.slice(0, 10))}</span>
-                        <span style={{ cursor: 'pointer' }} onClick={() => openEdit(x.item)}>{x.item.title}</span>
+                    <div key={k} style={{ display: 'grid', gridTemplateColumns: '90px 1fr auto', gap: 10, padding: '6px 0', borderTop: '1px solid var(--color-border-light)', alignItems: 'center', fontSize: '0.875rem' }}>
+                        <span className="hint">{shortDateBn(x.log.at.slice(0, 10))}</span>
+                        <b style={{ cursor: 'pointer', fontWeight: 600 }} onClick={() => openEdit(x.item)}>{x.item.title}</b>
                         <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Pill label={STAGE_INFO[x.log.stage as Stage]?.label || x.log.stage} bg="rgba(22,163,74,0.1)" color="#16A34A" />{!workPerson && x.log.by && <span className="hint">{x.log.by}</span>}</span>
                     </div>
                 ))}
@@ -1557,7 +1575,7 @@ function PostBankView({ submissions, team, submissionEdit, setSubmissionEdit, on
         <>
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>পোস্ট ব্যাংক</h2>
-                <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={onNew}><IconPlus size={14} /> নতুন পোস্ট জমা দিন</button>
+                <button className="btn" style={{ background: '#B0175A', color: '#fff', border: 'none', padding: '10px 20px', fontSize: '0.9375rem' }} onClick={onNew}><IconPlus size={16} /> নতুন পোস্ট জমা দিন</button>
             </motion.div>
             <p className="hint" style={{ margin: '0 0 16px', fontSize: '0.8125rem' }}>টিমের যে কেউ লেখা পোস্ট বা আইডিয়া এখানে জমা দেবেন। যিনি শিডিউল করেন, তিনি দেখে &quot;✓ শিডিউল করুন&quot; চাপে শুধু তারিখ, সময় আর পেজ বাছবেন — পোস্টটা ক্যালেন্ডারে চলে যাবে। ঠিক না লাগলে মন্তব্যসহ ফেরত দেওয়া যায়।</p>
 
@@ -1597,8 +1615,11 @@ function PostBankView({ submissions, team, submissionEdit, setSubmissionEdit, on
             <motion.div variants={item_} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
                 {(['pending', 'returned', 'idea', 'scheduled'] as SubmissionStatus[]).map(s => (
                     <button key={s} onClick={() => setTab(s)}
-                        style={{ padding: '6px 14px', borderRadius: 999, fontSize: '0.8125rem', fontWeight: 600, border: tab === s ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-surface)' }}>
-                        {SUBMISSION_STATUS_LABEL[s]} {bn(counts[s])}
+                        style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: 999, fontSize: '0.8125rem', fontWeight: 600, border: tab === s ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-surface)' }}>
+                        {SUBMISSION_STATUS_LABEL[s]}
+                        <span style={{ minWidth: 18, height: 18, padding: '0 5px', borderRadius: '50%', background: '#B0175A', color: '#fff', fontSize: '0.6875rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {bn(counts[s])}
+                        </span>
                     </button>
                 ))}
             </motion.div>
@@ -1627,9 +1648,9 @@ function PostBankView({ submissions, team, submissionEdit, setSubmissionEdit, on
                         {x.caption && <div className="hint" style={{ fontSize: '0.8125rem', background: 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 8, padding: '8px 10px', whiteSpace: 'pre-wrap' }}>{x.caption}</div>}
                         {x.status !== 'scheduled' && (
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
-                                <button className="btn btn-ghost btn-sm" onClick={() => onEdit(x)}>এডিট</button>
-                                {x.status !== 'returned' && <button className="btn btn-ghost btn-sm" onClick={() => onReturn(x)}>↩ ফেরত দিন</button>}
-                                <button className="btn btn-ghost btn-sm" style={{ color: '#DC2626' }} onClick={() => onDelete(x)}>✕ বাদ দিন</button>
+                                <button className="btn btn-secondary btn-sm" onClick={() => onEdit(x)}>এডিট</button>
+                                {x.status !== 'returned' && <button className="btn btn-secondary btn-sm" onClick={() => onReturn(x)}>↩ ফেরত দিন</button>}
+                                <button className="btn btn-secondary btn-sm" style={{ color: '#DC2626', borderColor: '#DC2626' }} onClick={() => onDelete(x)}>✕ বাদ দিন</button>
                             </div>
                         )}
                     </div>
@@ -1739,8 +1760,8 @@ function SeriesView({ series, items, types, channels, channelById, month, setMon
                                         {formatMonthLabel(month)}-এ বসানো হয়েছে {bn(made)}টা{need ? `, বাকি ${bn(need)}টা তারিখ` : ''}
                                     </div>
                                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
-                                        <button className="btn btn-ghost btn-sm" onClick={() => onEdit(s)}>এডিট</button>
-                                        <button className="btn btn-ghost btn-sm" style={{ color: '#DC2626' }} onClick={() => onDelete(s)}>মুছুন</button>
+                                        <button className="btn btn-secondary btn-sm" onClick={() => onEdit(s)}>এডিট</button>
+                                        <button className="btn btn-secondary btn-sm" style={{ color: '#DC2626', borderColor: '#DC2626' }} onClick={() => onDelete(s)}>মুছুন</button>
                                     </div>
                                 </div>
                                 {need > 0

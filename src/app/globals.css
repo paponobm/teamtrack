@@ -1915,3 +1915,27 @@ input[type="date"].form-input::-webkit-calendar-picker-indicator {
 .content-calendar-page .form-input {
   background: var(--color-bg-secondary);
 }
+
+/* Production board's horizontal scroll strip — makes the scrollbar always visible (not the
+   OS's hover/auto-hide default) so it's obvious there's more to scroll left/right to. */
+.content-calendar-page .board-scroll {
+  scrollbar-width: auto;
+}
+
+.content-calendar-page .board-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.content-calendar-page .board-scroll::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+  border-radius: 999px;
+}
+
+.content-calendar-page .board-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 999px;
+}
+
+.content-calendar-page .board-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
+}
