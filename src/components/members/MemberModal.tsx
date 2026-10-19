@@ -99,7 +99,7 @@ const PAGE_DEFINITIONS = [
             { name: 'Payroll Management', slug: 'payroll-management', desc: 'View and manage monthly salary sheets', superOnly: true },
             { name: 'Requisitions', slug: 'requisitions', desc: 'Submit requisition requests' },
             { name: 'Ideas', slug: 'idea-sharing', desc: 'Share and upvote ideas' },
-            { name: 'Content', slug: 'content', desc: 'Draft and manage content' },
+            { name: 'Content Calendar', slug: 'content', desc: 'Draft and manage content' },
             { name: 'Memories', slug: 'memories', desc: 'Team photos and memories' },
             { name: 'Customer Review', slug: 'customer-review', desc: 'Add and view customer reviews' },
         ]

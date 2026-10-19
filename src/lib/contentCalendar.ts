@@ -17,6 +17,23 @@ export const CONTENT_ROLES: { key: ContentRole; label: string }[] = [
     { key: 'post', label: 'পোস্ট করা' },
 ]
 
+// The Content Calendar's top-level nav tabs — used in Settings → টিমের দায়িত্ব to let an admin
+// restrict a team member to only some of them. Keys match the `view` state in the content page.
+export type ContentTab = 'month' | 'work' | 'board' | 'pages' | 'occ' | 'postbank' | 'products' | 'series' | 'target' | 'report' | 'settings'
+export const CONTENT_TABS: { key: ContentTab; label: string }[] = [
+    { key: 'month', label: 'মাস' },
+    { key: 'work', label: 'কার কী কাজ' },
+    { key: 'board', label: 'প্রোডাকশন' },
+    { key: 'pages', label: 'পেজ অনুযায়ী' },
+    { key: 'occ', label: 'উপলক্ষ' },
+    { key: 'postbank', label: 'পোস্ট ব্যাংক' },
+    { key: 'products', label: 'প্রোডাক্ট' },
+    { key: 'series', label: 'সিরিজ' },
+    { key: 'target', label: 'টার্গেট' },
+    { key: 'report', label: 'রিপোর্ট' },
+    { key: 'settings', label: 'সেটিংস' },
+]
+
 // Stage name + which content role is auto-assigned when an item enters it.
 export const STAGE_INFO: Record<Stage, { label: string; role: ContentRole }> = {
     plan: { label: 'প্ল্যান', role: 'plan' },

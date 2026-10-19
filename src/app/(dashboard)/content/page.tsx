@@ -7,7 +7,7 @@ import { useToast } from '@/lib/ToastContext'
 import { usePermissions } from '@/lib/PermissionsContext'
 import { getLocalDateString, getMonthRangeFromString } from '@/lib/dateRange'
 import {
-    STAGE_INFO, STAGE_ORDER, KIND_INFO, CONTENT_ROLES, PLATFORMS,
+    STAGE_INFO, STAGE_ORDER, KIND_INFO, CONTENT_ROLES, CONTENT_TABS, PLATFORMS,
     phaseOf, isActivePhase, isItemLate, isSlotLate, firstDateOf, nextStageOf, buildSlotDates,
     type Stage, type Kind, type Platform,
 } from '@/lib/contentCalendar'
@@ -22,7 +22,7 @@ interface Channel { id: string; name: string; platform: Platform; photo_url: str
 type ChannelDraft = { name: string; platform: Platform; upload_link: string; photo_url: string }
 type TypeDraft = { name: string; kind: Kind; caption_template: string }
 interface PostType { id: string; name: string; kind: Kind; caption_template: string | null; sort_order: number; item_count?: string }
-interface TeamMember { id: string; name: string; avatar_url: string | null; roles: string[]; active: boolean }
+interface TeamMember { id: string; name: string; avatar_url: string | null; roles: string[]; active: boolean; allowed_tabs: string[] }
 interface Slot { id?: string; channel_id: string; date: string; time: string | null; posted: boolean; hook: string | null; reach: number | null; msgs: number | null; orders: number | null }
 interface LogEntry { id: string; stage: string; by: string | null; at: string }
 interface CommentEntry { id: string; text: string; done: boolean; by: string | null; by_employee_id: string | null; at: string }
@@ -601,15 +601,23 @@ export default function ContentCalendarPage() {
         if (res.ok) { setTypes(prev => prev.filter(x => x.id !== t.id)); toast.success('ধরন মুছে ফেলা হয়েছে') }
         else toast.error((await res.json()).error || 'মুছে ফেলা যায়নি')
     }
-    async function toggleTeamRole(m: TeamMember, role: string) {
-        const roles = m.roles.includes(role) ? m.roles.filter(r => r !== role) : [...m.roles, role]
-        const res = await fetch('/api/content-calendar/team', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ employee_id: m.id, roles }) })
-        if (res.ok) setTeam(prev => prev.map(x => x.id === m.id ? { ...x, roles } : x))
-    }
     async function toggleTeamActive(m: TeamMember) {
         const active = !m.active
         const res = await fetch('/api/content-calendar/team', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ employee_id: m.id, active }) })
         if (res.ok) setTeam(prev => prev.map(x => x.id === m.id ? { ...x, active } : x))
+    }
+    async function toggleTeamTab(m: TeamMember, tab: string) {
+        // Empty allowed_tabs means "no restriction, every tab visible" — toggling a single tab
+        // off from that state has to first expand it to the explicit full list.
+        const current = m.allowed_tabs.length ? m.allowed_tabs : CONTENT_TABS.map(t => t.key)
+        const allowed_tabs = current.includes(tab) ? current.filter(t => t !== tab) : [...current, tab]
+        const res = await fetch('/api/content-calendar/team', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ employee_id: m.id, allowed_tabs }) })
+        if (res.ok) setTeam(prev => prev.map(x => x.id === m.id ? { ...x, allowed_tabs } : x))
+    }
+    async function selectAllTeamTabs(m: TeamMember) {
+        const allowed_tabs: string[] = []
+        const res = await fetch('/api/content-calendar/team', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ employee_id: m.id, allowed_tabs }) })
+        if (res.ok) setTeam(prev => prev.map(x => x.id === m.id ? { ...x, allowed_tabs } : x))
     }
 
     // ---------- Occasions ----------
@@ -799,6 +807,19 @@ export default function ContentCalendarPage() {
          { key: 'report', label: 'রিপোর্ট', icon: <IconBarChart3 size={14} /> },
         { key: 'settings', label: 'সেটিংস', icon: <IconWrench size={14} /> },
     ]
+    // Owner/Super Admin always see every tab; everyone else is limited to whatever's checked for
+    // them in Settings → টিমের দায়িত্ব (an empty allowed_tabs list there means "no restriction").
+    const myAllowedTabs = team.find(m => m.id === perms.employee_id)?.allowed_tabs || []
+    const visibleTabs = isSuperAdmin || !myAllowedTabs.length ? TABS : TABS.filter(t => myAllowedTabs.includes(t.key))
+    // Redirect off a tab that just became hidden (e.g. restrictions loaded in after the default
+    // 'month' view was already picked) — done during render, React's recommended pattern for
+    // adjusting state in response to changed data, so it doesn't cost an extra effect round-trip.
+    const visibleTabKeys = visibleTabs.map(t => t.key).join(',')
+    const [lastTabKeys, setLastTabKeys] = useState(visibleTabKeys)
+    if (visibleTabKeys !== lastTabKeys) {
+        setLastTabKeys(visibleTabKeys)
+        if (visibleTabs.length && !visibleTabs.some(t => t.key === view)) setView(visibleTabs[0].key)
+    }
 
     return (
         <RequireFeature slugs={['content']}>
@@ -816,7 +837,7 @@ export default function ContentCalendarPage() {
                 </motion.div>
 
                 <motion.div variants={item_} style={{ display: 'flex', gap: '6px', padding: '6px', width: 'fit-content', borderRadius: '16px', background: 'rgba(118,118,128,0.08)', marginBottom: '20px' }}>
-                    {TABS.map(t => (
+                    {visibleTabs.map(t => (
                         <button key={t.key} onClick={() => setView(t.key)}
                             style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '12px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 600, color: view === t.key ? '#fff' : 'var(--color-text-secondary)' }}>
                             {view === t.key && (
@@ -895,7 +916,7 @@ export default function ContentCalendarPage() {
                                 newChannelDraft, setNewChannelDraft, onSaveNewChannel: saveNewChannel,
                                 toggleChannelActive, deleteChannel, saveChannelField, reorderChannel, uploadChannelPhoto,
                                 newTypeDraft, setNewTypeDraft, onSaveNewType: saveNewType,
-                                saveTypeField, reorderType, deleteType, toggleTeamRole, toggleTeamActive,
+                                saveTypeField, reorderType, deleteType, toggleTeamActive, toggleTeamTab, selectAllTeamTabs,
                             }} />
                         )}
                     </>
@@ -2285,7 +2306,7 @@ function ProductsView({ items, products, monthStart, monthEnd, todayStr, showEdi
 }
 
 // ================= Settings =================
-function SettingsView({ channels, types, team, isSuperAdmin, newChannelDraft, setNewChannelDraft, onSaveNewChannel, toggleChannelActive, deleteChannel, saveChannelField, reorderChannel, uploadChannelPhoto, newTypeDraft, setNewTypeDraft, onSaveNewType, saveTypeField, reorderType, deleteType, toggleTeamRole, toggleTeamActive }: {
+function SettingsView({ channels, types, team, isSuperAdmin, newChannelDraft, setNewChannelDraft, onSaveNewChannel, toggleChannelActive, deleteChannel, saveChannelField, reorderChannel, uploadChannelPhoto, newTypeDraft, setNewTypeDraft, onSaveNewType, saveTypeField, reorderType, deleteType, toggleTeamActive, toggleTeamTab, selectAllTeamTabs }: {
     channels: Channel[]; types: PostType[]; team: TeamMember[]; isSuperAdmin: boolean
     newChannelDraft: ChannelDraft | null
     setNewChannelDraft: (d: ChannelDraft | null) => void; onSaveNewChannel: () => void
@@ -2295,7 +2316,8 @@ function SettingsView({ channels, types, team, isSuperAdmin, newChannelDraft, se
     newTypeDraft: TypeDraft | null; setNewTypeDraft: (d: TypeDraft | null) => void; onSaveNewType: () => void
     saveTypeField: (t: PostType, field: 'name' | 'kind' | 'caption_template', value: string) => void; reorderType: (t: PostType, direction: -1 | 1) => void
     deleteType: (t: PostType) => void
-    toggleTeamRole: (m: TeamMember, role: string) => void; toggleTeamActive: (m: TeamMember) => void
+    toggleTeamActive: (m: TeamMember) => void
+    toggleTeamTab: (m: TeamMember, tab: string) => void; selectAllTeamTabs: (m: TeamMember) => void
 }) {
     const activeChannelCount = channels.filter(c => c.active).length
     return (
@@ -2425,22 +2447,33 @@ function SettingsView({ channels, types, team, isSuperAdmin, newChannelDraft, se
 
             <motion.div variants={item_} className="card">
                 <h3 style={{ fontSize: '1.0625rem', marginBottom: 6 }}>টিমের দায়িত্ব</h3>
-                <p className="hint" style={{ margin: '0 0 10px', fontSize: '0.8125rem' }}>প্রত্যেকে কী কাজ করেন বেছে নিন। যার হাতে কাজ সবচেয়ে কম, অটো তাঁর কাছে যাবে।</p>
-                {team.map(m => (
-                    <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--color-border-light)', flexWrap: 'wrap', opacity: m.active ? 1 : 0.55 }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 160 }}>{avatar(m.name, m.avatar_url, 24)}<b style={{ fontSize: '0.875rem' }}>{m.name}</b>{!m.active && <span className="hint" style={{ fontSize: '0.75rem' }}>বন্ধ আছে</span>}</span>
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', flex: 1 }}>
-                            {CONTENT_ROLES.map(r => (
-                                <button key={r.key} onClick={() => toggleTeamRole(m, r.key)}
-                                    style={{ flex: 1, minWidth: 90, padding: '3px 9px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600, textAlign: 'center', border: '1px solid var(--color-border-light)', background: m.roles.includes(r.key) ? 'var(--color-text-primary)' : 'var(--color-surface)', color: m.roles.includes(r.key) ? 'var(--color-bg-primary)' : undefined }}>
-                                    {r.label}
-                                </button>
-                            ))}
+                <p className="hint" style={{ margin: '0 0 10px', fontSize: '0.8125rem' }}>কন্টেন্ট ক্যালেন্ডারে যাদের অ্যাক্সেস আছে তারাই এখানে দেখাবে। প্রত্যেকে কোন কোন ট্যাব দেখতে পারবেন বেছে দিন — কিছু না বাছলে সব ট্যাব দেখা যাবে।</p>
+                {team.map(m => {
+                    const restricted = m.allowed_tabs.length > 0
+                    return (
+                        <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--color-border-light)', flexWrap: 'wrap', opacity: m.active ? 1 : 0.55 }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 160 }}>{avatar(m.name, m.avatar_url, 24)}<b style={{ fontSize: '0.875rem' }}>{m.name}</b>{!m.active && <span className="hint" style={{ fontSize: '0.75rem' }}>বন্ধ আছে</span>}</span>
+                            <details style={{ position: 'relative' }}>
+                                <summary className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', listStyle: 'none' }}>
+                                    {restricted ? `${bn(m.allowed_tabs.length)}/${bn(CONTENT_TABS.length)} ট্যাব` : 'সব ট্যাব'}
+                                </summary>
+                                <div style={{ position: 'absolute', zIndex: 10, marginTop: 6, padding: 10, background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', borderRadius: 10, boxShadow: '0 8px 20px rgba(0,0,0,0.12)', minWidth: 220 }}>
+                                    <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', marginBottom: 6 }} onClick={() => selectAllTeamTabs(m)}>
+                                        সব সিলেক্ট করুন
+                                    </button>
+                                    {CONTENT_TABS.map(t => (
+                                        <label key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 2px', fontSize: '0.8125rem', cursor: 'pointer' }}>
+                                            <input type="checkbox" checked={!restricted || m.allowed_tabs.includes(t.key)} onChange={() => toggleTeamTab(m, t.key)} />
+                                            {t.label}
+                                        </label>
+                                    ))}
+                                </div>
+                            </details>
+                            <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => toggleTeamActive(m)}>{m.active ? 'বন্ধ করুন' : 'চালু করুন'}</button>
                         </div>
-                        <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => toggleTeamActive(m)}>{m.active ? 'বন্ধ করুন' : 'চালু করুন'}</button>
-                    </div>
-                ))}
-                {!isSuperAdmin && <p className="hint" style={{ marginTop: 8 }}>যেকোনো কর্মী এটা পরিবর্তন করতে পারেন — এটা শুধু ঠিক করে কাকে অটো দায়িত্ব দেওয়া হবে।</p>}
+                    )
+                })}
+                {!isSuperAdmin && <p className="hint" style={{ marginTop: 8 }}>যেকোনো কর্মী এটা পরিবর্তন করতে পারেন।</p>}
             </motion.div>
         </div>
     )
