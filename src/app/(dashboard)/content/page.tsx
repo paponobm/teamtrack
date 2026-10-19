@@ -1685,7 +1685,7 @@ function SeriesView({ series, items, types, channels, channelById, month, setMon
 
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                 <h2 style={{ fontSize: '1.0625rem', flex: 1 }}>নিয়মিত সিরিজ</h2>
-                <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={onNew}><IconPlus size={14} /> নতুন সিরিজ</button>
+                <button className="btn" style={{ background: '#B0175A', color: '#fff', border: 'none', padding: '10px 20px', fontSize: '0.9375rem' }} onClick={onNew}><IconPlus size={16} /> নতুন সিরিজ</button>
             </motion.div>
             <p className="hint" style={{ margin: '0 0 16px', fontSize: '0.8125rem' }}>যে কন্টেন্ট প্রতি সপ্তাহে একই বারে যায়, যেমন প্রতি শুক্রবার কাস্টমার রিভিউ বা প্রতি মঙ্গলবার লাইভ, সেটা একবার সেট করুন। &quot;বসান&quot; চাপলে বাছাই করা মাসের আজ থেকে বাকি সব তারিখে কন্টেন্ট তৈরি হবে, দায়িত্বও অটো বসবে।</p>
 
@@ -2075,7 +2075,7 @@ function ReportView({ items, channels, types, occasions, team, channelTargets, m
 
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                 <h2 style={{ fontSize: '1.0625rem', flex: 1 }}>{mname}-এর রিপোর্ট</h2>
-                <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={copyReport}><IconClipboard size={14} /> রিপোর্ট কপি করুন</button>
+                <button className="btn" style={{ background: '#B0175A', color: '#fff', border: 'none', padding: '10px 20px', fontSize: '0.9375rem' }} onClick={copyReport}><IconClipboard size={16} /> রিপোর্ট কপি করুন</button>
             </motion.div>
 
             <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
