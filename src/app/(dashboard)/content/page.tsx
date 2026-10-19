@@ -50,6 +50,9 @@ interface ContentItem {
     slots: Slot[]; logs: LogEntry[]; comments: CommentEntry[]
 }
 type EditingItem = Partial<ContentItem> & { _channelIds?: string[]; _fromSubmission?: string; _time?: string }
+// One draft row in the "এই দিনের সব একসাথে" bulk-add sheet — channelGroup mirrors the single-item
+// modal's preset picker ('__all__', 'platform:<p>', or a single channel id).
+type BulkRow = { key: string; typeId: string; date: string; time: string; channelGroup: string; title: string; caption: string }
 
 const UPLOAD_LINK: Record<Platform, string> = {
     facebook: 'https://business.facebook.com/latest/composer', instagram: 'https://business.facebook.com/latest/composer',
@@ -258,6 +261,7 @@ export default function ContentCalendarPage() {
     const [targetDraft, setTargetDraft] = useState<{ channels: Record<string, { posts: string; videos: string }>; members: Record<string, string> }>({ channels: {}, members: {} })
 
     const [editing, setEditing] = useState<EditingItem | null>(null)
+    const [bulkAddDate, setBulkAddDate] = useState<string | null>(null)
     const [newChannelDraft, setNewChannelDraft] = useState<ChannelDraft | null>(null)
     const [newTypeDraft, setNewTypeDraft] = useState<TypeDraft | null>(null)
     const [occEdit, setOccEdit] = useState<{ id?: string; name: string; date: string; lead_days: string; target: string; notes: string } | null>(null)
@@ -445,6 +449,34 @@ export default function ContentCalendarPage() {
         }
         const updated = await saveItemPut(e.id, payload)
         if (updated) { setEditing(null); toast.success('সেভ হয়েছে') }
+    }
+
+    // Creates one item per filled-in row (blank titles are silently skipped) — each posts to
+    // every channel in its group on its own date with gap_days 0, so a group never staggers
+    // across days the way the single-item form's rotation does; this is "all at once, one day".
+    async function saveBulkPosts(rows: BulkRow[]) {
+        const valid = rows.filter(r => r.title.trim())
+        if (!valid.length) { toast.error('অন্তত একটা শিরোনাম লিখুন'); return }
+        const created: ContentItem[] = []
+        for (const r of valid) {
+            const channelIds = r.channelGroup === '__all__' ? activeChannels.map(c => c.id)
+                : r.channelGroup.startsWith('platform:') ? activeChannels.filter(c => c.platform === r.channelGroup.slice(9)).map(c => c.id)
+                : r.channelGroup ? [r.channelGroup] : []
+            if (!channelIds.length) continue
+            const res = await fetch('/api/content-calendar/items', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: r.title.trim(), type_id: r.typeId, caption: r.caption || null,
+                    start_date: r.date, gap_days: 0, channel_ids: channelIds, time: r.time || null,
+                }),
+            })
+            if (res.ok) created.push(await res.json())
+        }
+        if (created.length) {
+            setItems(prev => [...created, ...prev])
+            toast.success(`${bn(created.length)}টা পোস্ট যোগ হয়েছে`)
+            setBulkAddDate(null)
+        } else toast.error('কোনো পোস্ট যোগ করা যায়নি')
     }
 
     async function addComment(text: string, byId: string) {
@@ -770,7 +802,7 @@ export default function ContentCalendarPage() {
 
     return (
         <RequireFeature slugs={['content']}>
-            <motion.div variants={container} initial="hidden" animate="show">
+            <motion.div className="content-calendar-page" variants={container} initial="hidden" animate="show">
                 <motion.div className="page-header" variants={item_}>
                     <div>
                         <h1 className="page-title">কন্টেন্ট ক্যালেন্ডার</h1>
@@ -805,7 +837,7 @@ export default function ContentCalendarPage() {
                 ) : (
                     <>
                         {view === 'month' && (
-                            <MonthView {...{ month, setMonth, selectedDate, setSelectedDate, monthStart, monthEnd, todayStr, slotsInRange, channelById, channels: activeChannels, channelTargets, occasions, openAdd, openEdit, togglePosted, copyCaption }} />
+                            <MonthView {...{ month, setMonth, selectedDate, setSelectedDate, monthStart, monthEnd, todayStr, slotsInRange, channelById, channels: activeChannels, channelTargets, occasions, openAdd, openEdit, togglePosted, copyCaption, onBulkAdd: setBulkAddDate, team: activeTeam, monthPerson: workPerson, setMonthPerson: setWorkPerson }} />
                         )}
                         {view === 'board' && (
                             <BoardView {...{ items, team: activeTeam, channelById, month, setMonth, openEdit, advanceStage }} />
@@ -877,26 +909,42 @@ export default function ContentCalendarPage() {
                         />
                     )}
                 </AnimatePresence>
+                <AnimatePresence>
+                    {bulkAddDate && (
+                        <BulkAddModal date={bulkAddDate} types={types} channels={activeChannels}
+                            onClose={() => setBulkAddDate(null)} onSaveAll={saveBulkPosts} />
+                    )}
+                </AnimatePresence>
             </motion.div>
         </RequireFeature>
     )
 }
 
 // ================= Month view =================
-function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart, monthEnd, todayStr, slotsInRange, channelById, channels, channelTargets, occasions, openAdd, openEdit, togglePosted, copyCaption }: {
+function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart, monthEnd, todayStr, slotsInRange, channelById, channels, channelTargets, occasions, openAdd, openEdit, togglePosted, copyCaption, onBulkAdd, team, monthPerson, setMonthPerson }: {
     month: string; setMonth: (m: string) => void
     selectedDate: string; setSelectedDate: (d: string) => void; monthStart: string; monthEnd: string; todayStr: string
     slotsInRange: (a: string, b: string) => { item: ContentItem; slot: Slot }[]
     channelById: (id: string) => Channel; channels: Channel[]; channelTargets: ChannelTarget[]
     occasions: Occasion[]; openAdd: (d?: string) => void; openEdit: (i: ContentItem) => void
     togglePosted: (i: ContentItem, s: Slot) => void; copyCaption: (i: ContentItem, s: Slot) => void
+    onBulkAdd: (date: string) => void
+    team: TeamMember[]; monthPerson: string; setMonthPerson: (id: string) => void
 }) {
     const [y, m] = month.split('-').map(Number)
     const daysInMonth = new Date(y, m, 0).getDate()
     const firstDow = (new Date(y, m - 1, 1).getDay() + 6) % 7 // Monday-first grid
-    const monthSlots = slotsInRange(monthStart, monthEnd)
+    // When an employee is picked, every number and cell on this tab narrows to just their
+    // assigned work — one filter, consistently applied, rather than only some of the view.
+    const slotsFor = (a: string, b: string) => {
+        const list = slotsInRange(a, b)
+        return monthPerson ? list.filter(x => x.item.assignee?.id === monthPerson) : list
+    }
+    const monthSlots = slotsFor(monthStart, monthEnd)
     const posted = monthSlots.filter(x => x.slot.posted).length
     const late = monthSlots.filter(x => isSlotLate(x.slot)).length
+    const msgs = monthSlots.reduce((t, x) => t + (Number(x.slot.msgs) || 0), 0)
+    const orders = monthSlots.reduce((t, x) => t + (Number(x.slot.orders) || 0), 0)
     const occasionsOn = (ds: string) => occasions.filter(o => o.date === ds)
     const isLeadDay = (ds: string) => occasions.some(o => ds < o.date && daysBetween(ds, o.date) <= o.lead_days)
     const nextOccasion = occasions.filter(o => o.date >= todayStr).sort((a, b) => a.date.localeCompare(b.date))[0]
@@ -910,7 +958,7 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
     const totalVideoPosted = monthSlots.filter(x => x.slot.posted && KIND_INFO[x.item.type.kind]?.isVideo).length
     const remaining = Math.max(0, totalTarget - totalPosted)
     const remainingVideo = Math.max(0, totalVideoTarget - totalVideoPosted)
-    const todayCount = slotsInRange(todayStr, todayStr).length
+    const todayCount = slotsFor(todayStr, todayStr).length
 
     const cells: React.ReactNode[] = []
     const WD = ['সোম', 'মঙ্গল', 'বুধ', 'বৃহ', 'শুক্র', 'শনি', 'রবি']
@@ -918,7 +966,7 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
     for (let k = 0; k < firstDow; k++) cells.push(<div key={'b' + k} />)
     for (let d = 1; d <= daysInMonth; d++) {
         const ds = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-        const list = slotsInRange(ds, ds)
+        const list = slotsFor(ds, ds)
         const dayLate = list.some(x => isSlotLate(x.slot)), dayDone = list.length > 0 && list.every(x => x.slot.posted)
         const dotColor = !list.length ? undefined : dayLate ? '#DC2626' : dayDone ? '#16A34A' : '#A15C00'
         const isToday = ds === todayStr, isSel = ds === selectedDate, isPast = ds < todayStr
@@ -941,7 +989,7 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
         )
     }
 
-    const dayList = slotsInRange(selectedDate, selectedDate)
+    const dayList = slotsFor(selectedDate, selectedDate)
     const leadOccasion = occasions.find(o => selectedDate < o.date && daysBetween(selectedDate, o.date) <= o.lead_days)
 
     return (
@@ -984,17 +1032,23 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                     )}
                 </motion.div>
             )}
-            <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
                 <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
                 <button className="btn btn-ghost btn-sm" onClick={() => setMonth(currentMonthString())}>এই মাস</button>
                 <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                <select className="form-input" style={{ width: 'auto' }} value={monthPerson} onChange={e => setMonthPerson(e.target.value)}>
+                    <option value="">সবাই</option>
+                    {team.map(mem => <option key={mem.id} value={mem.id}>{mem.name}</option>)}
+                </select>
             </motion.div>
 
             <motion.div variants={item_} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 20 }}>
-                <div className="stat-card"><span className="stat-label">প্ল্যান করা পোস্ট</span><span className="stat-value" style={{ fontSize: '1.5rem', ...monoNum }}>{bn(monthSlots.length)}</span></div>
+                <div className="stat-card"><span className="stat-label">মোট পোস্ট প্ল্যান</span><span className="stat-value" style={{ fontSize: '1.5rem', ...monoNum }}>{bn(monthSlots.length)}</span></div>
                 <div className="stat-card"><span className="stat-label">পোস্ট হয়েছে</span><span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A', ...monoNum }}>{bn(posted)}</span></div>
                 <div className="stat-card"><span className="stat-label">সময় পার, পোস্ট হয়নি</span><span className="stat-value" style={{ fontSize: '1.5rem', color: late ? '#DC2626' : undefined, ...monoNum }}>{bn(late)}</span></div>
+                <div className="stat-card"><span className="stat-label">মেসেজ</span><span className="stat-value" style={{ fontSize: '1.5rem', ...monoNum }}>{bn(msgs)}</span></div>
+                <div className="stat-card"><span className="stat-label">অর্ডার</span><span className="stat-value" style={{ fontSize: '1.5rem', ...monoNum }}>{bn(orders)}</span></div>
             </motion.div>
 
             {channels.length > 0 && (
@@ -1039,6 +1093,7 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                     <h3 style={{ fontSize: '1.0625rem', flex: 1, minWidth: 0 }}>{formatDate(selectedDate)}{selectedDate === todayStr ? ' — আজ' : ''}</h3>
                     <button className="btn btn-secondary btn-sm" onClick={() => openAdd(selectedDate)}><IconPlus size={14} /> এই তারিখে নতুন</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => onBulkAdd(selectedDate)}>☰ এই দিনের সব একসাথে</button>
                 </div>
                 {occasionsOn(selectedDate).map(o => (
                     <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, background: 'rgba(106,63,200,0.15)', color: '#A78BFA', marginBottom: 10, fontWeight: 600, fontSize: '0.875rem' }}>
@@ -2643,6 +2698,90 @@ function ItemModal({ editing, setEditing, types, channels, team, occasions, onCl
                     {isEdit && <button className="btn btn-secondary btn-sm" onClick={onDuplicate}>কপি করুন</button>}
                     {isEdit && <button className="btn btn-secondary btn-sm" style={{ color: '#DC2626' }} onClick={onDelete}>মুছুন</button>}
                     <button className="btn btn-primary btn-sm" onClick={onSave}>{isEdit ? 'সেভ করুন' : 'কন্টেন্ট যোগ করুন'}</button>
+                </div>
+            </motion.div>
+        </motion.div>
+    )
+}
+
+// ================= Bulk add (one day, several posts) =================
+function BulkAddModal({ date, types, channels, onClose, onSaveAll }: {
+    date: string; types: PostType[]; channels: Channel[]
+    onClose: () => void; onSaveAll: (rows: BulkRow[]) => void
+}) {
+    const byPlatform: Record<Platform, Channel[]> = { facebook: [], instagram: [], tiktok: [], youtube: [] }
+    channels.forEach(c => byPlatform[c.platform].push(c))
+    const blankRow = (): BulkRow => ({ key: Math.random().toString(36).slice(2), typeId: types[0]?.id || '', date, time: '', channelGroup: '__all__', title: '', caption: '' })
+    const [rows, setRows] = useState<BulkRow[]>(() => [blankRow(), blankRow(), blankRow()])
+    const [saving, setSaving] = useState(false)
+
+    function updateRow(key: string, patch: Partial<BulkRow>) {
+        setRows(prev => prev.map(r => r.key === key ? { ...r, ...patch } : r))
+    }
+    function copyRow(idx: number) {
+        setRows(prev => { const next = [...prev]; next.splice(idx + 1, 0, { ...prev[idx], key: Math.random().toString(36).slice(2) }); return next })
+    }
+    function removeRow(key: string) {
+        setRows(prev => prev.length > 1 ? prev.filter(r => r.key !== key) : prev)
+    }
+    async function handleSave() {
+        setSaving(true)
+        await onSaveAll(rows)
+        setSaving(false)
+    }
+
+    return (
+        <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                onClick={e => e.stopPropagation()} style={{ maxWidth: 560, width: '100%' }}>
+                <div className="modal-header">
+                    <h2 className="modal-title">একসাথে অনেকগুলো পোস্ট</h2>
+                    <button className="btn btn-ghost btn-sm" onClick={onClose}><IconX size={18} /></button>
+                </div>
+                <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '65vh', overflowY: 'auto' }}>
+                    <p className="hint" style={{ fontSize: '0.8125rem', margin: 0 }}>প্রতিটি ঘরে একটা পোস্ট — দরকার মতো ধরন বদলান। শুধু শিরোনাম লেখা ঘরগুলো সেভ হবে, ফাঁকা ঘর বাদ যাবে।</p>
+                    {rows.map((r, idx) => (
+                        <div key={r.key} style={{ border: '1px solid var(--color-border-light)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <b style={{ fontSize: '0.875rem', flex: 1 }}>পোস্ট {bn(idx + 1)}</b>
+                                <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyRow(idx)}><IconClipboard size={13} /> কপি</button>
+                                <button type="button" className="btn btn-ghost btn-icon" disabled={rows.length === 1} onClick={() => removeRow(r.key)}><IconX size={14} /></button>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                                <div className="form-group"><label className="form-label">ধরন</label>
+                                    <select className="form-input" value={r.typeId} onChange={e => updateRow(r.key, { typeId: e.target.value })}>
+                                        {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                                    </select>
+                                </div>
+                                <div className="form-group"><label className="form-label">তারিখ</label>
+                                    <input className="form-input" type="date" value={r.date} onChange={e => updateRow(r.key, { date: e.target.value })} />
+                                </div>
+                                <div className="form-group"><label className="form-label">সময়</label>
+                                    <input className="form-input" type="time" value={r.time} onChange={e => updateRow(r.key, { time: e.target.value })} />
+                                </div>
+                            </div>
+                            <div className="form-group"><label className="form-label">কোথায়</label>
+                                <select className="form-input" value={r.channelGroup} onChange={e => updateRow(r.key, { channelGroup: e.target.value })}>
+                                    <option value="__all__">সব চ্যানেল ({bn(channels.length)})</option>
+                                    {PLATFORMS.map(p => byPlatform[p].length > 0 && (
+                                        <option key={p} value={`platform:${p}`}>সব {PLATFORM_LABEL[p]} ({bn(byPlatform[p].length)})</option>
+                                    ))}
+                                    {channels.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
+                            </div>
+                            <div className="form-group"><label className="form-label">শিরোনাম</label>
+                                <input className="form-input" value={r.title} onChange={e => updateRow(r.key, { title: e.target.value })} placeholder="যেমন: মিষ্টি তেঁতুলের ভিডিও" />
+                            </div>
+                            <div className="form-group"><label className="form-label">ক্যাপশন (ঐচ্ছিক)</label>
+                                <textarea className="form-input" rows={2} value={r.caption} onChange={e => updateRow(r.key, { caption: e.target.value })} />
+                            </div>
+                        </div>
+                    ))}
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => setRows(prev => [...prev, blankRow()])}><IconPlus size={14} /> আরেকটা পোস্ট</button>
+                </div>
+                <div className="modal-footer">
+                    <button className="btn btn-secondary btn-sm" onClick={onClose}>বাতিল</button>
+                    <button className="btn btn-primary btn-sm" disabled={saving} onClick={handleSave}>{saving ? 'সেভ হচ্ছে…' : 'সব সেভ করুন'}</button>
                 </div>
             </motion.div>
         </motion.div>

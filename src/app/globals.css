@@ -1903,3 +1903,15 @@ input[type="date"].form-input::-webkit-calendar-picker-indicator {
     display: none !important;
   }
 }
+
+/* Content Calendar forms only — bolder field labels and a bit more contrast on inputs than the
+   site-wide .form-label/.form-input defaults, scoped here so no other page is affected.
+   (Module-scoped CSS can't be used here since this stylesheet is already global; these
+   selectors are deliberately narrow so nothing outside the Content Calendar is touched.) */
+.content-calendar-page .form-label {
+  font-weight: 700;
+}
+
+.content-calendar-page .form-input {
+  background: var(--color-bg-secondary);
+}
