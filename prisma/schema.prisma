@@ -1265,6 +1265,7 @@ model content_calendar_slots {
   item_id    String                      @db.Uuid
   channel_id String                      @db.Uuid
   date       DateTime                    @db.Date
+  time       DateTime?                   @db.Time
   posted     Boolean                     @default(false)
   hook       String?
   reach      Int?

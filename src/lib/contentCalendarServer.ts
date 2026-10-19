@@ -24,7 +24,7 @@ export const ITEM_SELECT = `
         CASE WHEN a.id IS NULL THEN NULL ELSE json_build_object('id', a.id, 'name', a.name) END AS assignee,
         CASE WHEN c.id IS NULL THEN NULL ELSE json_build_object('id', c.id, 'name', c.name) END AS creator,
         CASE WHEN o.id IS NULL THEN NULL ELSE json_build_object('id', o.id, 'name', o.name, 'date', o.date) END AS occasion,
-        COALESCE((SELECT json_agg(json_build_object('id', s.id, 'channel_id', s.channel_id, 'date', s.date, 'posted', s.posted, 'hook', s.hook, 'reach', s.reach, 'msgs', s.msgs, 'orders', s.orders) ORDER BY s.date)
+        COALESCE((SELECT json_agg(json_build_object('id', s.id, 'channel_id', s.channel_id, 'date', s.date, 'time', s.time, 'posted', s.posted, 'hook', s.hook, 'reach', s.reach, 'msgs', s.msgs, 'orders', s.orders) ORDER BY s.date)
                   FROM content_calendar_slots s WHERE s.item_id = i.id), '[]') AS slots,
         COALESCE((SELECT json_agg(json_build_object('id', g.id, 'stage', g.stage, 'by', e2.name, 'at', g.at) ORDER BY g.at)
                   FROM content_calendar_stage_logs g LEFT JOIN employees e2 ON e2.id = g.by_employee_id WHERE g.item_id = i.id), '[]') AS logs,

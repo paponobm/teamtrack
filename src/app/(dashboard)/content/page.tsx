@@ -1,14 +1,14 @@
 'use client'
 
 import RequireFeature from '@/components/common/RequireFeature'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from '@/lib/ToastContext'
 import { usePermissions } from '@/lib/PermissionsContext'
 import { getLocalDateString, getMonthRangeFromString } from '@/lib/dateRange'
 import {
     STAGE_INFO, STAGE_ORDER, KIND_INFO, CONTENT_ROLES, PLATFORMS,
-    phaseOf, isActivePhase, isItemLate, isSlotLate, firstDateOf, nextStageOf,
+    phaseOf, isActivePhase, isItemLate, isSlotLate, firstDateOf, nextStageOf, buildSlotDates,
     type Stage, type Kind, type Platform,
 } from '@/lib/contentCalendar'
 import {
@@ -23,7 +23,7 @@ type ChannelDraft = { name: string; platform: Platform; upload_link: string; pho
 type TypeDraft = { name: string; kind: Kind; caption_template: string }
 interface PostType { id: string; name: string; kind: Kind; caption_template: string | null; sort_order: number; item_count?: string }
 interface TeamMember { id: string; name: string; avatar_url: string | null; roles: string[]; active: boolean }
-interface Slot { id?: string; channel_id: string; date: string; posted: boolean; hook: string | null; reach: number | null; msgs: number | null; orders: number | null }
+interface Slot { id?: string; channel_id: string; date: string; time: string | null; posted: boolean; hook: string | null; reach: number | null; msgs: number | null; orders: number | null }
 interface LogEntry { id: string; stage: string; by: string | null; at: string }
 interface CommentEntry { id: string; text: string; done: boolean; by: string | null; by_employee_id: string | null; at: string }
 interface Occasion { id: string; name: string; date: string; lead_days: number; target: number | null; notes: string | null; item_count?: string }
@@ -49,7 +49,7 @@ interface ContentItem {
     series_id: string | null
     slots: Slot[]; logs: LogEntry[]; comments: CommentEntry[]
 }
-type EditingItem = Partial<ContentItem> & { _channelIds?: string[]; _fromSubmission?: string }
+type EditingItem = Partial<ContentItem> & { _channelIds?: string[]; _fromSubmission?: string; _time?: string }
 
 const UPLOAD_LINK: Record<Platform, string> = {
     facebook: 'https://business.facebook.com/latest/composer', instagram: 'https://business.facebook.com/latest/composer',
@@ -73,6 +73,9 @@ const BN_DSHORT = ['রবি', 'সোম', 'মঙ্গল', 'বুধ', '�
 const BN_MSHORT = ['জানু', 'ফেব্রু', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টে', 'অক্টো', 'নভে', 'ডিসে']
 const BN_DIGITS = '০১২৩৪৫৬৭৮৯'
 function bn(n: number | string) { return String(n).replace(/\d/g, d => BN_DIGITS[Number(d)]) }
+// Applied to standalone numeric displays (stat tiles, count badges, table number columns) so
+// Bengali digits line up evenly — scoped to this page only, never touches shared global classes.
+const monoNum: React.CSSProperties = { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace", fontVariantNumeric: 'tabular-nums' }
 function shortDateBn(ds: string) { const dt = new Date(ds); return `${bn(dt.getDate())} ${BN_MONTHS[dt.getMonth()]}` }
 function addDaysStr(ds: string, days: number) { const [y, m, d] = ds.split('-').map(Number); const dt = new Date(y, m - 1, d + days); return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}` }
 function daysBetween(a: string, b: string) { const [ay, am, ad] = a.split('-').map(Number), [by, bm, bd] = b.split('-').map(Number); return Math.round((new Date(by, bm - 1, bd).getTime() - new Date(ay, am - 1, ad).getTime()) / 86400000) }
@@ -121,7 +124,7 @@ function nextAnnualSeedYear(occasions: Occasion[], todayStr: string): number {
     return year
 }
 function yearRangeLabel(year: number): string { return `${BN_MONTHS[0]} ${bn(year)} - ${BN_MONTHS[11]} ${bn(year)}` }
-function formatDate(d: string) { const dt = new Date(d); return `${dt.getDate()} ${BN_MONTHS[dt.getMonth()]}, ${dt.getFullYear()}` }
+function formatDate(d: string) { const dt = new Date(d); return `${bn(dt.getDate())} ${BN_MONTHS[dt.getMonth()]}, ${bn(dt.getFullYear())}` }
 function formatMonthLabel(month: string) { const [y, m] = month.split('-').map(Number); return `${BN_MONTHS[m - 1]} ${y}` }
 function currentMonthString() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 function stepMonth(month: string, delta: number) { const [y, m] = month.split('-').map(Number); const d = new Date(y, m - 1 + delta, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
@@ -400,6 +403,10 @@ export default function ContentCalendarPage() {
                     title: e.title.trim(), type_id: e.type?.id, product_code: e.product_code || null,
                     caption: e.caption || null, notes: e.notes || null, start_date: e.start_date,
                     gap_days: e.gap_days ?? 3, channel_ids: channelIds, occasion_id: e.occasion?.id || null,
+                    time: e._time || null, stage: e.stage || null, assignee_id: e.assignee?.id || null,
+                    // The modal's per-row preview may have been hand-adjusted — send it as-is so
+                    // those edits land instead of being silently recomputed from scratch.
+                    slots: (e.slots || []).map(s => ({ channel_id: s.channel_id, date: s.date, time: s.time || null })),
                 }),
             })
             if (res.ok) {
@@ -431,7 +438,7 @@ export default function ContentCalendarPage() {
             // the server: simplest is to just send the new channel set as a flat same-day list
             // if nothing was posted yet, otherwise keep existing + append new ones at the start date.
             const kept = (e.slots || []).filter(s => channelIds.includes(s.channel_id))
-            const added = channelIds.filter(id => !currentChannelIds.includes(id)).map(id => ({ channel_id: id, date: e.start_date, posted: false, hook: null, reach: null, msgs: null, orders: null }))
+            const added = channelIds.filter(id => !currentChannelIds.includes(id)).map(id => ({ channel_id: id, date: e.start_date, time: e._time || null, posted: false, hook: null, reach: null, msgs: null, orders: null }))
             payload.slots = [...kept, ...added]
         } else {
             payload.slots = e.slots
@@ -604,7 +611,7 @@ export default function ContentCalendarPage() {
         const range = yearRangeLabel(year)
         const toAdd = annualOccasionsFor(year).filter(o => !occasions.some(x => x.name === o.name && x.date.slice(0, 4) === String(year)))
         if (!toAdd.length) { toast.success(`${range} - এর সব ফিক্সড উপলক্ষ আগে থেকেই আছে`); return }
-        if (!window.confirm(`${range} এর ${toAdd.length}টা ফিক্সড উপলক্ষ যোগ হবে। এগিয়ে যাবেন?`)) return
+        if (!window.confirm(`${range} এর ${bn(toAdd.length)}টা ফিক্সড উপলক্ষ যোগ হবে। এগিয়ে যাবেন?`)) return
         const added: Occasion[] = []
         for (const o of toAdd) {
             const res = await fetch('/api/content-calendar/occasions', {
@@ -750,14 +757,14 @@ export default function ContentCalendarPage() {
     const TABS: { key: typeof view; label: string; icon: React.ReactNode }[] = [
         { key: 'month', label: 'মাস', icon: <IconCalendar size={14} /> },
          { key: 'work', label: 'কার কী কাজ', icon: <IconUsers size={14} /> },
-        // { key: 'board', label: 'প্রোডাকশন', icon: <IconLayers size={14} /> },
+         { key: 'board', label: 'প্রোডাকশন', icon: <IconLayers size={14} /> },
         { key: 'pages', label: 'পেজ অনুযায়ী', icon: <IconGlobe size={14} /> },
         { key: 'occ', label: 'উপলক্ষ', icon: <IconTarget size={14} /> },
-        // { key: 'postbank', label: 'পোস্ট ব্যাংক', icon: <IconLightbulb size={14} /> },
-        // { key: 'products', label: 'প্রোডাক্ট', icon: <IconPackage size={14} /> },
+         { key: 'postbank', label: 'পোস্ট ব্যাংক', icon: <IconLightbulb size={14} /> },
+         { key: 'products', label: 'প্রোডাক্ট', icon: <IconPackage size={14} /> },
         { key: 'series', label: 'সিরিজ', icon: <IconClock size={14} /> },
         { key: 'target', label: 'টার্গেট', icon: <IconTrendingUp size={14} /> },
-        // { key: 'report', label: 'রিপোর্ট', icon: <IconBarChart3 size={14} /> },
+         { key: 'report', label: 'রিপোর্ট', icon: <IconBarChart3 size={14} /> },
         { key: 'settings', label: 'সেটিংস', icon: <IconWrench size={14} /> },
     ]
 
@@ -925,11 +932,11 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                     boxShadow: lead ? 'inset 0 3px 0 #6A3FC8' : undefined,
                     color: isToday ? '#fff' : 'var(--color-text-primary)', display: 'flex', flexDirection: 'column', gap: 2,
                 }}>
-                <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 700, fontSize: '0.875rem' }}>
-                    {d}{dotColor && <span style={{ width: 7, height: 7, borderRadius: '50%', background: isToday ? '#fff' : dotColor, display: 'inline-block' }} />}
+                <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 700, fontSize: '0.875rem', ...monoNum }}>
+                    {bn(d)}{dotColor && <span style={{ width: 7, height: 7, borderRadius: '50%', background: isToday ? '#fff' : dotColor, display: 'inline-block' }} />}
                 </span>
                 {occs.map(o => <span key={o.id} style={{ fontSize: '0.625rem', fontWeight: 700, borderRadius: 3, padding: '1px 3px', background: isToday ? 'rgba(255,255,255,0.25)' : 'rgba(106,63,200,0.1)', color: isToday ? '#fff' : '#6A3FC8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.name}</span>)}
-                {list.length > 0 && <span style={{ fontSize: '0.6875rem', opacity: 0.85 }}>{list.length}টা পোস্ট</span>}
+                {list.length > 0 && <span style={{ fontSize: '0.6875rem', opacity: 0.85 }}>{bn(list.length)}টা পোস্ট</span>}
             </button>
         )
     }
@@ -985,9 +992,9 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
             </motion.div>
 
             <motion.div variants={item_} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 20 }}>
-                <div className="stat-card"><span className="stat-label">প্ল্যান করা পোস্ট</span><span className="stat-value" style={{ fontSize: '1.5rem' }}>{monthSlots.length}</span></div>
-                <div className="stat-card"><span className="stat-label">পোস্ট হয়েছে</span><span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A' }}>{posted}</span></div>
-                <div className="stat-card"><span className="stat-label">সময় পার, পোস্ট হয়নি</span><span className="stat-value" style={{ fontSize: '1.5rem', color: late ? '#DC2626' : undefined }}>{late}</span></div>
+                <div className="stat-card"><span className="stat-label">প্ল্যান করা পোস্ট</span><span className="stat-value" style={{ fontSize: '1.5rem', ...monoNum }}>{bn(monthSlots.length)}</span></div>
+                <div className="stat-card"><span className="stat-label">পোস্ট হয়েছে</span><span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A', ...monoNum }}>{bn(posted)}</span></div>
+                <div className="stat-card"><span className="stat-label">সময় পার, পোস্ট হয়নি</span><span className="stat-value" style={{ fontSize: '1.5rem', color: late ? '#DC2626' : undefined, ...monoNum }}>{bn(late)}</span></div>
             </motion.div>
 
             {channels.length > 0 && (
@@ -1158,13 +1165,13 @@ function BoardView({ items, team, channelById, month, setMonth, openEdit, advanc
             <motion.div variants={item_} style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
                 {cols.map(c => (
                     <div key={c.key} style={{ flex: '0 0 260px', background: 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 12, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <h3 style={{ fontSize: '0.875rem', display: 'flex', justifyContent: 'space-between' }}>{c.label}<span className="hint">{c.items.length}</span></h3>
+                        <h3 style={{ fontSize: '0.875rem', display: 'flex', justifyContent: 'space-between' }}>{c.label}<span className="hint" style={monoNum}>{bn(c.items.length)}</span></h3>
                         {c.items.map(it => <BoardCard key={it.id} it={it} channelById={channelById} onOpen={openEdit} onAdvance={advanceStage} />)}
                     </div>
                 ))}
                 {[{ key: 'ready', label: 'পোস্টের জন্য প্রস্তুত', items: ready }, { key: 'done', label: 'সব পোস্টেড', items: done }].map(c => (
                     <div key={c.key} style={{ flex: '0 0 260px', background: 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 12, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <h3 style={{ fontSize: '0.875rem', display: 'flex', justifyContent: 'space-between' }}>{c.label}<span className="hint">{c.items.length}</span></h3>
+                        <h3 style={{ fontSize: '0.875rem', display: 'flex', justifyContent: 'space-between' }}>{c.label}<span className="hint" style={monoNum}>{bn(c.items.length)}</span></h3>
                         {c.items.map(it => <BoardCard key={it.id} it={it} channelById={channelById} onOpen={openEdit} onAdvance={advanceStage} />)}
                         {!c.items.length && <span className="hint">খালি</span>}
                     </div>
@@ -1212,11 +1219,11 @@ function WorkView({ items, team, month, setMonth, workStage, setWorkStage, workP
 
             <motion.div variants={item_} style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 16, paddingBottom: 4 }}>
                 <button onClick={() => setWorkStage('')} style={{ flex: '0 0 auto', padding: '8px 12px', borderRadius: 10, border: workStage === '' ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-surface)', minWidth: 90, textAlign: 'left' }}>
-                    <b style={{ display: 'block', fontSize: '1.25rem' }}>{active.length}</b><small className="hint">সব ধাপ</small>
+                    <b style={{ display: 'block', fontSize: '1.25rem', ...monoNum }}>{bn(active.length)}</b><small className="hint">সব ধাপ</small>
                 </button>
                 {stageCounts.map(s => (
                     <button key={s.key} onClick={() => setWorkStage(s.key)} style={{ flex: '0 0 auto', padding: '8px 12px', borderRadius: 10, border: workStage === s.key ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-surface)', minWidth: 90, textAlign: 'left' }}>
-                        <b style={{ display: 'block', fontSize: '1.25rem' }}>{s.count}</b><small className="hint">{s.label}</small>
+                        <b style={{ display: 'block', fontSize: '1.25rem', ...monoNum }}>{bn(s.count)}</b><small className="hint">{s.label}</small>
                     </button>
                 ))}
             </motion.div>
@@ -1233,9 +1240,9 @@ function WorkView({ items, team, month, setMonth, workStage, setWorkStage, workP
                             {rows.map(r => (
                                 <tr key={r.member.id} style={{ cursor: 'pointer', background: workPerson === r.member.id ? 'rgba(176,23,90,0.06)' : undefined }} onClick={() => setWorkPerson(workPerson === r.member.id ? '' : r.member.id)}>
                                     <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{avatar(r.member.name, r.member.avatar_url, 24)}<b>{r.member.name}</b></td>
-                                    <td style={{ textAlign: 'right' }}>{r.pending}</td>
-                                    <td style={{ textAlign: 'right', color: r.late ? '#DC2626' : undefined }}>{r.late}</td>
-                                    <td style={{ textAlign: 'right' }}>{r.done}</td>
+                                    <td style={{ textAlign: 'right', ...monoNum }}>{bn(r.pending)}</td>
+                                    <td style={{ textAlign: 'right', color: r.late ? '#DC2626' : undefined, ...monoNum }}>{bn(r.late)}</td>
+                                    <td style={{ textAlign: 'right', ...monoNum }}>{bn(r.done)}</td>
                                     <td>{r.nextDue ? formatDate(r.nextDue) : '—'}</td>
                                 </tr>
                             ))}
@@ -1251,7 +1258,7 @@ function WorkView({ items, team, month, setMonth, workStage, setWorkStage, workP
                 {queue.map(it => (
                     <div key={it.id} style={{ display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 10, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--color-border-light)' }}>
                         <div style={{ textAlign: 'center', background: isItemLate(it) ? 'rgba(220,38,38,0.08)' : 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 8, padding: '3px 0' }}>
-                            <b style={{ display: 'block', fontSize: '1rem' }}>{firstDateOf(it).slice(8, 10)}</b><small className="hint">{firstDateOf(it).slice(5, 7)}/{firstDateOf(it).slice(0, 4)}</small>
+                            <b style={{ display: 'block', fontSize: '1rem', ...monoNum }}>{bn(firstDateOf(it).slice(8, 10))}</b><small className="hint" style={monoNum}>{bn(firstDateOf(it).slice(5, 7))}/{bn(firstDateOf(it).slice(0, 4))}</small>
                         </div>
                         <div style={{ cursor: 'pointer', minWidth: 0 }} onClick={() => openEdit(it)}>
                             <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{it.title}</div>
@@ -1967,7 +1974,7 @@ function ReportView({ items, channels, types, occasions, team, channelTargets, m
     const late = monthSlots.filter(x => isSlotLate(x.slot)).length
     const reach = sum(posted, 'reach'), msgs = sum(posted, 'msgs'), orders = sum(posted, 'orders')
     const videos = posted.filter(x => KIND_INFO[x.item.type.kind].isVideo).length
-    const conv = msgs ? `${Math.round(orders / msgs * 100)}%` : '—'
+    const conv = msgs ? `${bn(Math.round(orders / msgs * 100))}%` : '—'
 
     function reportText() {
         const L = [`📊 কন্টেন্ট রিপোর্ট — ${mname}`, '', `পোস্ট: ${bn(posted.length)}/${bn(tPosts)} (টার্গেট)`, `ভিডিও পোস্ট: ${bn(videos)}`, `রিচ: ${bn(reach)} · মেসেজ: ${bn(msgs)} · অর্ডার: ${bn(orders)}`, `সময় পার, পোস্ট হয়নি: ${bn(late)}`, '', 'পেজ অনুযায়ী:']
@@ -1997,13 +2004,13 @@ function ReportView({ items, channels, types, occasions, team, channelTargets, m
 
             <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 12 }}>
-                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(posted.length)}/{bn(tPosts)}</b><small className="hint">পোস্ট / টার্গেট</small></div>
-                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(videos)}</b><small className="hint">ভিডিও পোস্ট</small></div>
-                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(reach)}</b><small className="hint">রিচ</small></div>
-                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(msgs)}</b><small className="hint">মেসেজ</small></div>
-                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{bn(orders)}</b><small className="hint">অর্ডার</small></div>
-                    <div><b style={{ display: 'block', fontSize: '1.5rem' }}>{conv}</b><small className="hint">মেসেজ থেকে অর্ডার</small></div>
-                    <div><b style={{ display: 'block', fontSize: '1.5rem', color: late ? '#DC2626' : undefined }}>{bn(late)}</b><small className="hint">সময় পার, পোস্ট হয়নি</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem', ...monoNum }}>{bn(posted.length)}/{bn(tPosts)}</b><small className="hint">পোস্ট / টার্গেট</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem', ...monoNum }}>{bn(videos)}</b><small className="hint">ভিডিও পোস্ট</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem', ...monoNum }}>{bn(reach)}</b><small className="hint">রিচ</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem', ...monoNum }}>{bn(msgs)}</b><small className="hint">মেসেজ</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem', ...monoNum }}>{bn(orders)}</b><small className="hint">অর্ডার</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem', ...monoNum }}>{conv}</b><small className="hint">মেসেজ থেকে অর্ডার</small></div>
+                    <div><b style={{ display: 'block', fontSize: '1.5rem', color: late ? '#DC2626' : undefined, ...monoNum }}>{bn(late)}</b><small className="hint">সময় পার, পোস্ট হয়নি</small></div>
                 </div>
                 <p className="hint" style={{ margin: '10px 0 0', fontSize: '0.8125rem' }}>রিচ, মেসেজ আর অর্ডারের হিসাব আসে পোস্টের পর প্রতিটি পেজে লেখা ফলাফল থেকে। না লিখলে এখানে শূন্য দেখাবে।</p>
             </motion.div>
@@ -2380,44 +2387,102 @@ function ItemModal({ editing, setEditing, types, channels, team, occasions, onCl
         : activeTeam
     const [commentText, setCommentText] = useState('')
     const [commentBy, setCommentBy] = useState(activeTeam[0]?.id || '')
+    const [showMore, setShowMore] = useState(false)
+    // Starts empty (not pre-filled with the selected type's name) so every post type the
+    // Settings page defines shows up by default — typing only narrows it further from there.
+    const [typeQuery, setTypeQuery] = useState('')
+    const [customChannelPicker, setCustomChannelPicker] = useState(false)
     const isEdit = !!editing.id
     const selectedType = editing.type
     const byPlatform: Record<Platform, Channel[]> = { facebook: [], instagram: [], tiktok: [], youtube: [] }
     channels.forEach(c => byPlatform[c.platform].push(c))
+    const selectedIds = editing._channelIds || []
+    const filteredTypes = typeQuery.trim() ? types.filter(t => t.name.toLowerCase().includes(typeQuery.trim().toLowerCase())) : types
 
     function setType(t: PostType) {
         setEditing({ ...editing, type: { id: t.id, name: t.name, kind: t.kind, caption_template: t.caption_template }, stage: KIND_INFO[t.kind].stages[0], caption: editing.caption?.trim() ? editing.caption : (t.caption_template || '') })
-    }
-    function toggleChannel(id: string) {
-        const ids = editing._channelIds || []
-        setEditing({ ...editing, _channelIds: ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id] })
+        // Doesn't touch the search box — filling it with the picked name would immediately
+        // filter the pill list down to just that match, hiding every other type to pick from.
     }
     function updateSlot(idx: number, patch: Partial<Slot>) {
         const slots = [...(editing.slots || [])]
         slots[idx] = { ...slots[idx], ...patch }
         setEditing({ ...editing, slots })
     }
+    // Channel picker is a dropdown of presets (all channels, or a whole platform) plus an
+    // explicit "নিজে বাছাই" that reveals the full toggleable pill grid for fine-grained picks —
+    // the preview line right below always shows exactly who ends up picked and when.
+    function selectChannelGroup(value: string) {
+        if (value === '__custom__') { setCustomChannelPicker(true); return }
+        setCustomChannelPicker(false)
+        if (value === '__all__') setEditing({ ...editing, _channelIds: channels.map(c => c.id) })
+        else if (value.startsWith('platform:')) setEditing({ ...editing, _channelIds: byPlatform[value.slice(9) as Platform].map(c => c.id) })
+    }
+    function toggleChannel(id: string) {
+        const ids = editing._channelIds || []
+        setEditing({ ...editing, _channelIds: ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id] })
+    }
+    const fullPlatform = (PLATFORMS as readonly Platform[]).find(p => byPlatform[p].length > 0 && byPlatform[p].every(c => selectedIds.includes(c.id)) && selectedIds.length === byPlatform[p].length)
+    const channelSelectValue = selectedIds.length === 0 ? ''
+        : selectedIds.length === channels.length ? '__all__'
+        : fullPlatform ? `platform:${fullPlatform}`
+        : '__custom__'
+    const showChannelPicker = customChannelPicker || channelSelectValue === '__custom__'
+    // Preview of who gets what date — real slot dates once saved, otherwise computed the same
+    // way the server will (grouped by platform, staggered by gap_days from the start date).
+    const previewSlots: { channelId: string; date: string }[] = isEdit
+        ? (editing.slots || []).map(s => ({ channelId: s.channel_id, date: s.date }))
+        : editing.start_date
+            ? (PLATFORMS as readonly Platform[]).flatMap(p => {
+                const ids = selectedIds.filter(id => byPlatform[p].some(c => c.id === id))
+                return ids.length ? buildSlotDates(ids, editing.start_date as string, editing.gap_days ?? 3) : []
+            })
+            : []
+
+    // For content that hasn't been saved yet, keep a draft slot per selected channel (date from
+    // the rotation, time from the field above) so "প্রতিটি পেজের তারিখ ও ফলাফল" can show — and let
+    // you hand-adjust — each one before it's created. Regenerates only when the channel set,
+    // start date or gap actually changes, so a manual per-row edit survives unrelated typing.
+    const draftKeyRef = useRef('')
+    useEffect(() => {
+        if (isEdit) return
+        const key = `${[...selectedIds].sort().join(',')}|${editing.start_date || ''}|${editing.gap_days ?? 3}`
+        if (key === draftKeyRef.current) return
+        draftKeyRef.current = key
+        if (!editing.start_date || !selectedIds.length) {
+            if ((editing.slots || []).length) setEditing({ ...editing, slots: [] })
+            return
+        }
+        const computed = (PLATFORMS as readonly Platform[]).flatMap(p => {
+            const ids = selectedIds.filter(id => byPlatform[p].some(c => c.id === id))
+            return ids.length ? buildSlotDates(ids, editing.start_date as string, editing.gap_days ?? 3) : []
+        })
+        setEditing({ ...editing, slots: computed.map(s => ({ channel_id: s.channelId, date: s.date, time: editing._time || null, posted: false, hook: null, reach: null, msgs: null, orders: null })) })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedIds.join(','), editing.start_date, editing.gap_days])
 
     const stages = selectedType ? KIND_INFO[selectedType.kind].stages : []
 
     return (
         <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                onClick={e => e.stopPropagation()} style={{ maxWidth: 560, width: '100%' }}>
+                onClick={e => e.stopPropagation()} style={{ maxWidth: 760, width: '100%' }}>
                 <div className="modal-header">
                     <h2 className="modal-title">{isEdit ? 'কন্টেন্ট এডিট' : 'নতুন কন্টেন্ট'}</h2>
                     <button className="btn btn-ghost btn-sm" onClick={onClose}><IconX size={18} /></button>
                 </div>
                 <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '65vh', overflowY: 'auto' }}>
                     <div className="form-group">
-                        <label className="form-label">পোস্টের ধরন *</label>
+                        <label className="form-label">কী ধরনের পোস্ট *</label>
+                        <input className="form-input" style={{ marginBottom: 6 }} value={typeQuery} onChange={e => setTypeQuery(e.target.value)} placeholder="টাইপ করে খুঁজুন…" />
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                            {types.map(t => (
+                            {filteredTypes.map(t => (
                                 <button key={t.id} type="button" onClick={() => setType(t)}
                                     style={{ padding: '4px 10px', borderRadius: 6, fontSize: '0.8125rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: selectedType?.id === t.id ? 'var(--color-text-primary)' : 'var(--color-surface)', color: selectedType?.id === t.id ? 'var(--color-bg-primary)' : undefined }}>
                                     {t.name}
                                 </button>
                             ))}
+                            {!filteredTypes.length && <span className="hint" style={{ fontSize: '0.8125rem' }}>কোনো ধরন মিলছে না</span>}
                         </div>
                     </div>
                     <div className="form-group">
@@ -2425,95 +2490,133 @@ function ItemModal({ editing, setEditing, types, channels, team, occasions, onCl
                         <input className="form-input" value={editing.title || ''} onChange={e => setEditing({ ...editing, title: e.target.value })} placeholder="যেমন: মিষ্টি তেঁতুলের ভিডিও" />
                     </div>
                     <div className="form-group">
-                        <label className="form-label">ক্যাপশন</label>
+                        <label className="form-label">ক্যাপশন (ঐচ্ছিক)</label>
                         <textarea className="form-input" rows={3} value={editing.caption || ''} onChange={e => setEditing({ ...editing, caption: e.target.value })} />
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                         <div className="form-group">
-                            <label className="form-label">শুরুর তারিখ</label>
+                            <label className="form-label">তারিখ</label>
                             <input className="form-input" type="date" value={editing.start_date || ''} onChange={e => setEditing({ ...editing, start_date: e.target.value })} />
                         </div>
                         <div className="form-group">
-                            <label className="form-label">পরের চ্যানেলে কত দিন পর</label>
-                            <input className="form-input" type="number" min={0} max={30} value={editing.gap_days ?? 3} onChange={e => setEditing({ ...editing, gap_days: Math.max(0, parseInt(e.target.value) || 0) })} />
+                            <label className="form-label">সময় (ঐচ্ছিক)</label>
+                            <input className="form-input" type="time" value={editing._time || ''} onChange={e => setEditing({ ...editing, _time: e.target.value })} />
                         </div>
                     </div>
                     <div className="form-group">
-                        <label className="form-label">চ্যানেল *</label>
-                        {PLATFORMS.map(p => byPlatform[p].length > 0 && (
-                            <div key={p} style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6, alignItems: 'center' }}>
-                                <span className="hint" style={{ fontSize: '0.75rem', width: 70 }}>{PLATFORM_LABEL[p]}</span>
-                                {byPlatform[p].map(c => (
+                        <label className="form-label">কোথায় যাবে *</label>
+                        <select className="form-input" value={channelSelectValue} onChange={e => selectChannelGroup(e.target.value)}>
+                            <option value="" disabled>— বেছে নিন —</option>
+                            <option value="__all__">সব চ্যানেল ({bn(channels.length)})</option>
+                            {PLATFORMS.map(p => byPlatform[p].length > 0 && (
+                                <option key={p} value={`platform:${p}`}>সব {PLATFORM_LABEL[p]} ({bn(byPlatform[p].length)})</option>
+                            ))}
+                            <option value="__custom__">নিজে বাছাই...</option>
+                        </select>
+                        {showChannelPicker && (
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 8 }}>
+                                {channels.map(c => (
                                     <button key={c.id} type="button" onClick={() => toggleChannel(c.id)}
-                                        style={{ padding: '3px 9px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: (editing._channelIds || []).includes(c.id) ? PLATFORM_COLOR[p] : 'var(--color-surface)', color: (editing._channelIds || []).includes(c.id) ? '#fff' : undefined }}>
+                                        style={{ padding: '3px 9px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: selectedIds.includes(c.id) ? PLATFORM_COLOR[c.platform] : 'var(--color-surface)', color: selectedIds.includes(c.id) ? '#fff' : undefined }}>
                                         {c.name}
                                     </button>
                                 ))}
                             </div>
-                        ))}
+                        )}
+                        {previewSlots.length > 0 && (
+                            <p className="hint" style={{ fontSize: '0.75rem', margin: '6px 0 0' }}>
+                                {[...previewSlots].sort((a, b) => a.date.localeCompare(b.date)).map(s => `${channels.find(c => c.id === s.channelId)?.name || '(মুছে ফেলা চ্যানেল)'} ${shortDateBn(s.date)}`).join(' · ')}
+                            </p>
+                        )}
                     </div>
 
-                    {isEdit && (editing.slots || []).length > 0 && (
-                        <div className="form-group">
-                            <label className="form-label">প্রতিটি চ্যানেলের তারিখ ও ফলাফল</label>
-                            {(editing.slots || []).map((s, k) => {
-                                const ch = channels.find(c => c.id === s.channel_id)
-                                return (
-                                    <div key={s.id || k} style={{ border: '1px solid var(--color-border-light)', borderRadius: 8, padding: 8, marginBottom: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                                            <b style={{ fontSize: '0.8125rem' }}>{ch?.name || '(মুছে ফেলা চ্যানেল)'}</b>
-                                            <input className="form-input" type="date" style={{ width: 150 }} value={s.date} onChange={e => updateSlot(k, { date: e.target.value })} />
-                                            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.8125rem' }}>
-                                                <input type="checkbox" checked={s.posted} onChange={e => updateSlot(k, { posted: e.target.checked })} /> পোস্টেড
-                                            </label>
-                                            <button type="button" className="btn btn-ghost btn-icon" title="ক্যাপশন কপি করুন" onClick={() => onCopyCaption(editing as ContentItem, s)}><IconClipboard size={14} /></button>
-                                        </div>
-                                        {s.posted && (
-                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-                                                <input className="form-input" type="number" placeholder="রিচ" value={s.reach ?? ''} onChange={e => updateSlot(k, { reach: e.target.value === '' ? null : Number(e.target.value) })} />
-                                                <input className="form-input" type="number" placeholder="মেসেজ" value={s.msgs ?? ''} onChange={e => updateSlot(k, { msgs: e.target.value === '' ? null : Number(e.target.value) })} />
-                                                <input className="form-input" type="number" placeholder="অর্ডার" value={s.orders ?? ''} onChange={e => updateSlot(k, { orders: e.target.value === '' ? null : Number(e.target.value) })} />
-                                            </div>
-                                        )}
+                    <button type="button" onClick={() => setShowMore(v => !v)} className="hint"
+                        style={{ fontSize: '0.8125rem', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
+                        <span style={{ display: 'inline-block', transform: showMore ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+                        আরো অপশন
+                    </button>
+
+                    {showMore && (
+                        <>
+                            {stages.length > 0 && (
+                                <div className="form-group">
+                                    <label className="form-label">ধাপ ও দায়িত্ব</label>
+                                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+                                        {stages.map(s => (
+                                            <button key={s} type="button" onClick={() => setEditing({ ...editing, stage: s })}
+                                                style={{ padding: '3px 9px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: editing.stage === s ? 'var(--color-text-primary)' : 'var(--color-surface)', color: editing.stage === s ? 'var(--color-bg-primary)' : undefined }}>
+                                                {STAGE_INFO[s].label}
+                                            </button>
+                                        ))}
                                     </div>
-                                )
-                            })}
-                        </div>
-                    )}
+                                    <select className="form-input" value={editing.assignee?.id || ''} onChange={e => { const m = team.find(x => x.id === e.target.value); setEditing({ ...editing, assignee: m ? { id: m.id, name: m.name } : null }) }}>
+                                        <option value="">— বেছে নিন —</option>
+                                        {assigneeOptions.map(m => <option key={m.id} value={m.id}>{m.name}{!m.active ? ' (বন্ধ)' : ''}</option>)}
+                                    </select>
+                                </div>
+                            )}
 
-                    {isEdit && stages.length > 0 && (
-                        <div className="form-group">
-                            <label className="form-label">ধাপ ও দায়িত্ব</label>
-                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
-                                {stages.map(s => (
-                                    <button key={s} type="button" onClick={() => setEditing({ ...editing, stage: s })}
-                                        style={{ padding: '3px 9px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: editing.stage === s ? 'var(--color-text-primary)' : 'var(--color-surface)', color: editing.stage === s ? 'var(--color-bg-primary)' : undefined }}>
-                                        {STAGE_INFO[s].label}
-                                    </button>
-                                ))}
+                            {(editing.slots || []).length > 0 && (
+                                <div className="form-group">
+                                    <label className="form-label">প্রতিটি পেজের তারিখ ও ফলাফল</label>
+                                    <div style={{ marginBottom: 8 }}>
+                                        <label className="form-label" style={{ fontWeight: 400 }}>পরের পেজে কত দিন পর</label>
+                                        <input className="form-input" type="number" min={0} max={30} value={editing.gap_days ?? 3} onChange={e => setEditing({ ...editing, gap_days: Math.max(0, parseInt(e.target.value) || 0) })} />
+                                    </div>
+                                    {(editing.slots || []).map((s, k) => {
+                                        const ch = channels.find(c => c.id === s.channel_id)
+                                        return (
+                                            <div key={s.id || k} style={{ border: '1px solid var(--color-border-light)', borderRadius: 8, padding: 8, marginBottom: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                                    {ch && <ChannelIcon channel={ch} size={24} />}
+                                                    <b style={{ fontSize: '0.8125rem' }}>{ch?.name || '(মুছে ফেলা চ্যানেল)'}</b>
+                                                    <input className="form-input" type="date" style={{ width: 150 }} value={s.date} onChange={e => updateSlot(k, { date: e.target.value })} />
+                                                    <input className="form-input" type="time" style={{ width: 120 }} value={s.time || ''} onChange={e => updateSlot(k, { time: e.target.value || null })} />
+                                                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.8125rem' }}>
+                                                        <input type="checkbox" checked={s.posted} onChange={e => updateSlot(k, { posted: e.target.checked })} /> পোস্টেড
+                                                    </label>
+                                                    <button type="button" className="btn btn-ghost btn-icon" title="ক্যাপশন কপি করুন" onClick={() => onCopyCaption(editing as ContentItem, s)}><IconClipboard size={14} /></button>
+                                                </div>
+                                                {s.posted && (
+                                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                                                        <input className="form-input" type="number" placeholder="রিচ" value={s.reach ?? ''} onChange={e => updateSlot(k, { reach: e.target.value === '' ? null : Number(e.target.value) })} />
+                                                        <input className="form-input" type="number" placeholder="মেসেজ" value={s.msgs ?? ''} onChange={e => updateSlot(k, { msgs: e.target.value === '' ? null : Number(e.target.value) })} />
+                                                        <input className="form-input" type="number" placeholder="অর্ডার" value={s.orders ?? ''} onChange={e => updateSlot(k, { orders: e.target.value === '' ? null : Number(e.target.value) })} />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            )}
+
+                            {!(editing.slots || []).length && (
+                                <div className="form-group">
+                                    <label className="form-label" style={{ fontWeight: 400 }}>পরের পেজে কত দিন পর</label>
+                                    <input className="form-input" type="number" min={0} max={30} value={editing.gap_days ?? 3} onChange={e => setEditing({ ...editing, gap_days: Math.max(0, parseInt(e.target.value) || 0) })} />
+                                </div>
+                            )}
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                                <div className="form-group">
+                                    <label className="form-label">উপলক্ষ</label>
+                                    <select className="form-input" value={editing.occasion?.id || ''}
+                                        onChange={e => { const o = occasions.find(x => x.id === e.target.value); setEditing({ ...editing, occasion: o ? { id: o.id, name: o.name, date: o.date } : null }) }}>
+                                        <option value="">— নেই —</option>
+                                        {occasions.filter(o => o.date >= getLocalDateString() || o.id === editing.occasion?.id).sort((a, b) => a.date.localeCompare(b.date)).map(o => (
+                                            <option key={o.id} value={o.id}>{o.name} — {formatDate(o.date)}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="form-group"><label className="form-label">প্রোডাক্ট কোড</label><input className="form-input" placeholder="ঐচ্ছিক" value={editing.product_code || ''} onChange={e => setEditing({ ...editing, product_code: e.target.value })} /></div>
                             </div>
-                            <select className="form-input" value={editing.assignee?.id || ''} onChange={e => { const m = team.find(x => x.id === e.target.value); setEditing({ ...editing, assignee: m ? { id: m.id, name: m.name } : null }) }}>
-                                <option value="">— বেছে নিন —</option>
-                                {assigneeOptions.map(m => <option key={m.id} value={m.id}>{m.name}{!m.active ? ' (বন্ধ)' : ''}</option>)}
-                            </select>
-                        </div>
+
+                            <div className="form-group">
+                                <label className="form-label">নোট</label>
+                                <textarea className="form-input" rows={2} placeholder="টিমের জন্য নির্দেশনা" value={editing.notes || ''} onChange={e => setEditing({ ...editing, notes: e.target.value })} />
+                            </div>
+                        </>
                     )}
-
-                    <div className="form-group">
-                        <label className="form-label">উপলক্ষ</label>
-                        <select className="form-input" value={editing.occasion?.id || ''}
-                            onChange={e => { const o = occasions.find(x => x.id === e.target.value); setEditing({ ...editing, occasion: o ? { id: o.id, name: o.name, date: o.date } : null }) }}>
-                            <option value="">— নেই —</option>
-                            {occasions.filter(o => o.date >= getLocalDateString() || o.id === editing.occasion?.id).sort((a, b) => a.date.localeCompare(b.date)).map(o => (
-                                <option key={o.id} value={o.id}>{o.name} — {formatDate(o.date)}</option>
-                            ))}
-                        </select>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                        <div className="form-group"><label className="form-label">প্রোডাক্ট কোড</label><input className="form-input" value={editing.product_code || ''} onChange={e => setEditing({ ...editing, product_code: e.target.value })} /></div>
-                        <div className="form-group"><label className="form-label">নোট</label><input className="form-input" value={editing.notes || ''} onChange={e => setEditing({ ...editing, notes: e.target.value })} /></div>
-                    </div>
 
                     {isEdit && (
                         <div className="form-group">

@@ -57,10 +57,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         await db.query(`DELETE FROM content_calendar_slots WHERE item_id = $1`, [id])
         for (const s of body.slots) {
             if (!s || typeof s.channel_id !== 'string' || typeof s.date !== 'string') continue
+            const time = typeof s.time === 'string' && /^\d{2}:\d{2}(:\d{2})?$/.test(s.time) ? s.time : null
             await db.query(
-                `INSERT INTO content_calendar_slots (item_id, channel_id, date, posted, hook, reach, msgs, orders)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-                [id, s.channel_id, s.date, !!s.posted, s.hook || null,
+                `INSERT INTO content_calendar_slots (item_id, channel_id, date, time, posted, hook, reach, msgs, orders)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                [id, s.channel_id, s.date, time, !!s.posted, s.hook || null,
                  s.reach === '' || s.reach == null ? null : Number(s.reach),
                  s.msgs === '' || s.msgs == null ? null : Number(s.msgs),
                  s.orders === '' || s.orders == null ? null : Number(s.orders)]
