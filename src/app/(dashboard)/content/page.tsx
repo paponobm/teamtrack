@@ -830,10 +830,15 @@ export default function ContentCalendarPage() {
                         {/* <p className="page-subtitle">আইডিয়া থেকে পোস্ট হওয়া পর্যন্ত প্রতিটি সোশ্যাল পোস্ট প্ল্যান, দায়িত্ব ও ট্র্যাক করুন।</p> */}
                     </div>
                      {view !== 'settings' && (
-                        <button className="btn" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={() => openAdd()}>
-                            <IconPlus size={16} /> নতুন কন্টেন্ট
-                        </button>
-                    )} 
+                        <div style={{ display: 'flex', flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                            <button className="btn" style={{ background: 'transparent', color: '#B0175A', border: '1.5px solid #B0175A' }} onClick={() => setBulkAddDate(selectedDate)}>
+                                ☰ একসাথে অনেকগুলো
+                            </button>
+                            <button className="btn" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={() => openAdd()}>
+                                <IconPlus size={16} /> নতুন কন্টেন্ট
+                            </button>
+                        </div>
+                    )}
                 </motion.div>
 
                 <motion.div variants={item_} style={{ display: 'flex', gap: '6px', padding: '6px', width: 'fit-content', borderRadius: '16px', background: 'rgba(118,118,128,0.08)', marginBottom: '20px' }}>
@@ -2787,7 +2792,7 @@ function BulkAddModal({ date, types, channels, onClose, onSaveAll }: {
     return (
         <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div className="modal" initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                onClick={e => e.stopPropagation()} style={{ maxWidth: 560, width: '100%' }}>
+                onClick={e => e.stopPropagation()} style={{ maxWidth: 760, width: '100%' }}>
                 <div className="modal-header">
                     <h2 className="modal-title">একসাথে অনেকগুলো পোস্ট</h2>
                     <button className="btn btn-ghost btn-sm" onClick={onClose}><IconX size={18} /></button>
