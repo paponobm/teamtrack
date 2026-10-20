@@ -183,7 +183,7 @@ function ChannelAvatar({ photoUrl, platform, onUpload, size = 60 }: { photoUrl: 
                 {photoUrl
                     ? <img src={photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in' }} onClick={() => setZoomed(true)} />
                     : <Icon size={size * 0.45} />}
-                <label style={{ position: 'absolute', bottom: -2, right: -2, width: 20, height: 20, borderRadius: '50%', background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', cursor: 'pointer' }} title="ছবি আপলোড করুন">
+                <label style={{ position: 'absolute', bottom: -2, right: -2, width: 20, height: 20, borderRadius: '50%', background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-secondary)', cursor: 'pointer' }} title="ছবি আপলোড করুন">
                     <IconCamera size={12} />
                     <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) onUpload(f); e.target.value = '' }} />
                 </label>
@@ -1003,7 +1003,7 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
             <button key={ds} onClick={() => setSelectedDate(ds)}
                 style={{
                     minHeight: 58, padding: '4px 5px', borderRadius: 8, textAlign: 'left', cursor: 'pointer',
-                    background: isToday ? '#B0175A' : isPast ? 'var(--color-bg-tertiary, #E2E8F0)' : 'var(--color-surface)',
+                    background: isToday ? '#B0175A' : isPast ? 'var(--color-bg-tertiary, #E2E8F0)' : 'var(--color-bg-secondary)',
                     border: isSel ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)',
                     boxShadow: lead ? 'inset 0 3px 0 #6A3FC8' : undefined,
                     color: isToday ? '#fff' : 'var(--color-text-primary)', display: 'flex', flexDirection: 'column', gap: 2,
@@ -1050,7 +1050,7 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                                 const cTarget = channelTargets.find(t => t.channel_id === c.id)?.posts || 0
                                 const cVideoTarget = channelTargets.find(t => t.channel_id === c.id)?.videos || 0
                                 return (
-                                    <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 10, border: '1px solid var(--color-border-light)', background: 'var(--color-surface)' }}>
+                                    <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 10, border: '1px solid var(--color-border-light)', background: 'var(--color-bg-secondary)' }}>
                                         <ChannelIcon channel={c} size={22} />
                                         <span style={{ fontSize: '0.8125rem', fontWeight: 600, whiteSpace: 'nowrap' }}>{c.name} {bn(cPosted)}/{bn(cTarget)}{cVideoTarget > 0 ? ` · ভিডিও ${bn(cVideoTarget)}` : ''}</span>
                                     </div>
@@ -1062,14 +1062,14 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
             )}
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
-                <select className="form-input" style={{ width: 'auto', height: 36,  background: '#fff',fontWeight: 700,}} value={monthPerson} onChange={e => setMonthPerson(e.target.value)}>
+                <select className="form-input" style={{ width: 'auto', height: 36, background: '#fff', color: '#1F2937', fontWeight: 700 }} value={monthPerson} onChange={e => setMonthPerson(e.target.value)}>
                     <option value="">সবাই</option>
                     {team.map(mem => <option key={mem.id} value={mem.id}>{mem.name}</option>)}
                 </select>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', }} onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                    <button className="btn btn-secondary btn-sm" style={{ height: 36, fontWeight: 700, background: '#fff',  }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
-                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff',  }} onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937' }} onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ height: 36, fontWeight: 700, background: '#fff', color: '#1F2937' }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937' }} onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
                 </div>
             </motion.div>
 
@@ -1090,7 +1090,7 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                             const target = channelTargets.find(t => t.channel_id === c.id)?.posts || 0
                             const pct = target > 0 ? Math.min(100, Math.round(planned / target * 100)) : 0
                             return (
-                                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 10, border: '1px solid var(--color-border-light)', background: 'var(--color-surface)' }}>
+                                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 10, border: '1px solid var(--color-border-light)', background: 'var(--color-bg-secondary)' }}>
                                     <ChannelIcon channel={c} size={22} />
                                     <span style={{ fontSize: '0.8125rem', fontWeight: 600, whiteSpace: 'nowrap' }}>{c.name} {bn(planned)}/{bn(target)}</span>
                                     <span style={{ width: 50, height: 4, borderRadius: 2, background: 'var(--color-border-light)', overflow: 'hidden', flexShrink: 0 }}>
@@ -1160,7 +1160,7 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                                                 {item.assignee && <span>{item.assignee.name}</span>}
                                             </div>
                                         </div>
-                                        <button className="btn btn-sm" style={{ background: slot.posted ? 'rgba(22,163,74,0.12)' : 'var(--color-surface-secondary, #F1F5F9)', color: slot.posted ? '#16A34A' : undefined, border: 'none', whiteSpace: 'nowrap' }} onClick={() => togglePosted(item, slot)}>
+                                        <button className="btn btn-sm" style={{ background: slot.posted ? 'rgba(22,163,74,0.12)' : 'var(--color-bg-secondary)', color: slot.posted ? '#16A34A' : undefined, border: 'none', whiteSpace: 'nowrap' }} onClick={() => togglePosted(item, slot)}>
                                             {slot.posted ? '✓ পোস্টেড' : 'পোস্ট হয়েছে'}
                                         </button>
                                     </div>
@@ -1243,21 +1243,21 @@ function BoardView({ items, team, channelById, month, setMonth, openEdit, advanc
                     {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </select>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                    <button className="btn btn-secondary btn-sm" style={{ height: 36, fontWeight: 700, background: '#fff', border: '1.5px solid #B0175A' }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
-                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ height: 36, fontWeight: 700, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
                 </div>
             </motion.div>
             <p className="hint" style={{ margin: '0 0 12px', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>প্রতিটি ধাপের জন্য আলাদা কলাম। প্রতিটি পোস্ট ফরম্যাটের নিজস্ব ধাপ আছে, আর প্রতি ধাপে সঠিক ব্যক্তি অটো দায়িত্ব পান।</p>
             <motion.div variants={item_} className="board-scroll" style={{ display: 'flex', gap: 12, overflowX: 'scroll', paddingBottom: 12 }}>
                 {cols.map(c => (
-                    <div key={c.key} style={{ flex: '0 0 260px', background: 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 12, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div key={c.key} style={{ flex: '0 0 260px', background: 'var(--color-bg-secondary)', borderRadius: 12, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <h3 style={{ fontSize: '0.875rem', display: 'flex', justifyContent: 'space-between' }}>{c.label}<span className="hint" style={monoNum}>{bn(c.items.length)}</span></h3>
                         {c.items.map(it => <BoardCard key={it.id} it={it} channelById={channelById} onOpen={openEdit} onAdvance={advanceStage} />)}
                     </div>
                 ))}
                 {[{ key: 'ready', label: 'পোস্টের জন্য প্রস্তুত', items: ready }, { key: 'done', label: 'সব পোস্টেড', items: done }].map(c => (
-                    <div key={c.key} style={{ flex: '0 0 260px', background: 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 12, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div key={c.key} style={{ flex: '0 0 260px', background: 'var(--color-bg-secondary)', borderRadius: 12, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <h3 style={{ fontSize: '0.875rem', display: 'flex', justifyContent: 'space-between' }}>{c.label}<span className="hint" style={monoNum}>{bn(c.items.length)}</span></h3>
                         {c.items.map(it => <BoardCard key={it.id} it={it} channelById={channelById} onOpen={openEdit} onAdvance={advanceStage} />)}
                         {!c.items.length && <span className="hint">খালি</span>}
@@ -1308,12 +1308,12 @@ function WorkView({ items, team, month, setMonth, workStage, setWorkStage, workP
             </motion.div>
 
             <motion.div variants={item_} style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 16, paddingBottom: 4 }}>
-                <button onClick={() => setWorkStage('')} style={{ flex: '0 0 auto', padding: '8px 12px', borderRadius: 10, border: workStage === '' ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-surface)', minWidth: 90, textAlign: 'left' }}>
-                    <b style={{ display: 'block', fontSize: '1.25rem', ...monoNum }}>{bn(active.length)}</b><small className="hint">সব ধাপ</small>
+                <button onClick={() => setWorkStage('')} style={{ flex: '0 0 auto', padding: '8px 12px', borderRadius: 10, border: workStage === '' ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-bg-secondary)', minWidth: 90, textAlign: 'left' }}>
+                    <b style={{ display: 'block', fontSize: '1.25rem', color: 'var(--color-text-primary)', ...monoNum }}>{bn(active.length)}</b><small style={{ color: 'var(--color-text-primary)' }}>সব ধাপ</small>
                 </button>
                 {stageCounts.map(s => (
-                    <button key={s.key} onClick={() => setWorkStage(s.key)} style={{ flex: '0 0 auto', padding: '8px 12px', borderRadius: 10, border: workStage === s.key ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-surface)', minWidth: 90, textAlign: 'left' }}>
-                        <b style={{ display: 'block', fontSize: '1.25rem', ...monoNum }}>{bn(s.count)}</b><small className="hint">{s.label}</small>
+                    <button key={s.key} onClick={() => setWorkStage(s.key)} style={{ flex: '0 0 auto', padding: '8px 12px', borderRadius: 10, border: workStage === s.key ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-bg-secondary)', minWidth: 90, textAlign: 'left' }}>
+                        <b style={{ display: 'block', fontSize: '1.25rem', color: 'var(--color-text-primary)', ...monoNum }}>{bn(s.count)}</b><small style={{ color: 'var(--color-text-primary)' }}>{s.label}</small>
                     </button>
                 ))}
             </motion.div>
@@ -1351,7 +1351,7 @@ function WorkView({ items, team, month, setMonth, workStage, setWorkStage, workP
                     const daysInStage = Math.max(0, daysBetween(stageStart, todayStr))
                     return (
                         <div key={it.id} style={{ display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 10, alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--color-border-light)' }}>
-                            <div style={{ textAlign: 'center', background: isItemLate(it) ? 'rgba(220,38,38,0.08)' : 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 8, padding: '3px 0' }}>
+                            <div style={{ textAlign: 'center', background: isItemLate(it) ? 'rgba(220,38,38,0.08)' : 'var(--color-bg-secondary)', borderRadius: 8, padding: '3px 0' }}>
                                 <small className="hint" style={{ display: 'block', fontSize: '0.6875rem' }}>{BN_DSHORT[d.getDay()]}</small>
                                 <b style={{ display: 'block', fontSize: '1rem', ...monoNum }}>{bn(d.getDate())}</b>
                                 <small className="hint" style={{ display: 'block', fontSize: '0.6875rem' }}>{BN_MSHORT[d.getMonth()]}</small>
@@ -1461,8 +1461,8 @@ function PagesView({ channels, month, setMonth, monthStart, monthEnd, todayStr, 
             <motion.div variants={item_} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
                 {channels.map(c => (
                     <button key={c.id} onClick={() => setPageChannel(c.id)}
-                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderRadius: 10, fontSize: '0.9375rem', fontWeight: 600, border: c.id === current ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-surface)' }}>
-                        <ChannelIcon channel={c} size={26} />{c.name}<span className="hint">{bn(countFor(c.id))}</span>
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderRadius: 10, fontSize: '0.9375rem', fontWeight: 600, color: 'var(--color-text-primary)', border: c.id === current ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-bg-secondary)' }}>
+                        <ChannelIcon channel={c} size={26} />{c.name}<span style={{ color: 'var(--color-text-primary)' }}>{bn(countFor(c.id))}</span>
                     </button>
                 ))}
             </motion.div>
@@ -1504,7 +1504,7 @@ function OccasionsView({ occasions, items, todayStr, showPastOcc, setShowPastOcc
         const when = n < 0 ? `${bn(-n)} দিন আগে গেছে` : n === 0 ? 'আজ' : `আর ${bn(n)} দিন`
         const prep = n < 0 ? null : todayStr >= prepStart
             ? <Pill label={`প্রস্তুতি চলছে (শুরু ${formatDate(prepStart)})`} bg="rgba(106,63,200,0.1)" color="#6A3FC8" />
-            : <Pill label={`প্রস্তুতি শুরু ${formatDate(prepStart)}`} bg="var(--color-surface-secondary, #F1F5F9)" color="var(--color-text-tertiary)" />
+            : <Pill label={`প্রস্তুতি শুরু ${formatDate(prepStart)}`} bg="var(--color-bg-secondary)" color="var(--color-text-tertiary)" />
         return (
             <div style={{ display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 12, padding: '12px 0', borderTop: '1px solid var(--color-border-light)', opacity: n < 0 ? 0.6 : 1 }}>
                 <div style={{ textAlign: 'center', background: 'rgba(106,63,200,0.1)', color: '#6A3FC8', borderRadius: 8, padding: '4px 0' }}>
@@ -1644,7 +1644,7 @@ function PostBankView({ submissions, types, submissionEdit, setSubmissionEdit, o
             <motion.div variants={item_} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
                 {(['pending', 'returned', 'idea', 'scheduled'] as SubmissionStatus[]).map(s => (
                     <button key={s} onClick={() => setTab(s)}
-                        style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: 999, fontSize: '0.8125rem', fontWeight: 600, border: tab === s ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-surface)' }}>
+                        style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: 999, fontSize: '0.8125rem', fontWeight: 600, color: 'var(--color-text-primary)', border: tab === s ? '2px solid var(--color-text-primary)' : '1px solid var(--color-border-light)', background: 'var(--color-bg-secondary)' }}>
                         {SUBMISSION_STATUS_LABEL[s]}
                         <span style={{ minWidth: 18, height: 18, padding: '0 5px', borderRadius: '50%', background: '#B0175A', color: '#fff', fontSize: '0.6875rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                             {bn(counts[s])}
@@ -1664,7 +1664,7 @@ function PostBankView({ submissions, types, submissionEdit, setSubmissionEdit, o
                             )}
                         </div>
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>
-                            {x.type_text && <Pill label={x.type_text} bg="var(--color-surface-secondary, #F1F5F9)" color="var(--color-text-secondary)" />}
+                            {x.type_text && <Pill label={x.type_text} bg="var(--color-bg-secondary)" color="var(--color-text-secondary)" />}
                             {x.by_employee && <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>{avatar(x.by_employee.name, null, 16)}{x.by_employee.name}</span>}
                             <span>· জমা {formatDate(x.created_at.slice(0, 10))}</span>
                         </div>
@@ -1674,7 +1674,7 @@ function PostBankView({ submissions, types, submissionEdit, setSubmissionEdit, o
                         {x.status === 'scheduled' && x.scheduled_item && (
                             <div style={{ fontSize: '0.8125rem' }}><Pill label={`শিডিউল হয়েছে: ${x.scheduled_item.title}`} bg="rgba(22,163,74,0.1)" color="#16A34A" /></div>
                         )}
-                        {x.caption && <div className="hint" style={{ fontSize: '0.8125rem', background: 'var(--color-surface-secondary, #F1F5F9)', borderRadius: 8, padding: '8px 10px', whiteSpace: 'pre-wrap' }}>{x.caption}</div>}
+                        {x.caption && <div className="hint" style={{ fontSize: '0.8125rem', background: 'var(--color-bg-secondary)', borderRadius: 8, padding: '8px 10px', whiteSpace: 'pre-wrap' }}>{x.caption}</div>}
                         {x.status !== 'scheduled' && (
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
                                 <button className="btn btn-secondary btn-sm" onClick={() => onEdit(x)}>এডিট</button>
@@ -1742,7 +1742,7 @@ function SeriesView({ series, items, types, channels, channelById, month, setMon
                             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                                 {WEEK_ORDER.map(d => (
                                     <button key={d} type="button" onClick={() => toggleDay(d)}
-                                        style={{ padding: '4px 10px', borderRadius: 6, fontSize: '0.8125rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: (f.days_of_week || []).includes(d) ? 'var(--color-text-primary)' : 'var(--color-surface)', color: (f.days_of_week || []).includes(d) ? 'var(--color-bg-primary)' : undefined }}>
+                                        style={{ padding: '4px 10px', borderRadius: 6, fontSize: '0.8125rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: (f.days_of_week || []).includes(d) ? 'var(--color-text-primary)' : 'var(--color-bg-secondary)', color: (f.days_of_week || []).includes(d) ? 'var(--color-bg-primary)' : 'var(--color-text-primary)' }}>
                                         {BN_DAYS[d]}
                                     </button>
                                 ))}
@@ -1755,7 +1755,7 @@ function SeriesView({ series, items, types, channels, channelById, month, setMon
                                     const Icon = PLATFORM_ICON[c.platform]
                                     return (
                                         <button key={c.id} type="button" onClick={() => toggleChannel(c.id)}
-                                            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 6, fontSize: '0.8125rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: (f.channel_ids || []).includes(c.id) ? PLATFORM_COLOR[c.platform] : 'var(--color-surface)', color: (f.channel_ids || []).includes(c.id) ? '#fff' : undefined }}>
+                                            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 6, fontSize: '0.8125rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: (f.channel_ids || []).includes(c.id) ? PLATFORM_COLOR[c.platform] : 'var(--color-bg-secondary)', color: (f.channel_ids || []).includes(c.id) ? '#fff' : 'var(--color-text-primary)' }}>
                                             <Icon size={14} />{c.name}
                                         </button>
                                     )
@@ -1879,7 +1879,7 @@ function TargetBar({ target, planned, posted, expected }: { target: number; plan
     const met = target > 0 && posted >= target
     const mk = target && expected ? Math.min(100, expected / max * 100) : null
     return (
-        <div style={{ position: 'relative', height: 8, borderRadius: 4, background: 'var(--color-surface-secondary, #F1F5F9)', overflow: 'hidden', minWidth: 80 }}>
+        <div style={{ position: 'relative', height: 8, borderRadius: 4, background: 'var(--color-bg-secondary)', overflow: 'hidden', minWidth: 80 }}>
             <div style={{ position: 'absolute', inset: '0 auto 0 0', width: `${pw}%`, borderRadius: 4, background: 'rgba(176,23,90,0.25)' }} />
             <div style={{ position: 'absolute', inset: '0 auto 0 0', width: `${po}%`, borderRadius: 4, background: met ? '#16A34A' : '#B0175A' }} />
             {mk != null && <div style={{ position: 'absolute', top: -2, bottom: -2, width: 2, background: 'var(--color-text-primary)', opacity: 0.55, left: `${mk}%` }} />}
@@ -2308,7 +2308,7 @@ function ProductsView({ items, products, monthStart, monthEnd, todayStr, showEdi
                                     : (r.since === null || r.since >= 30) && <Pill label="প্ল্যানে নেই" bg="rgba(220,38,38,0.1)" color="#DC2626" />}
                                 <span>· এ মাসে {bn(r.month)}টা</span>
                                 {r.orders > 0 && <span>· মোট অর্ডার {bn(r.orders)}</span>}
-                                {!r.inCat && <Pill label="তালিকায় নেই" bg="var(--color-surface-secondary, #F1F5F9)" color="var(--color-text-secondary)" />}
+                                {!r.inCat && <Pill label="তালিকায় নেই" bg="var(--color-bg-secondary)" color="var(--color-text-secondary)" />}
                             </div>
                         </div>
                         <button className="btn btn-sm" style={{ background: '#B0175A', color: '#fff', border: 'none', whiteSpace: 'nowrap' }} onClick={() => onAddContent(r.code, r.name)}>+ কন্টেন্ট</button>
@@ -2471,7 +2471,7 @@ function SettingsView({ channels, types, team, isSuperAdmin, newChannelDraft, se
                                 <summary className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', listStyle: 'none' }}>
                                     {restricted ? `${bn(m.allowed_tabs.length)}/${bn(CONTENT_TABS.length)} ট্যাব` : 'সব ট্যাব'}
                                 </summary>
-                                <div style={{ position: 'absolute', zIndex: 10, marginTop: 6, padding: 10, background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', borderRadius: 10, boxShadow: '0 8px 20px rgba(0,0,0,0.12)', minWidth: 220 }}>
+                                <div style={{ position: 'absolute', zIndex: 10, marginTop: 6, padding: 10, background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border-light)', borderRadius: 10, boxShadow: '0 8px 20px rgba(0,0,0,0.12)', minWidth: 220 }}>
                                     <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', marginBottom: 6 }} onClick={() => selectAllTeamTabs(m)}>
                                         সব সিলেক্ট করুন
                                     </button>
@@ -2601,7 +2601,7 @@ function ItemModal({ editing, setEditing, types, channels, team, occasions, onCl
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                             {filteredTypes.map(t => (
                                 <button key={t.id} type="button" onClick={() => setType(t)}
-                                    style={{ padding: '4px 10px', borderRadius: 6, fontSize: '0.8125rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: selectedType?.id === t.id ? 'var(--color-text-primary)' : 'var(--color-surface)', color: selectedType?.id === t.id ? 'var(--color-bg-primary)' : undefined }}>
+                                    style={{ padding: '4px 10px', borderRadius: 6, fontSize: '0.8125rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: selectedType?.id === t.id ? 'var(--color-text-primary)' : 'var(--color-bg-secondary)', color: selectedType?.id === t.id ? 'var(--color-bg-primary)' : 'var(--color-text-primary)' }}>
                                     {t.name}
                                 </button>
                             ))}
@@ -2640,7 +2640,7 @@ function ItemModal({ editing, setEditing, types, channels, team, occasions, onCl
                             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 8 }}>
                                 {channels.map(c => (
                                     <button key={c.id} type="button" onClick={() => toggleChannel(c.id)}
-                                        style={{ padding: '3px 9px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: selectedIds.includes(c.id) ? PLATFORM_COLOR[c.platform] : 'var(--color-surface)', color: selectedIds.includes(c.id) ? '#fff' : undefined }}>
+                                        style={{ padding: '3px 9px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: selectedIds.includes(c.id) ? PLATFORM_COLOR[c.platform] : 'var(--color-bg-secondary)', color: selectedIds.includes(c.id) ? '#fff' : 'var(--color-text-primary)' }}>
                                         {c.name}
                                     </button>
                                 ))}
@@ -2667,7 +2667,7 @@ function ItemModal({ editing, setEditing, types, channels, team, occasions, onCl
                                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
                                         {stages.map(s => (
                                             <button key={s} type="button" onClick={() => setEditing({ ...editing, stage: s })}
-                                                style={{ padding: '3px 9px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: editing.stage === s ? 'var(--color-text-primary)' : 'var(--color-surface)', color: editing.stage === s ? 'var(--color-bg-primary)' : undefined }}>
+                                                style={{ padding: '3px 9px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--color-border-light)', background: editing.stage === s ? 'var(--color-text-primary)' : 'var(--color-bg-secondary)', color: editing.stage === s ? 'var(--color-bg-primary)' : 'var(--color-text-primary)' }}>
                                                 {STAGE_INFO[s].label}
                                             </button>
                                         ))}
