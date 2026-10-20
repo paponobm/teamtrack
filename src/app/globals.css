@@ -1939,3 +1939,15 @@ input[type="date"].form-input::-webkit-calendar-picker-indicator {
 .content-calendar-page .board-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-tertiary);
 }
+
+/* Every primary button in the Content Calendar uses the page's pink accent instead of the
+   site-wide default blue, to match the "নতুন কন্টেন্ট" button. */
+.content-calendar-page .btn-primary {
+  background: #B0175A;
+  border-color: #B0175A;
+}
+
+.content-calendar-page .btn-primary:hover {
+  background: #8B1047;
+  border-color: #8B1047;
+}

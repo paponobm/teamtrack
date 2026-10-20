@@ -1062,13 +1062,15 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
             )}
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setMonth(currentMonthString())}>এই মাস</button>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
-                <select className="form-input" style={{ width: 'auto' }} value={monthPerson} onChange={e => setMonthPerson(e.target.value)}>
+                <select className="form-input" style={{ width: 'auto', height: 36,  background: '#fff',fontWeight: 700,}} value={monthPerson} onChange={e => setMonthPerson(e.target.value)}>
                     <option value="">সবাই</option>
                     {team.map(mem => <option key={mem.id} value={mem.id}>{mem.name}</option>)}
                 </select>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', }} onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ height: 36, fontWeight: 700, background: '#fff',  }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff',  }} onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                </div>
             </motion.div>
 
             <motion.div variants={item_} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 20 }}>
@@ -1236,13 +1238,15 @@ function BoardView({ items, team, channelById, month, setMonth, openEdit, advanc
         <>
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setMonth(currentMonthString())}>এই মাস</button>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
-                <select className="form-input" style={{ width: 'auto', height: 34, fontSize: '0.8125rem' }} value={who} onChange={e => setWho(e.target.value)}>
+                <select className="form-input" style={{ width: 'auto', height: 36, fontSize: '0.8125rem', border: '1.5px solid #B0175A' }} value={who} onChange={e => setWho(e.target.value)}>
                     <option value="">সবার কাজ</option>
                     {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </select>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ height: 36, fontWeight: 700, background: '#fff', border: '1.5px solid #B0175A' }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                </div>
             </motion.div>
             <p className="hint" style={{ margin: '0 0 12px', fontSize: '0.8125rem', color: 'var(--color-text-tertiary)' }}>প্রতিটি ধাপের জন্য আলাদা কলাম। প্রতিটি পোস্ট ফরম্যাটের নিজস্ব ধাপ আছে, আর প্রতি ধাপে সঠিক ব্যক্তি অটো দায়িত্ব পান।</p>
             <motion.div variants={item_} className="board-scroll" style={{ display: 'flex', gap: 12, overflowX: 'scroll', paddingBottom: 12 }}>
@@ -1296,9 +1300,11 @@ function WorkView({ items, team, month, setMonth, workStage, setWorkStage, workP
         <>
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setMonth(currentMonthString())}>এই মাস</button>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ fontWeight: 700 }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                </div>
             </motion.div>
 
             <motion.div variants={item_} style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 16, paddingBottom: 4 }}>
@@ -1445,9 +1451,11 @@ function PagesView({ channels, month, setMonth, monthStart, monthEnd, todayStr, 
         <>
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setMonth(currentMonthString())}>এই মাস</button>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ fontWeight: 700 }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                </div>
             </motion.div>
 
             <motion.div variants={item_} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -1704,9 +1712,11 @@ function SeriesView({ series, items, types, channels, channelById, month, setMon
         <>
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setMonth(currentMonthString())}>এই মাস</button>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ fontWeight: 700 }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                </div>
             </motion.div>
 
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
@@ -1930,9 +1940,11 @@ function TargetView({ items, channels, team, month, setMonth, monthStart, monthE
         <>
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{mname}</h2>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setMonth(currentMonthString())}>এই মাস</button>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ fontWeight: 700 }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                </div>
             </motion.div>
 
             <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
@@ -2094,9 +2106,11 @@ function ReportView({ items, channels, types, occasions, team, channelTargets, m
         <>
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{mname}</h2>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setMonth(currentMonthString())}>এই মাস</button>
-                <button className="btn btn-ghost btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ fontWeight: 700 }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                </div>
             </motion.div>
 
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
