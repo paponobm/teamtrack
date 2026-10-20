@@ -205,8 +205,8 @@ function TypeCaptionRow({ t, onSave }: { t: PostType; onSave: (v: string) => voi
     const [open, setOpen] = useState(!!t.caption_template)
     return (
         <div style={{ marginTop: 6 }}>
-            <button type="button" onClick={() => setOpen(o => !o)} className="hint"
-                style={{ fontSize: '0.8125rem', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button type="button" onClick={() => setOpen(o => !o)}
+                style={{ fontSize: '0.8125rem', color: 'var(--color-text-primary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
                 <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
                 ক্যাপশনের ছাঁচ (ঐচ্ছিক){Number(t.item_count) > 0 ? ` · ${bn(Number(t.item_count))}টা পোস্টে ব্যবহার হয়েছে` : ''}
             </button>
@@ -1435,8 +1435,8 @@ function PagesView({ channels, month, setMonth, monthStart, monthEnd, todayStr, 
                                 {slot.hook && <div className="hint" style={{ fontSize: '0.75rem' }}>হুক: {slot.hook}</div>}
                                 {!slot.posted && (
                                     <div style={{ display: 'flex', gap: 6 }}>
-                                        <button className="btn btn-ghost btn-sm" onClick={() => copyCaption(item, slot)}><IconClipboard size={13} /> ক্যাপশন কপি</button>
-                                        <a className="btn btn-ghost btn-sm" href={ch.upload_link || UPLOAD_LINK[ch.platform]} target="_blank" rel="noopener noreferrer">↗ {UPLOAD_NAME[ch.platform]} খুলুন</a>
+                                        <button className="btn btn-secondary btn-sm" onClick={() => copyCaption(item, slot)}><IconClipboard size={13} /> ক্যাপশন কপি</button>
+                                        <a className="btn btn-secondary btn-sm" href={ch.upload_link || UPLOAD_LINK[ch.platform]} target="_blank" rel="noopener noreferrer">↗ {UPLOAD_NAME[ch.platform]} খুলুন</a>
                                     </div>
                                 )}
                             </div>
@@ -2653,8 +2653,8 @@ function ItemModal({ editing, setEditing, types, channels, team, occasions, onCl
                         )}
                     </div>
 
-                    <button type="button" onClick={() => setShowMore(v => !v)} className="hint"
-                        style={{ fontSize: '0.8125rem', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
+                    <button type="button" onClick={() => setShowMore(v => !v)}
+                        style={{ fontSize: '0.8125rem', color: 'var(--color-text-primary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
                         <span style={{ display: 'inline-block', transform: showMore ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
                         আরো অপশন
                     </button>
