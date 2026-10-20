@@ -827,13 +827,13 @@ export default function ContentCalendarPage() {
                 <motion.div className="page-header" variants={item_}>
                     <div>
                         <h1 className="page-title">কন্টেন্ট ক্যালেন্ডার</h1>
-                        <p className="page-subtitle">আইডিয়া থেকে পোস্ট হওয়া পর্যন্ত প্রতিটি সোশ্যাল পোস্ট প্ল্যান, দায়িত্ব ও ট্র্যাক করুন।</p>
+                        {/* <p className="page-subtitle">আইডিয়া থেকে পোস্ট হওয়া পর্যন্ত প্রতিটি সোশ্যাল পোস্ট প্ল্যান, দায়িত্ব ও ট্র্যাক করুন।</p> */}
                     </div>
-                    {/* {view !== 'settings' && (
+                     {view !== 'settings' && (
                         <button className="btn" style={{ background: '#B0175A', color: '#fff', border: 'none' }} onClick={() => openAdd()}>
                             <IconPlus size={16} /> নতুন কন্টেন্ট
                         </button>
-                    )} */}
+                    )} 
                 </motion.div>
 
                 <motion.div variants={item_} style={{ display: 'flex', gap: '6px', padding: '6px', width: 'fit-content', borderRadius: '16px', background: 'rgba(118,118,128,0.08)', marginBottom: '20px' }}>
