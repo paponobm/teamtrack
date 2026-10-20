@@ -73,12 +73,18 @@ export async function POST(request: Request) {
             )
             attendance = newAtt
         } else if (!attendance.clock_in) {
+            // Clearing out the "Approved Leave" note here too — clocking in means they actually
+            // showed up, so that note would otherwise keep reading "on leave" despite the record
+            // now showing a real clock-in time and a present/late status.
             const { rows: [updAtt] } = await db.query(
-                `UPDATE attendance SET clock_in = $1, status = $2 WHERE id = $3 RETURNING *`,
+                `UPDATE attendance SET clock_in = $1, status = $2, notes = CASE WHEN notes = 'Approved Leave' THEN NULL ELSE notes END WHERE id = $3 RETURNING *`,
                 [now, clockInStatus, attendance.id]
             )
             attendance = updAtt
         }
+        // Showing up overrides an approved leave for the same day — drop it so it stops showing
+        // in leave history/calendar for a day they were actually present.
+        await db.query(`DELETE FROM leave_records WHERE employee_id = $1 AND leave_date = $2 AND status = 'approved'`, [auth.employee.id, date])
     } else if (action === 'clock_out') {
         if (!attendance) return NextResponse.json({ error: 'Must clock in first' }, { status: 400 })
         const { rows: [updAtt] } = await db.query(

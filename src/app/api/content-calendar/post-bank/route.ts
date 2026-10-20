@@ -21,9 +21,10 @@ export async function GET() {
     return NextResponse.json({ submissions: rows })
 }
 
-// POST /api/content-calendar/post-bank — {type_text, title, caption, by_employee_id, status}
+// POST /api/content-calendar/post-bank — {type_text, title, caption, status}
 // status is 'pending' (text is ready for approval) or 'idea' (just an idea) — chosen by the
-// submitter's radio pick, not inferred here.
+// submitter's radio pick, not inferred here. by_employee_id is always the logged-in submitter —
+// not something the client gets to set.
 export async function POST(request: Request) {
     const auth = await requireAuth(0)
     if (!isAuthed(auth)) return auth
@@ -33,7 +34,6 @@ export async function POST(request: Request) {
     const title = typeof body.title === 'string' ? body.title.trim() : ''
     const typeText = typeof body.type_text === 'string' ? body.type_text.trim() || null : null
     const caption = typeof body.caption === 'string' ? body.caption.trim() || null : null
-    const byEmployeeId = typeof body.by_employee_id === 'string' && body.by_employee_id ? body.by_employee_id : null
     const status = body.status === 'pending' ? 'pending' : 'idea'
 
     if (!title) return NextResponse.json({ error: 'শিরোনাম লিখুন' }, { status: 400 })
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     const { rows: [inserted] } = await db.query(
         `INSERT INTO content_calendar_post_submissions (title, type_text, caption, by_employee_id, status)
          VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [title, typeText, caption, byEmployeeId, status]
+        [title, typeText, caption, auth.employee.id, status]
     )
     const { rows: [full] } = await db.query(`${SELECT} WHERE s.id = $1`, [inserted.id])
     return NextResponse.json(full, { status: 201 })

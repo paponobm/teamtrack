@@ -15,7 +15,7 @@ export async function PATCH(
 
     // Get old record for logging
     const { rows: [oldRecord] } = await db.query(
-        `SELECT clock_in, clock_out, status, notes FROM attendance WHERE id = $1`,
+        `SELECT employee_id, date, clock_in, clock_out, status, notes FROM attendance WHERE id = $1`,
         [id]
     )
 
@@ -39,6 +39,13 @@ export async function PATCH(
     )
 
     if (!data) return NextResponse.json({ error: 'Attendance record not found' }, { status: 404 })
+
+    // Editing the status away from "leave" (e.g. Clock Out, or correcting it to present/late)
+    // overrides an approved leave for the same day — drop it so it stops showing in leave
+    // history/calendar for a day they weren't actually on leave.
+    if (body.status !== undefined && body.status !== 'leave' && oldRecord?.employee_id && oldRecord?.date) {
+        await db.query(`DELETE FROM leave_records WHERE employee_id = $1 AND leave_date = $2 AND status = 'approved'`, [oldRecord.employee_id, oldRecord.date])
+    }
 
     // Log changes
     const actor = auth.employee

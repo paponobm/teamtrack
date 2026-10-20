@@ -885,7 +885,7 @@ export default function ContentCalendarPage() {
                         )}
                         {view === 'postbank' && (
                             <PostBankView {...{
-                                submissions, team: activeTeam, submissionEdit, setSubmissionEdit,
+                                submissions, types, submissionEdit, setSubmissionEdit,
                                 onNew: openNewSubmission, onEdit: openEditSubmission, onSave: saveSubmission,
                                 onDelete: deleteSubmission, onReturn: returnSubmission, onSchedule: scheduleSubmission,
                             }} />
@@ -961,7 +961,7 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
 }) {
     const [y, m] = month.split('-').map(Number)
     const daysInMonth = new Date(y, m, 0).getDate()
-    const firstDow = (new Date(y, m - 1, 1).getDay() + 6) % 7 // Monday-first grid
+    const firstDow = (new Date(y, m - 1, 1).getDay() + 1) % 7 // Saturday-first grid
     // When an employee is picked, every number and cell on this tab narrows to just their
     // assigned work — one filter, consistently applied, rather than only some of the view.
     const slotsFor = (a: string, b: string) => {
@@ -989,8 +989,8 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
     const todayCount = slotsFor(todayStr, todayStr).length
 
     const cells: React.ReactNode[] = []
-    const WD = ['সোম', 'মঙ্গল', 'বুধ', 'বৃহ', 'শুক্র', 'শনি', 'রবি']
-    WD.forEach(w => cells.push(<div key={'wd' + w} style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-tertiary)', textAlign: 'center', padding: '2px 0', textTransform: 'uppercase' }}>{w}</div>))
+    const WD = ['শনি', 'রবি', 'সোম', 'মঙ্গল', 'বুধ', 'বৃহ', 'শুক্র']
+    WD.forEach(w => cells.push(<div key={'wd' + w} style={{ fontSize: '0.6875rem', fontWeight: 700, color: 'var(--color-text-primary)', textAlign: 'center', padding: '2px 0', textTransform: 'uppercase' }}>{w}</div>))
     for (let k = 0; k < firstDow; k++) cells.push(<div key={'b' + k} />)
     for (let d = 1; d <= daysInMonth; d++) {
         const ds = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
@@ -1593,8 +1593,8 @@ function OccasionsView({ occasions, items, todayStr, showPastOcc, setShowPastOcc
 // ================= Ideas =================
 const SUBMISSION_STATUS_LABEL: Record<SubmissionStatus, string> = { pending: 'অনুমোদনের অপেক্ষায়', returned: 'ফেরত দেওয়া', idea: 'শুধু আইডিয়া', scheduled: 'শিডিউল হয়েছে' }
 
-function PostBankView({ submissions, team, submissionEdit, setSubmissionEdit, onNew, onEdit, onSave, onDelete, onReturn, onSchedule }: {
-    submissions: Submission[]; team: TeamMember[]
+function PostBankView({ submissions, types, submissionEdit, setSubmissionEdit, onNew, onEdit, onSave, onDelete, onReturn, onSchedule }: {
+    submissions: Submission[]; types: PostType[]
     submissionEdit: (Partial<Submission> & { _byId?: string }) | null; setSubmissionEdit: (f: (Partial<Submission> & { _byId?: string }) | null) => void
     onNew: () => void; onEdit: (x: Submission) => void; onSave: () => void; onDelete: (x: Submission) => void
     onReturn: (x: Submission) => void; onSchedule: (x: Submission) => void
@@ -1617,16 +1617,11 @@ function PostBankView({ submissions, team, submissionEdit, setSubmissionEdit, on
                 <motion.div variants={item_} className="card" style={{ marginBottom: 16 }}>
                     <h3 style={{ fontSize: '1.0625rem', marginBottom: 10 }}>{f.id ? 'পোস্ট এডিট' : 'নতুন পোস্ট জমা দিন'}</h3>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                            <div className="form-group"><label className="form-label">ধরন</label>
-                                <input className="form-input" value={f.type_text || ''} onChange={e => setSubmissionEdit({ ...f, type_text: e.target.value })} placeholder="যেমন: স্টোরিটেলিং" />
-                            </div>
-                            <div className="form-group"><label className="form-label">কে জমা দিচ্ছেন</label>
-                                <select className="form-input" value={f._byId || ''} onChange={e => setSubmissionEdit({ ...f, _byId: e.target.value })}>
-                                    <option value="">— নাম বাছুন —</option>
-                                    {team.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                                </select>
-                            </div>
+                        <div className="form-group"><label className="form-label">ধরন</label>
+                            <select className="form-input" value={f.type_text || ''} onChange={e => setSubmissionEdit({ ...f, type_text: e.target.value })}>
+                                <option value="">— ধরন বাছুন —</option>
+                                {types.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                            </select>
                         </div>
                         <div className="form-group"><label className="form-label">শিরোনাম</label>
                             <input className="form-input" value={f.title || ''} onChange={e => setSubmissionEdit({ ...f, title: e.target.value })} placeholder="যেমন: মায়ের হাতের আচারের গল্প" />

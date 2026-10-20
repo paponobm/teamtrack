@@ -101,7 +101,7 @@ export default function CustomerReviewPage() {
         searchTimer.current = setTimeout(() => fetchReviews(value), 250)
     }
 
-    const handlePhotoUpload = async (file: File) => {
+    const handlePhotoUpload = useCallback(async (file: File) => {
         if (file.size > 2 * 1024 * 1024) { toast.error('Photo must be under 2MB'); return }
         setPhotoUploading(true)
         try {
@@ -115,7 +115,28 @@ export default function CustomerReviewPage() {
             setReviewForm(prev => ({ ...prev, image_url: data.url }))
         } catch { toast.error('Upload failed. Please try again.') }
         finally { setPhotoUploading(false) }
-    }
+    }, [toast])
+
+    // Lets you paste a copied image straight into the Add/Edit Customer Review modal instead of
+    // only being able to click-to-browse — listens on the window so it works regardless of which
+    // field currently has focus, and ignores the event (so normal text paste still works) unless
+    // the clipboard actually contains an image.
+    useEffect(() => {
+        if (!showReviewModal || photoUploading || reviewForm.image_url) return
+        const onPaste = (e: ClipboardEvent) => {
+            const items = e.clipboardData?.items
+            if (!items) return
+            for (const item of items) {
+                if (item.type.startsWith('image/')) {
+                    const file = item.getAsFile()
+                    if (file) { e.preventDefault(); handlePhotoUpload(file) }
+                    break
+                }
+            }
+        }
+        window.addEventListener('paste', onPaste)
+        return () => window.removeEventListener('paste', onPaste)
+    }, [showReviewModal, photoUploading, reviewForm.image_url, handlePhotoUpload])
 
     const openAddReview = () => {
         setEditingReviewId(null)
@@ -452,12 +473,17 @@ export default function CustomerReviewPage() {
                                                 style={{ position: 'absolute', top: '6px', right: '6px', width: '22px', height: '22px', borderRadius: '50%', background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '0.625rem' }}>✕</button>
                                         </div>
                                     ) : (
-                                        <label style={{ padding: '16px', borderRadius: '10px', border: '2px dashed var(--color-border-light)', textAlign: 'center', color: 'var(--color-text-tertiary)', cursor: photoUploading ? 'wait' : 'pointer' }}>
-                                            <p style={{ fontSize: '0.75rem' }}>{photoUploading ? 'Uploading...' : 'Click to upload a photo'}</p>
-                                            {!photoUploading && <p style={{ fontSize: '0.6875rem', marginTop: '2px' }}>JPG, PNG, WEBP, GIF • Max 2MB</p>}
-                                            <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} disabled={photoUploading}
-                                                onChange={e => { const f = e.target.files?.[0]; if (f) handlePhotoUpload(f); e.target.value = '' }} />
-                                        </label>
+                                        <div style={{ padding: '16px', borderRadius: '10px', border: '2px dashed var(--color-border-light)', textAlign: 'center', color: 'var(--color-text-tertiary)' }}>
+                                            <p style={{ fontSize: '0.75rem' }}>{photoUploading ? 'Uploading...' : 'Paste an image here (Ctrl+V)'}</p>
+                                            {!photoUploading && <p style={{ fontSize: '0.6875rem', margin: '2px 0 10px' }}>JPG, PNG, WEBP, GIF • Max 2MB</p>}
+                                            {!photoUploading && (
+                                                <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+                                                    Upload from device
+                                                    <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} disabled={photoUploading}
+                                                        onChange={e => { const f = e.target.files?.[0]; if (f) handlePhotoUpload(f); e.target.value = '' }} />
+                                                </label>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
                             </div>

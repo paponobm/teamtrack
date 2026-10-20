@@ -104,6 +104,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Admins cannot manually override their own attendance records' }, { status: 403 })
     }
 
+    const markedStatus = status || 'present'
+
     const { rows: [data] } = await db.query(
         `WITH ups AS (
             INSERT INTO attendance (employee_id, date, clock_in, status, notes)
@@ -114,8 +116,14 @@ export async function POST(request: Request) {
          )
          SELECT a.*, ${EMPLOYEE_JOIN}
          FROM ups a LEFT JOIN employees e ON e.id = a.employee_id LEFT JOIN departments d ON d.id = e.department_id`,
-        [employee_id, date, clock_in || null, status || 'present', notes || null]
+        [employee_id, date, clock_in || null, markedStatus, notes || null]
     )
+
+    // Marking someone present/late/absent overrides an approved leave for the same day — drop it
+    // so it stops showing in leave history/calendar for a day they weren't actually on leave.
+    if (markedStatus !== 'leave') {
+        await db.query(`DELETE FROM leave_records WHERE employee_id = $1 AND leave_date = $2 AND status = 'approved'`, [employee_id, date])
+    }
 
     return NextResponse.json(data, { status: 201 })
 }
