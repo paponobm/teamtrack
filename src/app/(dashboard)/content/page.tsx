@@ -1062,7 +1062,7 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
             )}
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
-                <select className="form-input" style={{ width: 'auto', height: 36, background: '#fff', color: '#1F2937', fontWeight: 700 }} value={monthPerson} onChange={e => setMonthPerson(e.target.value)}>
+                <select className="form-input" style={{ width: 'auto', height: 36, backgroundColor: '#fff', color: '#1F2937', fontWeight: 700 }} value={monthPerson} onChange={e => setMonthPerson(e.target.value)}>
                     <option value="">সবাই</option>
                     {team.map(mem => <option key={mem.id} value={mem.id}>{mem.name}</option>)}
                 </select>
