@@ -1318,9 +1318,9 @@ function WorkView({ items, team, month, setMonth, workStage, setWorkStage, workP
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                    <button className="btn btn-secondary btn-sm" style={{ fontWeight: 700 }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
-                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ height: 36, fontWeight: 700, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
                 </div>
             </motion.div>
 
@@ -1469,9 +1469,9 @@ function PagesView({ channels, month, setMonth, monthStart, monthEnd, todayStr, 
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                    <button className="btn btn-secondary btn-sm" style={{ fontWeight: 700 }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
-                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ height: 36, fontWeight: 700, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
                 </div>
             </motion.div>
 
@@ -1725,9 +1725,9 @@ function SeriesView({ series, items, types, channels, channelById, month, setMon
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                    <button className="btn btn-secondary btn-sm" style={{ fontWeight: 700 }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
-                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ height: 36, fontWeight: 700, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
                 </div>
             </motion.div>
 
@@ -1953,9 +1953,9 @@ function TargetView({ items, channels, team, month, setMonth, monthStart, monthE
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{mname}</h2>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                    <button className="btn btn-secondary btn-sm" style={{ fontWeight: 700 }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
-                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ height: 36, fontWeight: 700, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
                 </div>
             </motion.div>
 
@@ -2119,9 +2119,9 @@ function ReportView({ items, channels, types, occasions, team, channelTargets, m
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{mname}</h2>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                    <button className="btn btn-secondary btn-sm" style={{ fontWeight: 700 }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
-                    <button className="btn btn-secondary btn-icon" onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ height: 36, fontWeight: 700, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
                 </div>
             </motion.div>
 
