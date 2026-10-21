@@ -796,16 +796,22 @@ export default function ContentCalendarPage() {
 
     const TABS: { key: typeof view; label: string; icon: React.ReactNode }[] = [
         { key: 'month', label: 'মাস', icon: <IconCalendar size={14} /> },
-         { key: 'work', label: 'কার কী কাজ', icon: <IconUsers size={14} /> },
-         { key: 'board', label: 'প্রোডাকশন', icon: <IconLayers size={14} /> },
-        { key: 'pages', label: 'পেজ অনুযায়ী', icon: <IconGlobe size={14} /> },
-        { key: 'occ', label: 'উপলক্ষ', icon: <IconTarget size={14} /> },
          { key: 'postbank', label: 'পোস্ট ব্যাংক', icon: <IconLightbulb size={14} /> },
-         { key: 'products', label: 'প্রোডাক্ট', icon: <IconPackage size={14} /> },
-        { key: 'series', label: 'সিরিজ', icon: <IconClock size={14} /> },
-        { key: 'target', label: 'টার্গেট', icon: <IconTrendingUp size={14} /> },
-         { key: 'report', label: 'রিপোর্ট', icon: <IconBarChart3 size={14} /> },
-        { key: 'settings', label: 'সেটিংস', icon: <IconWrench size={14} /> },
+          { key: 'pages', label: 'পেজ অনুযায়ী', icon: <IconGlobe size={14} /> },
+           { key: 'occ', label: 'উপলক্ষ', icon: <IconTarget size={14} /> },
+            { key: 'series', label: 'সিরিজ', icon: <IconClock size={14} /> },
+             { key: 'products', label: 'প্রোডাক্ট', icon: <IconPackage size={14} /> },
+             { key: 'target', label: 'টার্গেট', icon: <IconTrendingUp size={14} /> },
+              { key: 'report', label: 'রিপোর্ট', icon: <IconBarChart3 size={14} /> },
+                { key: 'board', label: 'প্রোডাকশন', icon: <IconLayers size={14} /> },
+                 { key: 'work', label: 'কার কী কাজ', icon: <IconUsers size={14} /> },
+                { key: 'settings', label: 'সেটিংস', icon: <IconWrench size={14} /> },
+        
+        
+       
+       
+        
+       
     ]
     // Owner/Super Admin always see every tab; everyone else is limited to whatever's checked for
     // them in Settings → টিমের দায়িত্ব (an empty allowed_tabs list there means "no restriction").
@@ -980,6 +986,8 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
     // Aggregate target progress across every active channel, for the amber "so far this month"
     // banner — same channelTargets/monthSlots data the per-page row and Target page use.
     const [showTargetBreakdown, setShowTargetBreakdown] = useState(false)
+    // Stat cards + per-channel progress row — collapsed by default, toggled from beside the filter.
+    const [showStats, setShowStats] = useState(false)
     const totalTarget = channels.reduce((s, c) => s + (channelTargets.find(t => t.channel_id === c.id)?.posts || 0), 0)
     const totalVideoTarget = channels.reduce((s, c) => s + (channelTargets.find(t => t.channel_id === c.id)?.videos || 0), 0)
     const totalPosted = monthSlots.filter(x => x.slot.posted).length
@@ -1061,18 +1069,26 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                 </motion.div>
             )}
             <motion.div variants={item_} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+                
                 <h2 style={{ fontSize: '1.25rem', flex: 1 }}>{formatMonthLabel(month)}</h2>
-                <select className="form-input" style={{ width: 'auto', height: 36, backgroundColor: '#fff', color: '#1F2937', fontWeight: 700 }} value={monthPerson} onChange={e => setMonthPerson(e.target.value)}>
+                 <button className="btn btn-secondary btn-icon" style={{ height: 36, border: '1.5px solid #B0175A' }} onClick={() => setShowStats(v => !v)} title={showStats ? 'পরিসংখ্যান লুকান' : 'পরিসংখ্যান দেখান'}>
+                    <span style={{ display: 'inline-flex', transform: showStats ? 'rotate(-90deg)' : 'rotate(90deg)', transition: 'transform 0.15s' }}>
+                        <IconChevronRight size={16} />
+                    </span>
+                </button>
+                <select className="form-input" style={{ width: 'auto', height: 36, backgroundColor: '#fff', color: '#1F2937', fontWeight: 700, border: '1.5px solid #B0175A' }} value={monthPerson} onChange={e => setMonthPerson(e.target.value)}>
                     <option value="">সবাই</option>
                     {team.map(mem => <option key={mem.id} value={mem.id}>{mem.name}</option>)}
                 </select>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937' }} onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
-                    <button className="btn btn-secondary btn-sm" style={{ height: 36, fontWeight: 700, background: '#fff', color: '#1F2937' }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
-                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937' }} onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, -1))}><IconChevronLeft size={16} /></button>
+                    <button className="btn btn-secondary btn-sm" style={{ height: 36, fontWeight: 700, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(currentMonthString())}>{formatMonthLabel(month)}</button>
+                    <button className="btn btn-secondary btn-icon" style={{ height: 36, background: '#fff', color: '#1F2937', border: '1.5px solid #B0175A' }} onClick={() => setMonth(stepMonth(month, 1))}><IconChevronRight size={16} /></button>
                 </div>
+               
             </motion.div>
 
+            {showStats && (
             <motion.div variants={item_} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 20 }}>
                 <div className="stat-card"><span className="stat-label">মোট পোস্ট প্ল্যান</span><span className="stat-value" style={{ fontSize: '1.5rem', ...monoNum }}>{bn(monthSlots.length)}</span></div>
                 <div className="stat-card"><span className="stat-label">পোস্ট হয়েছে</span><span className="stat-value" style={{ fontSize: '1.5rem', color: '#16A34A', ...monoNum }}>{bn(posted)}</span></div>
@@ -1080,8 +1096,9 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                 <div className="stat-card"><span className="stat-label">মেসেজ</span><span className="stat-value" style={{ fontSize: '1.5rem', ...monoNum }}>{bn(msgs)}</span></div>
                 <div className="stat-card"><span className="stat-label">অর্ডার</span><span className="stat-value" style={{ fontSize: '1.5rem', ...monoNum }}>{bn(orders)}</span></div>
             </motion.div>
+            )}
 
-            {channels.length > 0 && (
+            {showStats && channels.length > 0 && (
                 <motion.div variants={item_} style={{ marginBottom: 20 }}>
                     <p className="hint" style={{ margin: '0 0 8px', fontSize: '0.8125rem' }}>এই মাসে প্রতিটি অ্যাকাউন্টে প্ল্যান করা পোস্ট / মাসিক টার্গেট — বিস্তারিত &quot;টার্গেট&quot; পাতায়</p>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -1122,8 +1139,8 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
             <motion.div variants={item_} className="card" style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                     <h3 style={{ fontSize: '1.0625rem', flex: 1, minWidth: 0 }}>{formatDate(selectedDate)}{selectedDate === todayStr ? ' — আজ' : ''}</h3>
-                    <button className="btn btn-secondary btn-sm" onClick={() => openAdd(selectedDate)}><IconPlus size={14} /> এই তারিখে নতুন</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => onBulkAdd(selectedDate)}>☰ এই দিনের সব একসাথে</button>
+                    {/* <button className="btn btn-secondary btn-sm" onClick={() => openAdd(selectedDate)}><IconPlus size={14} /> এই তারিখে নতুন</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => onBulkAdd(selectedDate)}>☰ এই দিনের সব একসাথে</button> */}
                 </div>
                 {occasionsOn(selectedDate).map(o => (
                     <div key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 10, background: 'rgba(106,63,200,0.15)', color: '#A78BFA', marginBottom: 10, fontWeight: 600, fontSize: '0.875rem' }}>
@@ -2320,6 +2337,41 @@ function ProductsView({ items, products, monthStart, monthEnd, todayStr, showEdi
 }
 
 // ================= Settings =================
+// A team member's allowed-tabs picker — closes itself when you click anywhere outside it,
+// since the native <details> element only closes on another click of its own <summary>.
+function TeamTabsDropdown({ m, restricted, toggleTeamTab, selectAllTeamTabs }: {
+    m: TeamMember; restricted: boolean
+    toggleTeamTab: (m: TeamMember, tab: string) => void; selectAllTeamTabs: (m: TeamMember) => void
+}) {
+    const ref = useRef<HTMLDetailsElement>(null)
+    useEffect(() => {
+        const onClick = (e: MouseEvent) => {
+            if (ref.current?.open && !ref.current.contains(e.target as Node)) ref.current.open = false
+        }
+        document.addEventListener('click', onClick)
+        return () => document.removeEventListener('click', onClick)
+    }, [])
+    return (
+        <details ref={ref} style={{ position: 'relative' }}>
+            <summary className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', listStyle: 'none' }}>
+                {restricted ? `${bn(m.allowed_tabs.length)}/${bn(CONTENT_TABS.length)} ট্যাব` : 'সব ট্যাব'}
+            </summary>
+            <div style={{ position: 'absolute', zIndex: 10, marginTop: 6, padding: 10, background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border-light)', borderRadius: 10, boxShadow: '0 8px 20px rgba(0,0,0,0.12)', minWidth: 340 }}>
+                <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', marginBottom: 6 }} onClick={() => selectAllTeamTabs(m)}>
+                    সব সিলেক্ট করুন
+                </button>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 10px' }}>
+                    {CONTENT_TABS.map(t => (
+                        <label key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 2px', fontSize: '0.8125rem', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={!restricted || m.allowed_tabs.includes(t.key)} onChange={() => toggleTeamTab(m, t.key)} />
+                            {t.label}
+                        </label>
+                    ))}
+                </div>
+            </div>
+        </details>
+    )
+}
 function SettingsView({ channels, types, team, isSuperAdmin, newChannelDraft, setNewChannelDraft, onSaveNewChannel, toggleChannelActive, deleteChannel, saveChannelField, reorderChannel, uploadChannelPhoto, newTypeDraft, setNewTypeDraft, onSaveNewType, saveTypeField, reorderType, deleteType, toggleTeamActive, toggleTeamTab, selectAllTeamTabs }: {
     channels: Channel[]; types: PostType[]; team: TeamMember[]; isSuperAdmin: boolean
     newChannelDraft: ChannelDraft | null
@@ -2467,22 +2519,7 @@ function SettingsView({ channels, types, team, isSuperAdmin, newChannelDraft, se
                     return (
                         <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--color-border-light)', flexWrap: 'wrap', opacity: m.active ? 1 : 0.55 }}>
                             <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 160 }}>{avatar(m.name, m.avatar_url, 24)}<b style={{ fontSize: '0.875rem' }}>{m.name}</b>{!m.active && <span className="hint" style={{ fontSize: '0.75rem' }}>বন্ধ আছে</span>}</span>
-                            <details style={{ position: 'relative' }}>
-                                <summary className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', listStyle: 'none' }}>
-                                    {restricted ? `${bn(m.allowed_tabs.length)}/${bn(CONTENT_TABS.length)} ট্যাব` : 'সব ট্যাব'}
-                                </summary>
-                                <div style={{ position: 'absolute', zIndex: 10, marginTop: 6, padding: 10, background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border-light)', borderRadius: 10, boxShadow: '0 8px 20px rgba(0,0,0,0.12)', minWidth: 220 }}>
-                                    <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'flex-start', marginBottom: 6 }} onClick={() => selectAllTeamTabs(m)}>
-                                        সব সিলেক্ট করুন
-                                    </button>
-                                    {CONTENT_TABS.map(t => (
-                                        <label key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 2px', fontSize: '0.8125rem', cursor: 'pointer' }}>
-                                            <input type="checkbox" checked={!restricted || m.allowed_tabs.includes(t.key)} onChange={() => toggleTeamTab(m, t.key)} />
-                                            {t.label}
-                                        </label>
-                                    ))}
-                                </div>
-                            </details>
+                            <TeamTabsDropdown m={m} restricted={restricted} toggleTeamTab={toggleTeamTab} selectAllTeamTabs={selectAllTeamTabs} />
                             <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => toggleTeamActive(m)}>{m.active ? 'বন্ধ করুন' : 'চালু করুন'}</button>
                         </div>
                     )

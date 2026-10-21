@@ -22,15 +22,15 @@ export const CONTENT_ROLES: { key: ContentRole; label: string }[] = [
 export type ContentTab = 'month' | 'work' | 'board' | 'pages' | 'occ' | 'postbank' | 'products' | 'series' | 'target' | 'report' | 'settings'
 export const CONTENT_TABS: { key: ContentTab; label: string }[] = [
     { key: 'month', label: 'মাস' },
-    { key: 'work', label: 'কার কী কাজ' },
-    { key: 'board', label: 'প্রোডাকশন' },
+    { key: 'postbank', label: 'পোস্ট ব্যাংক' },
     { key: 'pages', label: 'পেজ অনুযায়ী' },
     { key: 'occ', label: 'উপলক্ষ' },
-    { key: 'postbank', label: 'পোস্ট ব্যাংক' },
-    { key: 'products', label: 'প্রোডাক্ট' },
     { key: 'series', label: 'সিরিজ' },
+    { key: 'products', label: 'প্রোডাক্ট' },
     { key: 'target', label: 'টার্গেট' },
     { key: 'report', label: 'রিপোর্ট' },
+    { key: 'board', label: 'প্রোডাকশন' },
+    { key: 'work', label: 'কার কী কাজ' },
     { key: 'settings', label: 'সেটিংস' },
 ]
 
