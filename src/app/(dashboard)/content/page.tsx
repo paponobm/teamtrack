@@ -80,6 +80,14 @@ function bn(n: number | string) { return String(n).replace(/\d/g, d => BN_DIGITS
 // Bengali digits line up evenly — scoped to this page only, never touches shared global classes.
 const monoNum: React.CSSProperties = { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace", fontVariantNumeric: 'tabular-nums' }
 function shortDateBn(ds: string) { const dt = new Date(ds); return `${bn(dt.getDate())} ${BN_MONTHS[dt.getMonth()]}` }
+// "HH:MM" or "HH:MM:SS" (24h, as stored) -> Bengali-digit 12-hour time with AM/PM, e.g. "১১:৩০ AM".
+function formatTimeAmPm(t: string) {
+    const [hStr, mStr] = t.split(':')
+    const h24 = Number(hStr)
+    const ampm = h24 >= 12 ? 'pm' : 'am'
+    const h12 = h24 % 12 || 12
+    return `${bn(h12)}:${bn((mStr || '00').padStart(2, '0'))} ${ampm}`
+}
 function addDaysStr(ds: string, days: number) { const [y, m, d] = ds.split('-').map(Number); const dt = new Date(y, m - 1, d + days); return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}` }
 function daysBetween(a: string, b: string) { const [ay, am, ad] = a.split('-').map(Number), [by, bm, bd] = b.split('-').map(Number); return Math.round((new Date(by, bm - 1, bd).getTime() - new Date(ay, am - 1, ad).getTime()) / 86400000) }
 
@@ -1176,6 +1184,7 @@ function MonthView({ month, setMonth, selectedDate, setSelectedDate, monthStart,
                                                 {item.occasion && <Pill label={`🎯 ${item.occasion.name}`} bg="rgba(106,63,200,0.1)" color="#6A3FC8" />}
                                                 {item.assignee && <span>{item.assignee.name}</span>}
                                             </div>
+                                            {slot.time && <div style={{ fontSize: '0.75rem', color: 'var(--color-text-tertiary)', marginTop: 2, ...monoNum }}>পোস্টের সময়: {formatTimeAmPm(slot.time)}</div>}
                                         </div>
                                         <button className="btn btn-sm" style={{ background: slot.posted ? 'rgba(22,163,74,0.12)' : 'var(--color-bg-secondary)', color: slot.posted ? '#16A34A' : undefined, border: 'none', whiteSpace: 'nowrap' }} onClick={() => togglePosted(item, slot)}>
                                             {slot.posted ? '✓ পোস্টেড' : 'পোস্ট হয়েছে'}
@@ -1448,6 +1457,7 @@ function PagesView({ channels, month, setMonth, monthStart, monthEnd, todayStr, 
                                     <span style={{ fontWeight: 600, fontSize: '0.875rem', cursor: 'pointer' }} onClick={() => openEdit(item)}>{item.title}</span>
                                     {slot.posted ? <Pill label="পোস্টেড" bg="rgba(22,163,74,0.1)" color="#16A34A" /> : <Pill label={STAGE_INFO[item.stage as Stage]?.label} {...stagePillStyle(phase)} />}
                                 </div>
+                                {slot.time && <div className="hint" style={{ fontSize: '0.75rem', ...monoNum }}>পোস্টের সময়: {formatTimeAmPm(slot.time)}</div>}
                                 {others && <div className="hint" style={{ fontSize: '0.75rem' }}>অন্য জায়গায়: {others}</div>}
                                 {slot.hook && <div className="hint" style={{ fontSize: '0.75rem' }}>হুক: {slot.hook}</div>}
                                 {!slot.posted && (
