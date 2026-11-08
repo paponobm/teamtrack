@@ -3,6 +3,10 @@ import { ADVANCE_EXPENSE_CATEGORY } from '@/lib/advances'
 import { EMI_EXPENSE_CATEGORY, getEmiPaidSummaries } from '@/lib/emis'
 import { NextResponse } from 'next/server'
 
+// Categories that need proof of payment (a fund/method and an invoice/transaction id) before
+// they can be recorded — mirrors REQUIRE_PROOF_CATEGORIES in the Expense Hub page.
+const REQUIRE_PROOF_CATEGORIES = ['Customer Refund']
+
 // GET /api/expenses (super admin sees everyone's, admins/members see only their own)
 export async function GET(request: Request) {
     const auth = await requireAuth(0)
@@ -114,6 +118,10 @@ export async function POST(request: Request) {
     if (!isAuthed(auth)) return auth
 
     const body = await request.json()
+
+    if (REQUIRE_PROOF_CATEGORIES.includes(body.category) && !((body.fund_id || body.payment_method) && body.invoice_id)) {
+        return NextResponse.json({ error: 'This category requires a Fund (Method) and an Invoice ID' }, { status: 400 })
+    }
 
     const { rows: [data] } = await auth.db.query(
         `INSERT INTO expenses (date, category, description, amount, payment_method, fund_id, submitted_by, payment_status, note, business_name, invoice_id)

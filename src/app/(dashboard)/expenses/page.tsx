@@ -24,6 +24,7 @@ interface Expense {
     amount: string | number
     payment_method: string | null
     fund_id?: string | null
+    invoice_id?: string | null
     payment_status: 'pending' | 'paid' | 'rejected'
     // Independent of payment_status above — only set for Salary Advance/Employee Loan
     // expenses, tracking whether the EMPLOYEE has repaid it (see /api/expenses). "Paid" or
@@ -46,11 +47,15 @@ const statusConfig: Record<string, { label: string; color: string; bg: string }>
 
 const categories = [
     'Office Rent', 'Electricity Bill', 'Internet Bill', 'Telephone Bills',
-    'Employee Snacks Bill', 'Office Supplies', 'Product Purchase', 'Delivery Charges',
-    'Travel and Transportation', 'Marketing', 'Advertising', 'Maintenance',
+    'Employee Snacks Bill', 'Office Supplies', 'Product Purchase', 'Courier Charges',
+    'Transport Bill', 'Travel and Transportation', 'Marketing', 'Advertising', 'Maintenance',
     'Salaries', 'Bonus & Commission', 'Taxes', 'Development', 'Subscriptions', 'Donations',
-    'Family', 'Personal', 'Miscellaneous',
+    'Family', 'Personal', 'Miscellaneous', 'Customer Refund',
 ]
+// Categories that require proof of payment (Fund/Method + Invoice ID) before an expense can be
+// saved — currently just refunds, since those move money back out without a vendor invoice to
+// otherwise cross-check against.
+const REQUIRE_PROOF_CATEGORIES = ['Customer Refund']
 
 // Removed categoryOptions to use pure string categories
 
@@ -252,11 +257,13 @@ export default function ExpensesPage() {
             note: e.note || '',
             business_name: (e as unknown as { business_name?: string }).business_name || '',
         })
-        setShowExtraFields(!!(e.payment_method || (e as unknown as { invoice_id?: string }).invoice_id || e.note))
+        setShowExtraFields(!!(e.payment_method || (e as unknown as { invoice_id?: string }).invoice_id || e.note) || REQUIRE_PROOF_CATEGORIES.includes(e.category || ''))
         setShowModal(true)
     }
 
+    const requiresProof = REQUIRE_PROOF_CATEGORIES.includes(form.category)
     const isExpenseFormValid = form.date && form.amount && form.category && form.description.trim()
+        && (!requiresProof || ((form.fund_id || form.payment_method) && form.invoice_id.trim()))
 
     const handleSave = async () => {
         if (!isExpenseFormValid) return
@@ -1014,7 +1021,9 @@ export default function ExpensesPage() {
                                             <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontFamily: 'monospace' }}>
                                                 ৳{Number(e.amount).toLocaleString()}
                                             </td>
-                                            <td style={{ padding: '10px 16px', color: 'var(--color-text-tertiary)' }}>{e.payment_method || '-'}</td>
+                                            <td style={{ padding: '10px 16px', color: 'var(--color-text-tertiary)' }}>
+                                                {e.payment_method ? (e.invoice_id ? `${e.payment_method} (${e.invoice_id})` : e.payment_method) : '-'}
+                                            </td>
                                             <td style={{ padding: '10px 16px' }}>
                                                 <span style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.6875rem', fontWeight: 600, color: sc.color, background: sc.bg }}>{sc.label}</span>
                                             </td>
@@ -1127,9 +1136,15 @@ export default function ExpensesPage() {
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
                                             Category
                                         </label>
-                                        <select className="form-input" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} style={{ padding: '10px 14px', borderRadius: '10px' }}>
+                                        <select className="form-input" value={form.category} onChange={e => {
+                                            const category = e.target.value
+                                            setForm({ ...form, category })
+                                            if (REQUIRE_PROOF_CATEGORIES.includes(category)) setShowExtraFields(true)
+                                        }} style={{ padding: '10px 14px', borderRadius: '10px' }}>
                                             <option value="">Select category...</option>
-                                            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                                            {categories.map(c => (
+                                                <option key={c} value={c} style={REQUIRE_PROOF_CATEGORIES.includes(c) ? { backgroundColor: '#FEE2E2', color: '#DC2626' } : undefined}>{c}</option>
+                                            ))}
                                         </select>
                                     </div>
                                 </div>
@@ -1148,7 +1163,7 @@ export default function ExpensesPage() {
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', paddingTop: '16px', borderTop: '1px dashed var(--color-border-light)' }}>
                                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                                                     <div className="form-group">
-                                                        <label className="form-label">Fund (Method)</label>
+                                                        <label className="form-label">Fund (Method){requiresProof && ' *'}</label>
                                                         <select className="form-input" value={form.fund_id || form.payment_method} onChange={e => {
                                                             const fund = funds.find(f => f.id === e.target.value)
                                                             if (fund) {
@@ -1164,7 +1179,7 @@ export default function ExpensesPage() {
                                                         </select>
                                                     </div>
                                                     <div className="form-group">
-                                                        <label className="form-label">Invoice ID</label>
+                                                        <label className="form-label">Invoice ID / Transaction ID{requiresProof && ' *'}</label>
                                                         <input className="form-input" value={form.invoice_id} onChange={e => setForm({ ...form, invoice_id: e.target.value })} placeholder="#INV-001" />
                                                     </div>
                                                 </div>
@@ -1479,7 +1494,7 @@ export default function ExpensesPage() {
                                 </div>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                     <div className="form-group">
-                                        <label className="form-label">Invoice ID</label>
+                                        <label className="form-label">Invoice ID / Transaction ID</label>
                                         <input className="form-input" value={incomeForm.invoice_id} onChange={e => setIncomeForm({ ...incomeForm, invoice_id: e.target.value })} placeholder="Enter invoice ID" />
                                     </div>
                                 </div>
