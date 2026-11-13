@@ -359,6 +359,7 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                 ? {
                     employee_id: form.employee_id || null,
                     name: form.name,
+                    email: form.email || null,
                     designation: form.designation || null,
                     personal_contact: form.personal_contact || null,
                     whatsapp_number: form.whatsapp_number || null,
@@ -662,7 +663,7 @@ export default function MemberModal({ member, departments, roles, onClose, onSav
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                             <div className="input-group">
                                                 <label className="input-label" htmlFor="email">Email {!isEdit && '*'}</label>
-                                                <input className="input" id="email" name="email" type="email" value={form.email} onChange={handleChange} placeholder="you@company.com" required={!isEdit} disabled={isEdit} style={isEdit ? { opacity: 0.6, cursor: 'not-allowed' } : {}} />
+                                                <input className="input" id="email" name="email" type="email" value={form.email} onChange={handleChange} placeholder="you@company.com" required={!isEdit} disabled={isEdit && !isSuperAdmin} style={isEdit && !isSuperAdmin ? { opacity: 0.6, cursor: 'not-allowed' } : {}} />
                                             </div>
                                             {!isEdit && (
                                                 <div className="input-group">
